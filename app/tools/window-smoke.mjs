@@ -5,6 +5,7 @@ import { readFile, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import sharp from 'sharp';
+import { runWindowActions } from './window-actions.mjs';
 
 const execute = promisify(execFile);
 const tool = name => fileURLToPath(new URL(name, import.meta.url));
@@ -126,18 +127,6 @@ export async function captureWindow(app, out, evidence) {
   await rm(destination, { force: true }).catch(error => { result.attempts.push({ method: 'cleanup', reason: error.message }); });
 }
 
-async function waitState(app, key, expected) {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const value = await app.evaluate(({ BrowserWindow }, key) => {
-      const win = BrowserWindow.getAllWindows()[0];
-      return key === 'minimized' ? win.isMinimized() : win.isMaximized();
-    }, key);
-    if (value === expected) return;
-    await delay(100);
-  }
-  throw Error(`Window ${key} did not become ${expected}`);
-}
-
 export async function checkWindowControls(app, page, work, out, evidence) {
   const check = evidence.windowControls = { status: 'running', actions: [] };
   let macHelper;
@@ -155,6 +144,7 @@ export async function checkWindowControls(app, page, work, out, evidence) {
       check.brand = await page.locator('.titlebar > .brand-lockup').evaluate(el => [...el.children].map(child => {
         const { x, y, width, height } = child.getBoundingClientRect(); return { x, y, width, height };
       }));
+      assert.deepEqual(Object.keys(check.buttons).sort(), ['close', 'maximize', 'minimize'], 'All three traffic lights must exist');
       for (const rect of Object.values(check.buttons)) {
         assert.ok(rect.enabled && rect.pressable && rect.width > 0 && rect.height > 0, 'Traffic light is unavailable');
         const local = { ...rect, x: rect.x - info.content.x, y: rect.y - info.content.y };
@@ -173,29 +163,44 @@ export async function checkWindowControls(app, page, work, out, evidence) {
       assert.ok(check.overlay.visible && check.overlay.titlebar.width > 0 && check.overlay.titlebar.height > 0 && check.overlay.reservedRight > 0, 'Missing overlay or empty right-hand button area');
       check.method = process.platform === 'win32' ? 'WM_SYSCOMMAND (native caption system commands)' : 'X11 window-manager commands (xdotool / wmctrl)';
     }
-    const trigger = async action => {
-      if (process.platform === 'darwin') await run(macHelper, [String(info.pid), action]);
+    const trigger = async (action, method = 'AXPress') => {
+      if (process.platform === 'darwin') return JSON.parse((await run(macHelper, [String(info.pid), action, method])).stdout);
       else if (process.platform === 'win32') await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', tool('window-system.ps1'), '-WindowHandle', info.handle, '-OwnerPid', String(info.pid), '-Action', action]);
       else if (action === 'minimize') await run('xdotool', ['windowminimize', info.handle]);
       else if (action === 'close') await run('wmctrl', ['-i', '-c', info.handle]);
       else await run('wmctrl', ['-i', '-r', info.handle, '-b', `${action === 'maximize' ? 'add' : 'remove'},maximized_vert,maximized_horz`]);
     };
-    await trigger('minimize'); await waitState(app, 'minimized', true);
-    check.actions.push({ action: 'minimize', passed: true });
-    // Restoring a minimized window is setup for the next caption-button check.
-    await app.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.restore(); win.show(); win.focus(); });
-    await waitState(app, 'minimized', false);
-    await trigger('maximize'); await waitState(app, 'maximized', true);
-    check.actions.push({ action: 'maximize', passed: true });
-    await trigger('restore'); await waitState(app, 'maximized', false);
-    check.actions.push({ action: 'restore', passed: true });
-    // Keep the child handle before close disposes Playwright's Electron dispatcher.
-    const processHandle = app.process();
-    const closed = page.waitForEvent('close', { timeout: 15000 });
-    await Promise.all([closed, trigger('close')]);
-    for (let i = 0; i < 100 && processHandle.exitCode === null; i++) await delay(100);
-    assert.equal(processHandle.exitCode, 0, 'Native close must end the application cleanly');
-    check.actions.push({ action: 'close', passed: true });
-    check.status = 'passed';
+    await runWindowActions({
+      state: () => app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (!win || win.isDestroyed()) throw Error('Smoke window is no longer available');
+        return { isMinimized: win.isMinimized(), isMaximized: win.isMaximized(),
+          isFullScreen: win.isFullScreen(), isVisible: win.isVisible(), isFocused: win.isFocused() };
+      }),
+      command: action => app.evaluate(({ app, BrowserWindow }, action) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (action === 'leave-full-screen') win.setFullScreen(false);
+        // Electron restore maps to NSWindow deminiaturize for a minimized window.
+        else if (action === 'deminiaturize') win.restore();
+        else if (action === 'maximize') win.maximize();
+        else if (action === 'unmaximize') win.unmaximize();
+        else if (action === 'focus') {
+          if (process.platform === 'darwin') app.focus({ steal: true });
+          win.show(); win.focus();
+        } else throw Error('Unknown window setup action: ' + action);
+      }, action),
+      native: trigger,
+      close: async () => {
+        // Keep the child handle before close disposes Playwright's Electron dispatcher.
+        const processHandle = app.process();
+        const closed = page.waitForEvent('close', { timeout: 15000 });
+        await Promise.all([closed, (async () => {
+          const result = await trigger('close');
+          assert.notEqual(result?.ok, false, 'Native close AXPress failed: ' + JSON.stringify(result));
+        })()]);
+        for (let i = 0; i < 100 && processHandle.exitCode === null; i++) await delay(100);
+        assert.equal(processHandle.exitCode, 0, 'Native close did not exit cleanly within 10000ms');
+      }
+    }, check, { mac: process.platform === 'darwin' });
   } catch (error) { check.status = 'failed'; check.reason = error.message; throw error; }
 }
