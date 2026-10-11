@@ -39,10 +39,16 @@ export function warnGpuFallback(events, info, options = {}) {
   }
 }
 
-export const observeBrowser = (events, ffmpeg = null) => async browser => {
-  events.onCancel(() => browser.close());
-  events.check();
-  const info = await environment(browser, ffmpeg);
-  events.emit('environment', info);
-  warnGpuFallback(events, info, events.options);
+export const observeBrowser = (events, ffmpeg = null) => {
+  let observed = false;
+  return async browser => {
+    const unsubscribe = events.onCancel(() => browser.close());
+    browser.once('disconnected', unsubscribe);
+    events.check();
+    if (observed) return;
+    const info = await environment(browser, ffmpeg);
+    observed = true;
+    events.emit('environment', info);
+    warnGpuFallback(events, info, events.options);
+  };
 };

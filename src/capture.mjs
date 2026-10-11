@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { browserClosed, crashedError, recoveryBudget, MAX_BROWSER_RESTARTS } from './browser-recovery.mjs';
 import { access, realpath } from 'node:fs/promises';
 import { launchBrowser } from './environment.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
@@ -18,7 +19,7 @@ export function validateScale(width, height, scale, label = '--scale') {
   }
 }
 
-export async function openShot(shot, scale = 1, options = {}) {
+async function openShotOnce(shot, scale = 1, options = {}) {
   const raster = options.raster ?? 'gpu';
   if (!['software', 'gpu'].includes(raster)) throw invalidOption('--raster', '--raster must be software or gpu.');
   number(scale, '--scale', { positive: true });
@@ -30,11 +31,12 @@ export async function openShot(shot, scale = 1, options = {}) {
   const realRelative = path.relative(await realpath(root), await realpath(path.resolve(root, shot)));
   if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) throw new MultiplaneError('shot_outside_root');
   const server = await startServer(0, root);
-  let browser;
+  let browser, page, crashed = false;
   try {
     browser = await launchBrowser(options);
     await options.onBrowser?.(browser);
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: scale });
+    page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: scale });
+    page.on('crash', () => { crashed = true; });
     const errors = [];
     page.on('pageerror', error => errors.push(new MultiplaneError('shot_load_failed', undefined, { details: { reason: error.message } })));
     page.on('console', message => { if (['log', 'warning', 'error'].includes(message.type())) process.stderr.write(message.text() + '\n'); });
@@ -70,6 +72,7 @@ export async function openShot(shot, scale = 1, options = {}) {
     check();
     const cdp = (options.capture ?? 'cdp') === 'cdp' ? await page.context().newCDPSession(page) : null;
     const timings = { renderCallMs: 0, screenshotMs: 0 };
+    let closing;
     const beginFrame = async (t, { motionBlur = 1 } = {}) => {
         const renderStart = performance.now();
         await page.evaluate(({ t, motionBlur }) => {
@@ -82,12 +85,14 @@ export async function openShot(shot, scale = 1, options = {}) {
           else stage.style.removeProperty('display');
           const previous = SHOT.sampleContext;
           SHOT.sampleContext = { time: t, motionBlur };
-          try { SHOT.render(t); } finally {
+          let failure;
+          try { SHOT.render(t); } catch (error) { failure = String(error?.message ?? error); } finally {
             if (previous === undefined) delete SHOT.sampleContext;
             else SHOT.sampleContext = previous;
           }
           stage.getBoundingClientRect();
-        }, { t, motionBlur }).catch(cause => { throw new MultiplaneError('render_threw', undefined, { cause, details: { t, reason: cause.message } }); });
+          return failure;
+        }, { t, motionBlur }).then(reason => { if (reason !== undefined) throw new MultiplaneError('render_threw', undefined, { details: { t, reason } }); });
         timings.renderCallMs += performance.now() - renderStart;
         check();
         const screenshotStart = performance.now();
@@ -103,9 +108,59 @@ export async function openShot(shot, scale = 1, options = {}) {
     };
     return {
       page, browser, server, ...metadata, beginFrame, timings,
-      ...(metadata.hasBlurAt ? { blurAt: t => page.evaluate(t => SHOT.blurAt(t), t).catch(cause => { throw new MultiplaneError('render_threw', undefined, { cause, details: { t, reason: cause.message } }); }) } : {}),
+      isCrash: error => browserClosed(error, browser, page, crashed),
+      ...(metadata.hasBlurAt ? { blurAt: async t => {
+        const result = await page.evaluate(t => { try { return { value: SHOT.blurAt(t) }; } catch (error) { return { reason: String(error?.message ?? error) }; } }, t);
+        if ('reason' in result) throw new MultiplaneError('render_threw', undefined, { details: { t, reason: result.reason } });
+        return result.value;
+      } } : {}),
       async frame(t, context) { return (await beginFrame(t, context)).png; },
-      async close() { try { await browser.close(); } finally { await server.close(); } },
+      close() { return closing ??= (async () => { try { await browser.close(); } finally { await server.close(); } })(); },
     };
-  } catch (error) { try { await browser?.close(); } finally { await server.close(); } throw error; }
+  } catch (error) { const failure = browserClosed(error, browser, page, crashed) ? crashedError(error) : error; try { await browser?.close(); } finally { await server.close(); } throw failure; }
+}
+
+// Recovery belongs to a complete output frame, never to an individual blur sample.
+export async function openShot(shot, scale = 1, options = {}) {
+  const budget = options._browserRecovery ?? recoveryBudget();
+  let current, closed = false;
+  const recover = async (error, t) => {
+    options.check?.();
+    if (closed) throw error;
+    const failure = crashedError(error, t);
+    if (Atomics.load(budget, 0) >= MAX_BROWSER_RESTARTS) throw failure;
+    const attempt = Atomics.add(budget, 0, 1) + 1;
+    if (attempt > MAX_BROWSER_RESTARTS) throw failure;
+    await current?.close().catch(() => {});
+    try { current = await openShotOnce(shot, scale, options); }
+    catch (restartError) {
+      options.check?.();
+      const restarted = crashedError(restartError, t);
+      restarted.details = { ...failure.details, ...restarted.details };
+      throw restarted;
+    }
+    options.onWarning?.({ code: 'browser_restarted', message: 'Browser restarted; retrying the affected frame.', details: { ...failure.details, attempt } });
+  };
+  try { current = await openShotOnce(shot, scale, options); }
+  catch (error) { if (error.code !== 'browser_crashed') throw error; await recover(error); }
+  const api = {
+    ...current,
+    get page() { return current.page; },
+    get browser() { return current.browser; },
+    beginFrame: (...args) => current.beginFrame(...args),
+    frame: (...args) => current.frame(...args),
+    ...(current.blurAt ? { blurAt: (...args) => current.blurAt(...args) } : {}),
+    async retryFrame(t, operation) {
+      for (;;) {
+        try { return await operation(); }
+        catch (error) {
+          options.check?.();
+          if (closed || !current.isCrash(error)) throw error;
+          await recover(error, t);
+        }
+      }
+    },
+    async close() { closed = true; await current.close(); },
+  };
+  return api;
 }

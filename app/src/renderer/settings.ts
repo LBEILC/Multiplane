@@ -1,10 +1,11 @@
+import { userError } from '../shared/errors.mjs';
 import type { Settings, Environment, Event } from '../shared/types';
 import { menu } from './menu';
 import { displayPath, revealLabel } from './platform';
 const api = window.multiplane;
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const names: Record<string, string> = { node: 'Node', browser: '浏览器', gpu: 'GPU 光栅', ffmpeg: 'FFmpeg', libx264: 'libx264', three: 'three.js', claude: 'Claude Code', codex: 'Codex' };
-const states: Record<string, string> = { missing: '未安装', latest: '已是最新', update: '可更新', modified: '已被修改，不会自动替换' };
+const states: Record<string, string> = { missing: '未安装', latest: '已是最新', update: '可更新', modified: '已被修改，不会自动替换', error: '无法读取安装状态' };
 const configNames: Record<string, string> = { ffmpeg: 'FFmpeg 路径', raster: '光栅', encoder: '编码器', workers: '并行数', jobsDir: '作业目录' };
 export class SettingsView {
   settings?: Settings; environment?: Environment; doctor?: Event;
@@ -24,16 +25,19 @@ export class SettingsView {
     catch (e) { this.failure(e); }
   }
   mount(page: string) { const changed = this.page !== page; this.page = page; this.error = ''; this.render(); if (changed) this.container.scrollTop = 0; if (page === '环境' && !this.checking) void this.check(); }
-  private failure(e: unknown) { this.error = String(e instanceof Error ? e.message : e); this.render(); }
+  private failure(e: unknown) { this.error = userError(e); this.render(); }
   private button(label: string, action: string, extra = '') { return `<button data-pref="${action}" ${this.busy ? 'disabled' : ''} ${extra}>${label}</button>`; }
   private async check() {
     const id = ++this.checkId; this.checking = true; this.error = ''; this.doctorError = ''; this.doctor = undefined; this.render();
     const results = await Promise.allSettled([api.doctor(), api.environment()]);
     if (id !== this.checkId) return;
     if (results[0].status === 'fulfilled') this.doctor = results[0].value;
-    else this.doctorError = String(results[0].reason instanceof Error ? results[0].reason.message : results[0].reason).replace(/^Error invoking remote method 'doctor': Error: /, '');
+    else this.doctorError = userError(results[0].reason);
     if (results[1].status === 'fulfilled') this.environment = results[1].value;
-    if (results[1].status === 'rejected') this.error = String(results[1].reason);
+    if (results[1].status === 'rejected') {
+      const error = userError(results[1].reason);
+      this.environment = { command: { path: null, version: null, error }, skills: ['claude', 'codex'].map(host => ({ host, target: '', detected: false, availableVersion: this.settings?.version ?? '', version: null, state: 'error', blocked: true, error })) };
+    }
     this.checking = false; this.render();
   }
   private checks() {
@@ -67,8 +71,8 @@ export class SettingsView {
     const command = this.environment?.command, config = this.doctor?.data?.config;
     const mismatch = command?.version && command.version.replace(/^multiplane\s+/, '') !== this.settings?.version;
     const configuration = config ? this.infoRow('配置文件', this.configPath(config.path)) + this.infoRow('状态', config.exists ? '已存在' : '尚未创建（全部使用默认值）') + this.infoRow('生效的设置', esc((config.applied ?? []).map((key: string) => configNames[key]).filter(Boolean).join('、') || '无')) : '';
-    const commandRows = this.infoRow('命令行中的 multiplane', command?.path ? `<span class="mono muted">${esc(displayPath(command.path))}</span>` : '未找到（agent 也可以在项目里用 npx 调用）') + (command?.path ? this.infoRow('版本', `${esc(command.version ?? command.error ?? '—')}${mismatch ? '<p class="cancelled">版本与软件不同，作业以 agent 实际调用的版本为准。</p>' : ''}`) : '');
-    return `<section class="card"><div class="card-head"><h2>渲染器</h2>${this.button('重新检查', 'check', this.checking ? 'disabled' : '')}</div>${this.checks()}${config ? `<h3>配置</h3>${configuration}` : ''}<h3>系统 PATH</h3>${commandRows}</section><h2>Agent skill</h2><div class="skill-cards">${(this.environment?.skills ?? []).map(s => `<section class="card" data-host-card="${s.host}"><h3>${names[s.host]}</h3><p class="mono muted">${esc(displayPath(s.target))}</p>${!s.detected ? `<p class="muted">未检测到 ${names[s.host]}</p>` : ''}<p class="${s.state === 'modified' ? 'cancelled' : ''}">${states[s.state]}</p><p class="muted">已装版本 ${esc(s.version ?? '—')} · 软件自带 ${esc(s.availableVersion)}</p><div class="actions">${s.state !== 'latest' ? this.button(s.state === 'missing' ? '安装' : '更新', 'skill', `data-host="${s.host}" data-operation="install"`) : ''}${s.state !== 'missing' ? this.button('移除', 'skill', `data-host="${s.host}" data-operation="remove"`) : ''}</div></section>`).join('')}</div>`;
+    const commandRows = command?.error ? `<p role="alert">${esc(command.error)}</p>` : this.infoRow('命令行中的 multiplane', command?.path ? `<span class="mono muted">${esc(displayPath(command.path))}</span>` : '未找到（agent 也可以在项目里用 npx 调用）') + (command?.path ? this.infoRow('版本', `${esc(command.version ?? command.error ?? '—')}${mismatch ? '<p class="cancelled">版本与软件不同，作业以 agent 实际调用的版本为准。</p>' : ''}`) : '');
+    return `<section class="card"><div class="card-head"><h2>渲染器</h2>${this.button('重新检查', 'check', this.checking ? 'disabled' : '')}</div>${this.checks()}${config ? `<h3>配置</h3>${configuration}` : ''}<h3>系统 PATH</h3>${commandRows}</section><h2>Agent skill</h2><div class="skill-cards">${(this.environment?.skills ?? []).map(s => `<section class="card" data-host-card="${s.host}"><h3>${names[s.host]}</h3><p class="mono muted">${esc(displayPath(s.target))}</p>${!s.detected ? `<p class="muted">未检测到 ${names[s.host]}</p>` : ''}<p class="${s.state === 'modified' ? 'cancelled' : ''}">${states[s.state]}</p>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ''}<p class="muted">已装版本 ${esc(s.version ?? '—')} · 软件自带 ${esc(s.availableVersion)}</p><div class="actions">${!s.blocked && s.state !== 'latest' ? this.button(s.state === 'missing' ? '安装' : '更新', 'skill', `data-host="${s.host}" data-operation="install"`) : ''}${!s.blocked && s.state !== 'missing' ? this.button('移除', 'skill', `data-host="${s.host}" data-operation="remove"`) : ''}</div></section>`).join('')}</div>`;
   }
   private selector(key: string, value: unknown, options: [unknown, string][]) {
     return `<button class="sel" data-select="${key}" aria-label="${({ raster: '光栅', encoder: '编码器', theme: '外观' } as Record<string, string>)[key]}" aria-haspopup="listbox" aria-expanded="false" ${this.busy ? 'disabled' : ''}><span>${esc(options.find(([v]) => v === value)?.[1] ?? options[0][1])}</span><i class="ri-arrow-down-s-line"></i></button>`;
@@ -99,7 +103,7 @@ export class SettingsView {
   render() {
     if (this.page === '作业' && !this.step) { this.container.replaceChildren(); return; }
     const top = this.container.scrollTop;
-    this.container.innerHTML = `${this.error ? `<div class="banner" role="alert">${esc(this.error)}</div>` : ''}${!this.settings ? '<p>无法读取设置</p>' : this.step ? this.wizard() : this.page === '环境' ? this.environmentPage() : this.page === '设置' ? this.settingsPage() : this.page === '关于' ? this.about() : ''}`;
+    this.container.innerHTML = `${this.error ? `<div class="banner" role="alert">${esc(this.error)}</div>` : ''}${this.page === '环境' ? this.environmentPage() : !this.settings ? '<p>无法读取设置</p>' : this.step ? this.wizard() : this.page === '设置' ? this.settingsPage() : this.page === '关于' ? this.about() : ''}`;
     this.container.scrollTop = top;
   }
   startWizard() {

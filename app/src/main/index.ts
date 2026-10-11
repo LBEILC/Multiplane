@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, dialog, protocol, net, clipboard, Menu } from 'electron';
+import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { readFile, mkdir } from 'node:fs/promises';
-import { Configuration, Skills, rendererRoot, bundledCommand, parseDoctor, findCommand, pathVersion } from './settings.mjs';
+import { Configuration, Skills, rendererRoot, bundledCommand, parseDoctor, readEnvironment } from './settings.mjs';
 import { pathToFileURL } from 'node:url';
 import { JobStore, Preferences, homeDirectory } from './store.mjs';
 import type { Job, Snapshot } from '../shared/types';
@@ -37,9 +38,10 @@ app.whenReady().then(async () => {
       return await net.fetch(pathToFileURL(file).href, { headers: request.headers });
     } catch { return new Response(null, { status: 404 }); }
   });
-  const handle = (name: string, fn: (...args: any[]) => unknown) => ipcMain.handle(name, (event, ...args) => {
+  const handle = (name: string, fn: (...args: any[]) => unknown) => ipcMain.handle(name, async (event, ...args) => {
     if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('Invalid sender');
-    return fn(...args);
+    try { return await fn(...args); }
+    catch (error) { throw Error(userError(error)); }
   });
   handle('platform', () => ({ platform: process.platform, home: os.homedir() }));
   const jobFor = (id: unknown): Job => { if (typeof id !== 'string') throw Error('Invalid job'); return store.job(id); };
@@ -91,11 +93,7 @@ app.whenReady().then(async () => {
       throw Error(e.code ?? (/^[a-z][a-z0-9_]+$/.test(e.message) ? e.message : 'internal_error'));
     }
   });
-  handle('environment', async () => {
-    const file = await findCommand('multiplane'); let commandVersion = null, error = null;
-    try { commandVersion = await pathVersion(file); } catch (e) { error = String(e); }
-    return { skills: await skills.list(), command: { path: file, version: commandVersion, error } };
-  });
+  handle('environment', () => readEnvironment(skills));
   let confirmationId = 0;
   let pendingConfirmation: { id: number; resolve: (accepted: boolean) => void } | undefined;
   handle('answer-skill-confirmation', (id, accepted) => {
@@ -108,6 +106,7 @@ app.whenReady().then(async () => {
   handle('skill', async (host, action) => {
     if (!['install', 'remove'].includes(action)) throw Error('Invalid action');
     const status = await skills.status(host);
+    if (status.blocked) throw Error(status.error ?? undefined);
     const backupName = await skills.backupName(host);
     if (status.state === 'modified' || action === 'remove') {
       if (pendingConfirmation) return { cancelled: true };

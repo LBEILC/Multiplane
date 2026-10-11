@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { userError } from '../shared/errors.mjs';
 import { spawn } from 'node:child_process';
 
 export class BrowserInstaller {
@@ -19,7 +20,7 @@ export class BrowserInstaller {
     const child = this.child = this.launch(process.execPath, [...tls, this.worker, path.join(this.root, 'node_modules/playwright/cli.js'), 'install', 'chromium'], { cwd: this.root, env, shell: false, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     const output = bytes => this.publish({ text: (this.state.text + '\n' + bytes.toString().replace(/\x1b\[[0-9;]*m/g, '')).slice(-6000) });
     child.stdout.on('data', output); child.stderr.on('data', output);
-    child.once('error', error => { this.child = null; this.publish({ running: false, text: `安装失败：${error.message}` }); });
+    child.once('error', error => { this.child = null; this.publish({ running: false, text: `安装失败：${userError(error)}` }); });
     child.once('close', code => { this.child = null; this.publish({ running: false, text: this.cancelled ? '已取消安装' : code === 0 ? '浏览器安装完成' : `安装失败（${code}）\n${this.state.text}` }); });
     return true;
   }

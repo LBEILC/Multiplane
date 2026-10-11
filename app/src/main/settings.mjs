@@ -1,3 +1,4 @@
+import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import * as fs from 'node:fs/promises';
@@ -48,6 +49,15 @@ export function parseDoctor(stdout) {
   if (result?.schema !== 'multiplane/1' || result.type !== 'result' || result.command !== 'doctor' || !Array.isArray(result.data?.checks)) throw Error('Invalid doctor result');
   return result;
 }
+export async function readEnvironment(skills, locate = findCommand, version = pathVersion) {
+  const command = async () => {
+    let file = null;
+    try { file = await locate('multiplane'); return { path: file, version: await version(file), error: null }; }
+    catch (error) { return { path: file, version: null, error: userError(error) }; }
+  };
+  const [agents, executable] = await Promise.all([skills.list(), command()]);
+  return { skills: agents, command: executable };
+}
 export class Configuration {
   queue = Promise.resolve();
   constructor(home, env = process.env) { this.file = path.join(home, 'config.json'); this.env = env; }
@@ -74,19 +84,28 @@ export class Configuration {
 const marker = '.multiplane.json';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 async function exists(file) { try { await fs.lstat(file); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } }
-async function safeAncestors(file) {
-  for (let p = path.resolve(file); ; p = path.dirname(p)) {
-    if (await exists(p) && (await fs.lstat(p)).isSymbolicLink()) throw Error('不支持符号链接安装目录');
-    if (path.dirname(p) === p) break;
+// Resolve existing ancestors without creating directories during inspection.
+async function realRoot(root) {
+  try {
+    const resolved = await fs.realpath(root);
+    if (!(await fs.stat(resolved)).isDirectory()) throw Object.assign(Error('Skill root is not a directory'), { code: 'ENOTDIR' });
+    return resolved;
+  }
+  catch (error) {
+    if (error.code !== 'ENOENT' || await exists(root)) throw error;
+    const parent = path.dirname(root);
+    if (parent === root) throw error;
+    return path.join(await realRoot(parent), path.basename(root));
   }
 }
+const linkedSkill = () => Object.assign(Error('skill 目录或其内部包含符号链接，请手动处理，不会自动替换或移除'), { code: 'SKILL_LINK' });
 export async function treeHashes(root) {
   const files = Object.create(null);
   async function walk(dir, prefix = '') {
-    if ((await fs.lstat(dir)).isSymbolicLink()) throw Error('不支持符号链接');
+    if ((await fs.lstat(dir)).isSymbolicLink()) throw linkedSkill();
     for (const entry of (await fs.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : 1)) {
       const name = prefix + entry.name;
-      if (entry.isSymbolicLink()) throw Error('不支持符号链接');
+      if (entry.isSymbolicLink()) throw linkedSkill();
       if (entry.isDirectory()) { files[name + '/'] = null; await walk(path.join(dir, entry.name), name + '/'); }
       else if (entry.isFile()) { if (name !== marker) files[name] = hash(await fs.readFile(path.join(dir, entry.name))); }
       else throw Error('不支持的文件类型');
@@ -102,12 +121,14 @@ export class Skills {
     return path.join(this.user, host === 'claude' ? '.claude' : '.agents', 'skills', 'multiplane');
   }
   async status(host) {
-    const target = this.target(host);
+    const target = path.join(await realRoot(path.dirname(this.target(host))), 'multiplane');
     const detected = await exists(path.join(this.user, host === 'claude' ? '.claude' : '.codex')) || !!await findCommand(host, this.env);
-    const base = { host, target, detected, availableVersion: this.version, version: null, state: 'missing', signature: null };
-    await safeAncestors(target);
+    const base = { host, target, detected, availableVersion: this.version, version: null, state: 'missing', signature: null, blocked: false, error: null };
     if (!await exists(target)) return base;
-    const files = await treeHashes(target), signature = hash(JSON.stringify(files));
+    let files;
+    try { files = await treeHashes(target); }
+    catch (error) { if (error.code === 'SKILL_LINK') return { ...base, state: 'modified', blocked: true, error: userError(error) }; throw error; }
+    const signature = hash(JSON.stringify(files));
     let record;
     try { record = JSON.parse(await fs.readFile(path.join(target, marker), 'utf8')); } catch {}
     const current = await treeHashes(this.source);
@@ -116,11 +137,14 @@ export class Skills {
     const release = [{ version: this.version, files: current }, ...known].find(r => JSON.stringify(r.files) === JSON.stringify(files));
     return { ...base, signature, version: release?.version ?? record?.version ?? null, state: release ? release.version === this.version ? 'latest' : 'update' : 'modified' };
   }
-  list() { return Promise.all(['claude', 'codex'].map(host => this.status(host))); }
+  list() { return Promise.all(['claude', 'codex'].map(async host => {
+    try { return await this.status(host); }
+    catch (error) { return { host, target: this.target(host), detected: false, availableVersion: this.version, version: null, state: 'error', blocked: true, error: userError(error) }; }
+  })); }
   async backupName(host, date = new Date()) {
     const pad = n => String(n).padStart(2, '0');
     const base = `multiplane.bak-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
-    const parent = path.dirname(this.target(host));
+    const parent = await realRoot(path.dirname(this.target(host)));
     let name = base;
     for (let i = 2; await exists(path.join(parent, name)); i++) name = `${base}-${i}`;
     return name;
@@ -131,9 +155,11 @@ export class Skills {
       backupName ??= await this.backupName(host);
       if (!/^multiplane\.bak-\d{8}-\d{6}(?:-[2-9]\d*|-1\d+)?$/.test(backupName)) throw Error('Invalid backup name');
       const before = await this.status(host);
+      if (before.blocked) throw Error(before.error);
       if (before.signature !== expected) throw Error('安装状态已变化，请重新检查');
       const parent = path.dirname(before.target);
-      await safeAncestors(parent); await fs.mkdir(parent, { recursive: true });
+      await fs.mkdir(parent, { recursive: true });
+      if (await fs.realpath(parent) !== parent) throw Error('安装路径已变化，请重新检查');
       const token = randomUUID(), stage = path.join(parent, '.multiplane-new-' + token);
       const old = path.join(parent, backupName);
       if (await exists(old)) throw Error('Backup already exists');
@@ -153,7 +179,8 @@ export class Skills {
           await fs.writeFile(path.join(stage, marker), JSON.stringify({ v: 1, host, skill: 'multiplane', version: this.version, installedAt: Date.now(), files, releases: [...releases.filter(r => r.version !== this.version), { version: this.version, files }] }, null, 2));
           if (JSON.stringify(await treeHashes(stage)) !== JSON.stringify(files)) throw Error('Skill source changed during copy');
         }
-        if ((await this.status(host)).signature !== before.signature) throw Error('安装状态已变化，请重新检查');
+        const latest = await this.status(host);
+        if (latest.blocked || latest.target !== before.target || latest.signature !== before.signature || await fs.realpath(parent) !== parent) throw Error('安装状态已变化，请重新检查');
         if (before.state !== 'missing') { await fs.rename(before.target, old); moved = true; }
         if (action === 'install') { await fs.rename(stage, before.target); installed = true; }
       } catch (error) {

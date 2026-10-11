@@ -234,5 +234,13 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       return png ?? timed('pngMs', () => encodePNG(result));
     },
   };
+  if (capture.retryFrame) {
+    const frame = api.frame.bind(api);
+    api.frame = (t, index) => capture.retryFrame(t, async () => {
+      const before = { ...stats };
+      try { return await frame(t, index); }
+      catch (error) { Object.assign(stats, before); decodedCache = undefined; throw error; }
+    });
+  }
   return api;
 }

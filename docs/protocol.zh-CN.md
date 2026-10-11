@@ -81,10 +81,10 @@
 | 1 | 镜头或检查不通过 | `shot_not_found`、`shot_outside_root`、`shot_load_failed`（HTTP 或脚本错误）、`shot_contract_invalid`（缺 `SHOT`、`render` 不是函数、`duration`/`fps`/`cuts` 不合法等）、`stage_size_invalid`（缺 `#stage`、尺寸不是正整数或随视口变化）、`ready_timeout`、`render_threw`（`render(t)` 抛错，`details` 带 `t`）、`resource_failed`（字体或素材加载失败）、`nondeterministic_output`、`lint_failed`、`cancel_timeout`（`cancel --wait` 到时作业仍未结束） |
 | 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` 找不到作业或快照损坏） |
 | 3 | 环境问题 | `ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node` |
-| 4 | 渲染器内部 | `worker_crashed`、`encode_failed`、`internal_error` |
+| 4 | 渲染器内部 | `worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败；已知时带 `details.t`）、`encode_failed`、`internal_error` |
 | 130 | 被取消 | `cancelled` |
 
-警告码（只出现在 `warning` 事件，不影响退出码）：`gpu_software_fallback`（要求 GPU 光栅但实际落到软件渲染器）、`home_unavailable`（用户级目录读写失败，见第 8 节）、`config_invalid`（用户配置某字段非法，已忽略；整份文件损坏或顶层不是对象时 `details.field` 为 `"$"`）、`preview_failed`（预览帧写入失败，每个作业只报一次，此后不再更新预览，渲染照常）。
+警告码（只出现在 `warning` 事件，不影响退出码）：`browser_restarted`（浏览器进程或页面意外关闭，已重新启动并重渲受影响的帧；`render(t)` 只由 `t` 决定，所以不会改变像素；`details.attempt`）、`gpu_software_fallback`（要求 GPU 光栅但实际落到软件渲染器）、`home_unavailable`（用户级目录读写失败，见第 8 节）、`config_invalid`（用户配置某字段非法，已忽略；整份文件损坏或顶层不是对象时 `details.field` 为 `"$"`）、`preview_failed`（预览帧写入失败，每个作业只报一次，此后不再更新预览，渲染照常）。
 
 lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_animation`、`web_animations`、`media_playback`、`remote_resource`、`resource_missing`、`stage_missing`、`shot_missing`、`runtime_missing`、`async_render` 为 error；`timer_driven`、`animated_image`、`stage_size_unfixed`、`font_not_awaited`、`lint_directive_invalid`、`lint_incomplete`（某段源码无法解析、被跳过，扫描覆盖不完整）为 warning。lint 的 `location` 为 `{file, line, column}`（相对资源根，从 1 开始），`details.snippet` 为该行源码。问题行的上一行写注释 `multiplane-disable-next-line <规则码>` 可豁免。
 

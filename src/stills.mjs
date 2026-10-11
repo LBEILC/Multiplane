@@ -1,3 +1,4 @@
+import { recoveryBudget } from './browser-recovery.mjs';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { openShot, number } from './capture.mjs';
@@ -11,6 +12,7 @@ export async function stillsShot(shot, options = {}) {
   return runCommand('stills', shot, options, async events => {
     options = { ...events.options };
     delete options.onEvent;
+    options._browserRecovery = recoveryBudget();
     let result;
 
     let capture, cleaning;
@@ -21,7 +23,7 @@ export async function stillsShot(shot, options = {}) {
       events.check();
       events.progress('load');
       if (options.at !== undefined && options.every !== undefined) throw invalidOption('--at', '--at and --every are mutually exclusive.');
-      capture = await openShot(shot, resolveScale(options).renderScale, { ...options, onBrowser: observeBrowser(events) });
+      capture = await openShot(shot, resolveScale(options).renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events) });
       await loaded(events, capture);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
       const processed = createPostCapture(capture, options, fps);
@@ -48,10 +50,13 @@ export async function stillsShot(shot, options = {}) {
       }
       const thumbnailHeight = 480 * capture.height / capture.width;
       const rowHeight = thumbnailHeight + 40;
+      const sheetPNG = await capture.retryFrame(undefined, async () => {
       const sheet = await capture.browser.newPage({ viewport: { width: 1920, height: Math.ceil(Math.ceil(frames.length / 4) * rowHeight) }, deviceScaleFactor: 1 });
       await sheet.setContent(`<html><head><style>body{margin:0;background:#222;color:#fff;font:24px sans-serif}main{display:grid;grid-template-columns:repeat(4,480px)}figure{margin:0;width:480px;height:${rowHeight}px}img{display:block;width:480px;height:${thumbnailHeight}px}figcaption{height:40px;line-height:40px;text-align:center}</style></head><body><main>${frames.map(f => `<figure><img src="data:image/png;base64,${f.image}"><figcaption>t = ${f.time} s</figcaption></figure>`).join('')}</main></body></html>`);
       await sheet.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode())); });
-      await writeArtifact(path.join(out, '_sheet.png'), await sheet.screenshot({ fullPage: true }));
+      try { return await sheet.screenshot({ fullPage: true }); } finally { await sheet.close().catch(() => {}); }
+      });
+      await writeArtifact(path.join(out, '_sheet.png'), sheetPNG);
       events.artifact(path.join(out, '_sheet.png'), 'contact-sheet');
       result = { stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
     } finally { await cleanup(); }

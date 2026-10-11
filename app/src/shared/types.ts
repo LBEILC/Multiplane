@@ -37,6 +37,6 @@ export interface Bridge {
 export interface SkillConfirmation { id: number; title: string; detail: string; action: string; danger: boolean }
 export interface BrowserInstallState { running: boolean; text: string }
 export interface Settings { values: Record<string, any>; file: string; overrides: Record<string, string | null>; own: { theme: string; notifications: boolean; wizardDone: boolean }; version: string; packaged: boolean }
-export interface Skill { host: string; target: string; detected: boolean; availableVersion: string; version: string | null; state: string }
+export interface Skill { blocked?: boolean; error?: string | null; host: string; target: string; detected: boolean; availableVersion: string; version: string | null; state: string }
 export interface Environment { skills: Skill[]; command: { path: string | null; version: string | null; error: string | null } }
 declare global { interface Window { multiplane: Bridge } }

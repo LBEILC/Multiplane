@@ -1,3 +1,4 @@
+import { userError } from '../shared/errors.mjs';
 import type { Job, Snapshot, Event } from '../shared/types';
 import { menu } from './menu';
 import { installScrollMaterial } from './floatingThumb';
@@ -17,7 +18,7 @@ const duration = (ms: number | null) => ms == null ? '—' : `${Math.floor(ms / 
 const elapsed = (j: Job) => j.result?.elapsedMs ?? Math.max(0, Date.now() - Date.parse(j.startedAt));
 let stateFilter = 'all', projectFilter = '';
 let state: Snapshot = { jobs: [], runningCount: 0, theme: 'light' }, selected = '', tab = '预览', page = '作业', contentKey = '', headerKey = '';
-const fail = (e: unknown) => { $('#error').textContent = String(e instanceof Error ? e.message : e); $('#error').hidden = false; };
+const fail = (e: unknown) => { $('#error').textContent = userError(e); $('#error').hidden = false; };
 const media = (j: Job, file: string, version = '') => escape(api.media(j.jobId, file, version));
 function navigate(next: string) {
   page = next; $('#heading').textContent = page; $('#jobs').hidden = page !== '作业'; $('#placeholder').hidden = page === '作业';

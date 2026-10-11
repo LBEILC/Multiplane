@@ -32,7 +32,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ffmpeg xvfb
+          sudo apt-get install --yes ffmpeg xvfb openbox wmctrl xdotool imagemagick
       - name: Renderer dependencies
         run: node tools/ci-run.mjs renderer-install . npm ci
       - name: Chromium (Windows and macOS)
@@ -54,7 +54,7 @@ jobs:
         run: node tools/ci-run.mjs desktop-smoke app node tools/smoke.mjs
       - name: Desktop smoke (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a node tools/ci-run.mjs desktop-smoke app node tools/smoke.mjs
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node tools/ci-run.mjs desktop-smoke app node tools/smoke.mjs
       - name: Test logs and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

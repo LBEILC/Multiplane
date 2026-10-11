@@ -20,6 +20,7 @@ export const errorCodes = Object.freeze(Object.fromEntries([
   [3, 'browser_not_installed', 'Chromium is not installed.'],
   [3, 'browser_launch_failed', 'Chromium failed to launch.'],
   [3, 'three_not_installed', 'Optional three.js is not installed.'],
+  [4, 'browser_crashed', 'Browser closed unexpectedly and recovery failed.'],
   [4, 'worker_crashed', 'A rendering worker exited unexpectedly.'],
   [4, 'encode_failed', 'Video encoding failed.'],
   [4, 'internal_error', 'An internal error occurred.'],

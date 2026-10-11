@@ -1,3 +1,4 @@
+import { recoveryBudget } from './browser-recovery.mjs';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -14,12 +15,13 @@ export async function verifyShot(shot, options = {}) {
   return runCommand('verify', shot, options, async events => {
     options = { ...events.options };
     delete options.onEvent;
+    options._browserRecovery = recoveryBudget();
     const out = path.resolve(options.out ?? path.join(events.directory, 'verify'));
     let capture, pool;
     events.onCancel(() => pool?.cancel());
     try {
       events.check();
-      capture = await openShot(shot, resolveScale(options).renderScale, { ...options, onBrowser: observeBrowser(events) });
+      capture = await openShot(shot, resolveScale(options).renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events) });
       await loaded(events, capture);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
       const workers = number(options.workers ?? 2, '--workers', { positive: true });
@@ -71,15 +73,17 @@ export async function verifyShot(shot, options = {}) {
       const captureDuration = capture.duration;
       for (const t of [...times].reverse().concat(times)) await check(t, decodePNG(await processed.frame(t)).data, 'reorder');
       finishCheck('reorder');
-      await capture.page.reload();
-      await capture.page.evaluate(async () => { await SHOT.ready; await document.fonts.ready; });
+      await capture.retryFrame(undefined, async () => {
+        await capture.page.reload();
+        await capture.page.evaluate(async () => { await SHOT.ready; await document.fonts.ready; });
+      });
       const reloaded = createPostCapture(capture, { ...options, transport: 'png' }, fps);
       for (const t of times) await check(t, decodePNG(await reloaded.frame(t)).data, 'reload');
       finishCheck('reload');
       const size = { width: capture.width, height: capture.height };
       await capture.close(); capture = undefined;
       for (const count of new Set([1, workers])) {
-        pool = createRenderPool(shot, { ...options, transport: 'raw' }, fps, count, size);
+        pool = createRenderPool(shot, { ...options, transport: 'raw' }, fps, count, size, events.warning);
         const name = 'workers:' + count;
         for (const t of times) {
           const index = Math.round(t * fps);

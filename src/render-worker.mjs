@@ -15,7 +15,7 @@ async function close() {
   parentPort.close();
 }
 try {
-  capture = await openShot(workerData.shot, resolveScale(workerData.options).renderScale, workerData.options);
+  capture = await openShot(workerData.shot, resolveScale(workerData.options).renderScale, { ...workerData.options, onWarning: warning => parentPort.postMessage({ type: 'warning', warning }), check: () => { if (closing) throw new MultiplaneError('cancelled'); } });
   if (workerData.size && (capture.width !== workerData.size.width || capture.height !== workerData.size.height)) throw new MultiplaneError('internal_error', 'Worker stage dimensions differ from the main process.');
   const processed = createPostCapture(capture, workerData.options, workerData.fps);
   parentPort.on('message', async message => {

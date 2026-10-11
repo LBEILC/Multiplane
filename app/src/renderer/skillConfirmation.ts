@@ -1,3 +1,4 @@
+import { userError } from '../shared/errors.mjs';
 const api = window.multiplane;
 
 // A modal dialog keeps keyboard focus inside the confirmation until it closes.
@@ -19,7 +20,7 @@ api.onSkillConfirmation(confirmation => {
     if (previous?.isConnected) previous.focus();
     void api.answerSkillConfirmation(confirmation.id, accepted).catch(error => {
       const banner = document.querySelector<HTMLElement>('#error');
-      if (banner) { banner.textContent = String(error); banner.hidden = false; }
+      if (banner) { banner.textContent = userError(error); banner.hidden = false; }
     });
   };
   cancel.onclick = () => answer(false); accept.onclick = () => answer(true);

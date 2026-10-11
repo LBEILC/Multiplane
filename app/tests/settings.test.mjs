@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, realpath } from 'node:fs/promises';
-import { Configuration, Skills, parseDoctor, rendererRoot, pathVersion } from '../src/main/settings.mjs';
+import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, realpath, symlink, lstat, unlink } from 'node:fs/promises';
+import { Configuration, Skills, parseDoctor, rendererRoot, pathVersion, readEnvironment } from '../src/main/settings.mjs';
+import { userError } from '../src/shared/errors.mjs';
 import { Preferences } from '../src/main/store.mjs';
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-settings-')));
@@ -95,4 +96,65 @@ test('npm command shim version is executed as an argument array without shell', 
   const f = await fixture(t), script = path.join(f.root, 'version.cjs'), shim = path.join(f.root, 'multiplane.cmd');
   await writeFile(script, "console.log('1.2.3')"); await writeFile(shim, 'IF EXIST "%dp0%\\node.exe" (\nSET "_prog=%dp0%\\node.exe"\n)\n@"%_prog%" "%dp0%\\version.cjs" %*');
   assert.equal(await pathVersion(shim), '1.2.3');
+});
+
+const linkDirectory = (target, link) => symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+for (const host of ['claude', 'codex']) for (const level of ['user', 'agent', 'skills']) test(`${host}: linked ${level} ancestor supports install, update, backup and removal in the real root`, async t => {
+  const f = await fixture(t), physical = path.join(f.root, 'physical'); await mkdir(physical);
+  const agent = host === 'claude' ? '.claude' : '.agents';
+  await mkdir(path.join(f.user, agent), { recursive: true });
+  const link = level === 'user' ? f.user : level === 'agent' ? path.join(f.user, agent) : path.join(f.user, agent, 'skills');
+  if (level !== 'skills') await rm(link, { recursive: true });
+  await linkDirectory(physical, link);
+  const skills = new Skills(f.source, '1.0.0', f), expectedRoot = level === 'user' ? path.join(physical, agent, 'skills') : level === 'agent' ? path.join(physical, 'skills') : physical;
+  await skills.change(host, 'install', null);
+  const installed = await skills.status(host);
+  assert.equal(installed.target, path.join(expectedRoot, 'multiplane')); assert.equal(installed.state, 'latest');
+  await writeFile(path.join(f.source, 'SKILL.md'), 'v2');
+  const newer = new Skills(f.source, '2.0.0', f), previous = await newer.status(host); assert.equal(previous.state, 'update');
+  await newer.change(host, 'install', previous.signature);
+  await writeFile(path.join(installed.target, 'SKILL.md'), 'user edit');
+  const updated = await newer.change(host, 'install', (await newer.status(host)).signature);
+  assert.equal(path.dirname(updated.backup), expectedRoot); assert.equal(await readFile(path.join(updated.backup, 'SKILL.md'), 'utf8'), 'user edit');
+  await writeFile(path.join(installed.target, 'custom'), 'keep');
+  const removed = await newer.change(host, 'remove', (await newer.status(host)).signature);
+  assert.equal(path.dirname(removed.backup), expectedRoot); assert.equal(await readFile(path.join(removed.backup, 'custom'), 'utf8'), 'keep');
+  await newer.change(host, 'install', null);
+  await newer.change(host, 'remove', (await newer.status(host)).signature);
+  assert.equal((await newer.status(host)).state, 'missing');
+  assert.equal((await lstat(link)).isSymbolicLink(), true);
+});
+
+for (const inside of [false, true]) test(`a ${inside ? 'nested' : 'target'} skill link is blocked without touching the linked directory`, async t => {
+  const f = await fixture(t), skills = new Skills(f.source, '1.0.0', f), outside = path.join(f.root, 'external');
+  await mkdir(outside); await writeFile(path.join(outside, 'keep'), 'untouched');
+  const target = skills.target('claude'); await mkdir(path.dirname(target), { recursive: true });
+  if (inside) await mkdir(target);
+  const link = inside ? path.join(target, 'nested') : target;
+  await linkDirectory(outside, link);
+  const status = await skills.status('claude');
+  assert.equal(status.state, 'modified'); assert.equal(status.blocked, true); assert.match(status.error, /符号链接/);
+  for (const action of ['install', 'remove']) await assert.rejects(skills.change('claude', action, status.signature), /符号链接/);
+  assert.equal(await readFile(path.join(outside, 'keep'), 'utf8'), 'untouched');
+  assert.equal((await lstat(link)).isSymbolicLink(), true);
+  await unlink(link);
+});
+
+test('agent and PATH failures remain local to their own environment cards', async t => {
+  const f = await fixture(t), skills = new Skills(f.source, '1.0.0', f);
+  await writeFile(path.join(f.user, '.claude', 'skills'), 'not a directory');
+  await skills.change('codex', 'install', null);
+  const environment = await readEnvironment(skills, async () => { throw Object.assign(Error('denied'), { code: 'EACCES' }); });
+  assert.match(environment.command.error, /没有权限/);
+  assert.equal(environment.skills[0].state, 'error'); assert.match(environment.skills[0].error, /不是目录/);
+  assert.equal(environment.skills[1].state, 'latest');
+  const healthyCommand = await readEnvironment(skills, async () => '/multiplane', async () => '1.0.0');
+  assert.equal(healthyCommand.command.version, '1.0.0'); assert.equal(healthyCommand.skills[1].state, 'latest');
+});
+
+test('IPC errors have a bounded Chinese explanation without Electron wrappers or stacks', () => {
+  assert.equal(userError(Error("Error invoking remote method 'environment': Error: 不支持符号链接安装目录")), '不支持符号链接安装目录');
+  assert.match(userError("Error: Error invoking remote method 'open': Error: EACCES: access denied"), /^没有权限.*EACCES/);
+  assert.equal(userError(Error('Unknown failure\n    at private/path')), '操作失败，请重新检查');
+  assert.equal(userError(Error('安装状态已变化，请重新检查\nprivate/path')), '安装状态已变化，请重新检查');
 });

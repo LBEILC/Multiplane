@@ -1,3 +1,4 @@
+import { recoveryBudget } from './browser-recovery.mjs';
 import path from 'node:path';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -19,6 +20,7 @@ export async function renderShot(shot, options = {}) {
   return runCommand('render', shot, options, async events => {
     options = { ...events.options };
     delete options.onEvent;
+    options._browserRecovery = recoveryBudget();
     const name = path.basename(shot, path.extname(shot));
     let result;
 
@@ -47,7 +49,7 @@ export async function renderShot(shot, options = {}) {
       if (!Number.isSafeInteger(workers)) throw invalidOption('--workers', '--workers must be a positive integer.');
       const audioOffset = number(options['audio-offset'] ?? 0, '--audio-offset');
       if (options['audio-offset'] !== undefined && !options.audio) throw invalidOption('--audio-offset', '--audio-offset requires --audio.');
-      capture = await openShot(shot, renderScale, { ...options, onBrowser: observeBrowser(events, ffmpegInfo) });
+      capture = await openShot(shot, renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events, ffmpegInfo) });
       await loaded(events, capture, ffmpegInfo);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
       const processed = createPostCapture(capture, options, fps);
@@ -65,7 +67,7 @@ export async function renderShot(shot, options = {}) {
       const actualWorkers = Math.min(workers, Math.ceil(total / 4));
       const started = performance.now();
       const frameHashes = process.env.RENDER_FRAME_HASHES ? [] : null;
-      pool = createRenderPool(shot, options, fps, actualWorkers, { width, height });
+      pool = createRenderPool(shot, options, fps, actualWorkers, { width, height }, events.warning);
       events.onCancel(() => pool?.cancel());
       await mkdir(path.dirname(out), { recursive: true });
       events.check();
