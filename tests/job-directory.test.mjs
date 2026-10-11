@@ -1,9 +1,9 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, chmod, rm } from 'node:fs/promises';
+import { mkdir, writeFile, chmod, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { runCommand } from '../src/events.mjs';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import { syncBuiltinESMExports } from 'node:module';
 
 const cli = fileURLToPath(new URL('../bin/multiplane', import.meta.url));
 test('unwritable job directories fail before render work; status and cancel stay independent', async t => {
-  const work = await mkdtemp(path.join(os.tmpdir(), 'multiplane-job-dir-'));
+  const work = createTempDirectory('multiplane-job-dir-');
   const blocked = path.join(work, 'blocked');
   t.after(async () => { if (process.platform !== 'win32') await chmod(blocked, 0o700); await rm(work, { recursive: true, force: true }); });
   if (process.platform === 'win32') await writeFile(blocked, 'file occupying directory');
@@ -46,7 +46,7 @@ test('unwritable job directories fail before render work; status and cancel stay
 });
 
 test('file-write failure is reported even when job directories can be created', async t => {
-  const jobs = await mkdtemp(path.join(os.tmpdir(), 'multiplane-job-write-'));
+  const jobs = createTempDirectory('multiplane-job-write-');
   t.after(() => rm(jobs, { recursive: true, force: true }));
   const original = fs.writeFileSync;
   const mocked = t.mock.method(fs, 'writeFileSync', (file, ...args) => {

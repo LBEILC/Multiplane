@@ -2,14 +2,14 @@ import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, mkdtemp, writeFile, readFile, symlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, symlink } from 'node:fs/promises';
 import { scanShot } from '../src/lint.mjs';
 import { lintShot } from '../src/index.mjs';
-import { run } from './helpers.mjs';
+import { run, createTempDirectory } from './helpers.mjs';
 import { base, cases } from './lint-cases.mjs';
 
 await mkdir('out/tests', { recursive: true });
-const root = await mkdtemp(path.resolve('out/tests/lint-'));
+const root = createTempDirectory(path.resolve('out/tests/lint-'));
 for (const file of ['image.gif', 'image.apng', 'image.png', 'font.woff2']) await writeFile(path.join(root, file), 'fixture');
 let id = 0;
 async function scan(html) {
@@ -71,7 +71,7 @@ test('resource contexts, recursion, cycles, root boundary and runtime exclusions
   assert.deepEqual(result.findings.map(f => f.location), [{ file: 'b.css', line: 2, column: 3 }, { file: 'b.js', line: 2, column: 3 }]);
   for (const url of ['../outside.png', '%2e%2e/outside.png', 'missing.png']) assert.equal((await scan(base + `<img src="${url}">`)).findings[0].code, 'resource_missing');
   assert.equal((await scan(base + '<img src="data:image/png;base64,a"><script type="module">import "three";import "/multiplane/three.js";</script>')).findings.length, 0);
-  const outer = await mkdtemp(path.resolve('out/tests/outer-')); await writeFile(path.join(outer, 'a.js'), 'Date.now()');
+  const outer = createTempDirectory(path.resolve('out/tests/outer-')); await writeFile(path.join(outer, 'a.js'), 'Date.now()');
   await symlink(outer, path.join(root, 'linked'), 'junction');
   assert.equal((await scan(base + '<script src="linked/a.js"></script>')).findings[0].code, 'resource_missing');
 });

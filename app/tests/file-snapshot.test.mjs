@@ -1,12 +1,12 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, utimes } from 'node:fs/promises';
+import { writeFile, rm, utimes } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { fileSnapshot } from '../tools/file-snapshot.mjs';
 
 test('installation snapshots detect additions, deletions and same-size content changes', async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'multiplane-snapshot-'));
+  const root = createTempDirectory('multiplane-snapshot-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const file = path.join(root, 'file'); await writeFile(file, 'before');
   const before = await fileSnapshot(root);

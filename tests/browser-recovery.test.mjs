@@ -2,12 +2,12 @@ import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { openShot } from '../src/capture.mjs';
 import { createPostCapture } from '../src/post.mjs';
 import { decodePNG } from '../src/png.mjs';
 import { crashDetails, MAX_BROWSER_RESTARTS } from '../src/browser-recovery.mjs';
-import { run } from './helpers.mjs';
+import { run, createTempDirectory } from './helpers.mjs';
 
 const html = `<style>body{margin:0}#stage{width:64px;height:48px;background:#123}i{display:block;width:9px;height:11px;background:#fea}</style><div id="stage"><i></i></div><script>
 window.SHOT={duration:1,fps:4,ready:Promise.resolve(),blurAt:()=>4,render(t){document.querySelector('i').style.transform='translateX('+Math.round(t*40)+'px)'}};
@@ -15,7 +15,7 @@ window.SHOT={duration:1,fps:4,ready:Promise.resolve(),blurAt:()=>4,render(t){doc
 const options = { raster: 'software', 'motion-blur': 4, grain: 2, 'adaptive-blur': 0, 'no-lint': true };
 async function fixture() {
   await mkdir('out/tests', { recursive: true });
-  const root = await mkdtemp(path.resolve('out/tests/recovery-'));
+  const root = createTempDirectory(path.resolve('out/tests/recovery-'));
   const shot = path.join(root, 'shot.html'); await writeFile(shot, html);
   return { root, shot };
 }

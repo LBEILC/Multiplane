@@ -1,14 +1,14 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { rm, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import sharp from 'sharp';
 import { captureFailure } from '../tools/smoke-diagnostics.mjs';
 
 test('element timeout evidence includes accessible names and a screenshot masking only the config path', async t => {
-  const out = await mkdtemp(path.join(os.tmpdir(), 'multiplane-diagnostics-'));
+  const out = createTempDirectory('multiplane-diagnostics-');
   t.after(() => rm(out, { recursive: true, force: true }));
   const browser = await chromium.launch(); t.after(() => browser.close());
   const page = await browser.newPage();

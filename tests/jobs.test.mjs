@@ -2,17 +2,17 @@ import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { setTimeout } from 'node:timers/promises';
 import { createEvents, jobDirectory } from '../src/events.mjs';
 import { errorCodes, MultiplaneError } from '../src/errors.mjs';
 import { stillsShot } from '../src/stills.mjs';
 import { decodePNG } from '../src/png.mjs';
-import { run } from './helpers.mjs';
+import { run, createTempDirectory } from './helpers.mjs';
 
 await mkdir('out/tests', { recursive: true });
-const directory = await mkdtemp(path.resolve('out/tests/protocol-'));
+const directory = createTempDirectory(path.resolve('out/tests/protocol-'));
 const evidence = [];
 const cli = async (args, options = {}) => {
   const result = await run(process.execPath, ['bin/multiplane', ...args, '--json'], options);

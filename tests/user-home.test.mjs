@@ -2,17 +2,17 @@ import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, writeFile, stat, utimes } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, utimes } from 'node:fs/promises';
 import { userHome } from '../src/platform.mjs';
 import { loadUserConfig, appendJobIndex } from '../src/user-home.mjs';
 import { renderShot } from '../src/render.mjs';
 import { createPreview } from '../src/preview.mjs';
 import { scanShot } from '../src/lint.mjs';
 import { decodePNG } from '../src/png.mjs';
-import { run } from './helpers.mjs';
+import { run, createTempDirectory } from './helpers.mjs';
 import { resolveFFmpeg } from '../src/ffmpeg.mjs';
 
-const directory = await mkdtemp(path.resolve('out/tests/user-home-'));
+const directory = createTempDirectory(path.resolve('out/tests/user-home-'));
 const home = process.env.MULTIPLANE_HOME;
 const readLines = async file => (await readFile(file, 'utf8')).trim().split('\n').map(JSON.parse);
 const cli = async (args, env = {}) => {

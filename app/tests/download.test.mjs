@@ -1,9 +1,9 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequester } from '../tools/download.mjs';
 import { prepareFont, downloadPage } from '../tools/fonts.mjs';
@@ -50,7 +50,7 @@ test('permanent HTTP errors are not retried', async () => {
 });
 
 test('wrong font hash never replaces the existing file; invalid cache hits never use the network', async t => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'multiplane-font-test-'));
+  const directory = createTempDirectory('multiplane-font-test-');
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'MiSansVF.ttf');
   await writeFile(file, 'old');
@@ -68,7 +68,7 @@ test('wrong font hash never replaces the existing file; invalid cache hits never
 });
 
 test('CI cache-only mode rejects missing and corrupt fonts without network fallback', async t => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'multiplane-font-offline-'));
+  const directory = createTempDirectory('multiplane-font-offline-');
   const previous = process.env.MULTIPLANE_FONT_CACHE_ONLY;
   process.env.MULTIPLANE_FONT_CACHE_ONLY = '1';
   t.after(async () => {

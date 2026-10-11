@@ -1,13 +1,13 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, realpath, rename } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, readdir, rm, symlink, rename } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import os from 'node:os';
 import { exportPublic, resolveExportPaths } from '../tools/export-public.mjs';
 
 async function fixture(t) {
-  const base = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-export-')));
+  const base = createTempDirectory('multiplane-export-');
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'source'), output = path.join(base, 'public'); await mkdir(root);
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });

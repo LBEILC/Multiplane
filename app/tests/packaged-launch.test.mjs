@@ -1,3 +1,5 @@
+import { rmSync } from 'node:fs';
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -31,7 +33,10 @@ test('Windows and macOS use the installed binary for both GUI and Node', () => {
   }
 });
 
-test('app doctor and render use the running binary, never the APPIMAGE wrapper or GUI flags', () => {
+test('app doctor and render use the running binary, never the APPIMAGE wrapper or GUI flags', t => {
+  const temporary = createTempDirectory('multiplane-cwd-');
+  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  t.mock.method(os, 'tmpdir', () => temporary);
   for (const execPath of ['/tmp/.mount_Multiplane/multiplane-desktop', '/tmp/appimage_extracted_123/multiplane-desktop']) {
     for (const args of [['doctor', '--json'], ['render', '/project space/animation.html', '--json']]) {
       const env = { APPIMAGE: '/downloads/Multiplane.AppImage', APPDIR: path.dirname(execPath), MULTIPLANE_NO_SANDBOX: '1' };
@@ -39,7 +44,7 @@ test('app doctor and render use the running binary, never the APPIMAGE wrapper o
       const command = bundledInvocation(root, args, execPath, env);
       assert.equal(command.file, execPath);
       assert.deepEqual(command.args, [path.join(root, 'bin/multiplane'), ...args]);
-      assert.equal(command.options.cwd, os.tmpdir());
+      assert.equal(command.options.cwd, temporary);
       assert.equal(bundledInvocation(root, args, execPath, env, '/temporary-project').options.cwd, '/temporary-project');
       assert.deepEqual(command.options.env, { ...env, ELECTRON_RUN_AS_NODE: '1' });
       assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);

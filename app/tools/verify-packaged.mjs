@@ -1,5 +1,5 @@
 import { _electron } from 'playwright';
-import { mkdtemp, mkdir, readFile, writeFile, readdir, stat, lstat, cp, chmod, rm } from 'node:fs/promises';
+import { realpath, mkdtemp, mkdir, readFile, writeFile, readdir, stat, lstat, cp, chmod, rm } from 'node:fs/promises';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -30,7 +30,7 @@ const cache = windows ? path.join(folders.local, 'multiplane-desktop-updater') :
 const exists = async file => { try { await lstat(file); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 if (windows) for (const hive of ['HKCU', 'HKLM']) for (const key of keys) assert.equal(registryExists(hive, key), false, 'Existing installation must not be changed by verification');
 for (const file of [...shortcuts, ...(cache ? [cache] : [])]) assert.equal(await exists(file), false, 'Existing shortcuts/cache must not be changed by verification');
-const work = await mkdtemp(path.join(os.tmpdir(), 'multiplane-packaged-'));
+const work = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-packaged-')));
 const installation = path.join(work, windows ? 'installed' : mac ? 'mount' : 'squashfs-root'), home = path.join(work, 'renderer-home'), data = path.join(work, 'desktop-home'), user = path.join(work, 'user'), project = path.join(work, 'example');
 for (const dir of [home, data, user, project]) await mkdir(dir, { recursive: true });
 await writeFile(path.join(data, 'preferences.json'), JSON.stringify({ wizardDone: true, notifications: false, theme: 'dark', hidden: [] }));

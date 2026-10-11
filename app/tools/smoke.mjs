@@ -1,6 +1,6 @@
 import { _electron } from 'playwright';
 import { ensureElectron } from './electron.mjs';
-import { mkdir, mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
+import { realpath, mkdir, mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ const out = path.resolve(appRoot, '../out/ci/smoke'); await mkdir(out, { recursi
 // Do not let a previous successful capture masquerade as evidence for a failed run.
 await rm(path.join(out, 'window.png'), { force: true });
 await rm(path.join(out, 'failure.png'), { force: true });
-const work = await mkdtemp(path.join(os.tmpdir(), 'multiplane-smoke-'));
+const work = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-smoke-')));
 const home = path.join(work, 'renderer'), data = path.join(work, 'desktop'), user = path.join(work, 'user');
 const realUser = path.join(work, 'real-user');
 for (const dir of [home, data, realUser]) await mkdir(dir);

@@ -1,12 +1,12 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { ensureElectron } from '../tools/electron.mjs';
 
 async function fixture(t, installed = '1.2.3') {
-  const app = await mkdtemp(path.join(os.tmpdir(), 'multiplane-electron-test-'));
+  const app = createTempDirectory('multiplane-electron-test-');
   t.after(() => rm(app, { recursive: true, force: true }));
   const directory = path.join(app, 'node_modules/electron');
   await mkdir(directory, { recursive: true });

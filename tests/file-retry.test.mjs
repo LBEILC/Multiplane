@@ -1,9 +1,9 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { retryFileOperation } from '../src/user-home.mjs';
 import { appendJobIndex } from '../src/user-home.mjs';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { createEvents } from '../src/events.mjs';
@@ -23,7 +23,7 @@ test('Windows transient sharing failures recover within one shared second', () =
 });
 
 test('lock, append and unlock recover simulated sharing violations without duplicate rows', { skip: process.platform !== 'win32' }, t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'multiplane-lock-'));
+  const directory = createTempDirectory('multiplane-lock-');
   const open = fs.openSync, write = fs.writeSync, unlink = fs.unlinkSync;
   const counts = { lock: 0, append: 0, write: 0, unlock: 0 };
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(directory, { recursive: true, force: true }); });
@@ -41,7 +41,7 @@ test('lock, append and unlock recover simulated sharing violations without dupli
   assert.deepEqual(counts, { lock: 2, append: 2, write: 3, unlock: 2 });
 });
 test('status snapshot replacement tolerates a transient Windows reader', { skip: process.platform !== 'win32' }, t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'multiplane-status-'));
+  const directory = createTempDirectory('multiplane-status-');
   const rename = fs.renameSync; let calls = 0;
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(directory, { recursive: true, force: true }); });
   t.mock.method(fs, 'renameSync', (...args) => { if (++calls === 1) throw Object.assign(Error('sharing violation'), { code: 'EPERM' }); return rename(...args); });

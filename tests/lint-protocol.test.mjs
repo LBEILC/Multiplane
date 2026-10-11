@@ -3,15 +3,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { mkdir, mkdtemp, writeFile, readFile, readdir } from 'node:fs/promises';
-import { run } from './helpers.mjs';
+import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
+import { run, createTempDirectory } from './helpers.mjs';
 import { cancelJob, statusJob, stillsShot, verifyShot, renderShot } from '../src/index.mjs';
 import { publishVideo } from '../src/artifacts.mjs';
 import { decodePNG } from '../src/png.mjs';
 import { warnGpuFallback } from '../src/environment.mjs';
 
 await mkdir('out/tests', { recursive: true });
-const root = await mkdtemp(path.resolve('out/tests/lint-protocol-'));
+const root = createTempDirectory(path.resolve('out/tests/lint-protocol-'));
 const shot = path.join(root, 'tiny.html');
 const html = '<div id="stage" style="width:32px;height:32px;background:red"></div><script>window.SHOT={duration:0.25,fps:4,render(){}}</script>';
 await writeFile(shot, html);
@@ -27,10 +27,10 @@ test('each command exposes human-readable help even with --json', async () => {
 });
 test('missing and corrupt snapshots use job_not_found; wait timeout retains snapshot', async () => {
   for (const value of ['not json', 'null', '{}', '{"schema":"multiplane/1","pid":1,"state":"invalid"}']) {
-    const job = await mkdtemp(path.join(root, 'corrupt-')); await writeFile(path.join(job, 'status.json'), value);
+    const job = createTempDirectory(path.join(root, 'corrupt-')); await writeFile(path.join(job, 'status.json'), value);
     for (const action of [statusJob, cancelJob]) await assert.rejects(action(job), { code: 'job_not_found', exitCode: 2 });
   }
-  const job = await mkdtemp(path.join(root, 'waiting-'));
+  const job = createTempDirectory(path.join(root, 'waiting-'));
   await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid, state: 'running' }));
   await assert.rejects(cancelJob(job, { wait: 0 }), error => error.code === 'cancel_timeout' && error.exitCode === 1 && error.result.data.state === 'running');
 });

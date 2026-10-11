@@ -1,12 +1,12 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, symlink, rm, stat } from 'node:fs/promises';
+import { mkdir, writeFile, symlink, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { startServer } from '../src/server.mjs';
 
 test('resource roots reject symlink escapes and obey the host filesystem case rules', async t => {
-  const work = await mkdtemp(path.join(os.tmpdir(), 'multiplane-resource-'));
+  const work = createTempDirectory('multiplane-resource-');
   t.after(() => rm(work, { recursive: true, force: true }));
   const root = path.join(work, 'project'), outside = path.join(work, 'outside');
   await mkdir(root); await mkdir(outside);

@@ -1,12 +1,12 @@
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { findInstaller } from '../tools/installer-file.mjs';
 
 test('installer discovery uses actual platform filenames and rejects zero or multiple matches', async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'multiplane-installers-'));
+  const root = createTempDirectory('multiplane-installers-');
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const [platform, name] of [['win32', 'Multiplane-Setup-0.0.0-x64.exe'], ['darwin', 'Multiplane-0.0.0-arm64.dmg'], ['linux', 'Multiplane-0.0.0-x86_64.AppImage']]) {
     const dir = path.join(root, platform); await mkdir(dir);

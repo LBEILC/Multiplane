@@ -1,12 +1,12 @@
 import { _electron } from 'playwright';
 import { ensureElectron } from './electron.mjs';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { realpath, mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const work = await mkdtemp(path.join(os.tmpdir(), 'multiplane-ui-'));
+const work = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-ui-')));
 const home = path.join(work, 'renderer'), data = path.join(work, 'desktop'), user = path.join(work, 'user');
 for (const dir of [home, data, path.join(user, '.claude'), path.join(user, '.codex')]) await mkdir(dir, { recursive: true });
 const env = { ...process.env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data, MULTIPLANE_TEST_USER_HOME: user, USERPROFILE: user, HOME: user, CODEX_HOME: path.join(user, '.codex'), CLAUDE_CONFIG_DIR: path.join(user, '.claude'), MULTIPLANE_FFMPEG: 'Z:/missing/ffmpeg.exe', MULTIPLANE_JOBS_DIR: 'D:/renders' };

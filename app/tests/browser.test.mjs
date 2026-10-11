@@ -1,15 +1,20 @@
+import { rmSync } from 'node:fs';
+import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { BrowserInstaller } from '../src/main/browser.mjs';
 
-test('browser download uses bundled Playwright, shared cache, output events and a single child', async () => {
+test('browser download uses bundled Playwright, shared cache, output events and a single child', async t => {
+  const temporary = createTempDirectory('multiplane-cwd-');
+  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  t.mock.method(os, 'tmpdir', () => temporary);
   const calls = [], states = [];
   const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.pid = 123;
   child.kill = () => { child.emit('close', 1); };
@@ -28,7 +33,7 @@ test('browser download uses bundled Playwright, shared cache, output events and 
   assert.equal(calls[0].options.env.PLAYWRIGHT_BROWSERS_PATH, undefined);
   assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, '1');
   assert.equal(calls[0].options.shell, false);
-  assert.equal(calls[0].options.cwd, os.tmpdir());
+  assert.equal(calls[0].options.cwd, temporary);
   child.stdout.write('50% downloaded'); assert.match(installer.state.text, /50%/);
   await installer.cancel();
   assert.deepEqual(installer.state, { running: false, text: '已取消安装' });
@@ -38,7 +43,7 @@ test('browser download uses bundled Playwright, shared cache, output events and 
   assert.ok(states.length >= 4);
 });
 test('worker awaits the asynchronous CLI and rejects incomplete browser caches', async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'multiplane-browser-worker-'));
+  const root = createTempDirectory('multiplane-browser-worker-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const playwright = path.join(root, 'node_modules/playwright'), core = path.join(root, 'node_modules/playwright-core');
   await mkdir(path.join(playwright, 'lib'), { recursive: true }); await mkdir(path.join(core, 'lib'), { recursive: true });

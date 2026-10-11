@@ -1,19 +1,18 @@
 import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import os from 'node:os';
 import { normalizeResourcePath, isInsideResourceRoot, relativeResourcePath } from '../src/resource-path.mjs';
 import { scanShot } from '../src/lint.mjs';
 import { openShot } from '../src/capture.mjs';
 import { startServer } from '../src/server.mjs';
-import { run } from './helpers.mjs';
+import { run, createTempDirectory } from './helpers.mjs';
 
 const html = '<div id="stage" style="width:32px;height:32px;background:red"></div><script>window.SHOT={duration:1,fps:4,render(){}}</script>';
 async function fixture(t) {
-  const work = await mkdtemp(path.join(os.tmpdir(), 'multiplane-path-test-'));
+  const work = createTempDirectory('multiplane-path-test-');
   t.after(() => rm(work, { recursive: true, force: true }));
   const root = path.join(work, 'Long resource directory'), outside = path.join(work, 'outside');
   await mkdir(root); await mkdir(outside);
