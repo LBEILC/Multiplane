@@ -1,7 +1,6 @@
 {
   "name": "multiplane",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -29,7 +28,8 @@
   "scripts": {
     "postinstall": "node tools/install-browser.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
-    "export:public": "node tools/export-public.mjs"
+    "export:public": "node tools/export-public.mjs",
+    "release:check": "node tools/release-check.mjs"
   },
   "dependencies": {
     "acorn": "8.15.0",
@@ -54,5 +54,28 @@
     "postcss": {
       "nanoid": "3.3.19"
     }
+  },
+  "description": "Local headless HTML-to-video renderer for AI agents: shots are plain web pages driven by render(t), with determinism checks, cut-aware motion blur and a 3D layer with accumulated depth of field.",
+  "keywords": [
+    "video",
+    "renderer",
+    "html",
+    "headless",
+    "chromium",
+    "playwright",
+    "ffmpeg",
+    "ai-agent",
+    "deterministic",
+    "motion-blur",
+    "depth-of-field",
+    "three.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LBEILC/Multiplane.git"
+  },
+  "homepage": "https://github.com/LBEILC/Multiplane#readme",
+  "bugs": {
+    "url": "https://github.com/LBEILC/Multiplane/issues"
   }
 }

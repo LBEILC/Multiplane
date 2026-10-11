@@ -1,3 +1,4 @@
+import releasePackage from '../../package.json' with { type: 'json' };
 import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import { findInstaller } from '../tools/installer-file.mjs';
 test('installer discovery uses actual platform filenames and rejects zero or multiple matches', async t => {
   const root = createTempDirectory('multiplane-installers-');
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const [platform, name] of [['win32', 'Multiplane-Setup-0.0.0-x64.exe'], ['darwin', 'Multiplane-0.0.0-arm64.dmg'], ['linux', 'Multiplane-0.0.0-x86_64.AppImage']]) {
+  for (const [platform, name] of [['win32', `Multiplane-Setup-${releasePackage.version}-x64.exe`], ['darwin', `Multiplane-${releasePackage.version}-arm64.dmg`], ['linux', `Multiplane-${releasePackage.version}-x86_64.AppImage`]]) {
     const dir = path.join(root, platform); await mkdir(dir);
     await assert.rejects(findInstaller(dir, platform), /found 0: \[\]/);
     await mkdir(path.join(dir, 'directory' + path.extname(name)));

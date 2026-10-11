@@ -1,3 +1,4 @@
+import releasePackage from '../package.json' with { type: 'json' };
 import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -153,7 +154,7 @@ test('known shot failures have specific codes and render time details', async ()
     if (code === 'render_threw') assert.equal(result.final.details.t, 0);
   }
   const version = await run(process.execPath, ['bin/multiplane', '--version']);
-  assert.equal(version.code, 0); assert.equal(version.stdout.trim(), '0.0.0');
+  assert.equal(version.code, 0); assert.equal(version.stdout.trim(), releasePackage.version);
 });
 
 test('existing outputs are preserved; vanished process status is synthesized without writing', async () => {

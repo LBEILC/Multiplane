@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="app/design/icons/readme-dark.svg">
-  <img src="app/design/icons/readme-light.svg" width="72" height="72" alt="">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LBEILC/Multiplane/main/app/design/icons/readme-dark.svg">
+  <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/app/design/icons/readme-light.svg" width="72" height="72" alt="">
 </picture>
 
 # Multiplane
@@ -9,7 +9,7 @@ English · [简体中文](README.zh-CN.md)
 
 A local, headless HTML video renderer for AI agents. **A shot is an ordinary web page**: the page implements `render(t)`, and the image depends only on time `t`. Multiplane captures frames with headless Chromium, applies post-processing such as supersampling, motion blur, and film grain, encodes video with FFmpeg, and checks whether a shot is deterministic.
 
-> This is a pre-release (`0.0.0`), not yet published to npm. Interfaces may change before v0.1. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine.
+> Version `0.1.0`. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
 
 The name comes from Disney's multiplane camera: flat artwork placed at different depths, photographed frame by frame with real depth of field. Here, this corresponds to layered web content, a 3D card layer, and accumulated depth of field.
 
@@ -28,12 +28,17 @@ The name comes from Disney's multiplane camera: flat artwork placed at different
 Requires Node.js 24 or later and FFmpeg with libx264 support.
 
 ```sh
-npm install
+npm install github:LBEILC/Multiplane#v0.1.0
+npx playwright install chromium
 npx multiplane doctor
-npx multiplane render examples/animation.html
+npx multiplane render node_modules/multiplane/examples/animation.html
 ```
 
-`npm install` downloads the Chromium version used by Playwright, reusing it if already installed. In an offline environment, set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to skip the download, then run `npx playwright install chromium` later. On Linux, Chromium also needs system libraries: run `npx playwright install-deps chromium` once (`doctor` tells you when they are missing).
+The package is not on the npm registry yet; the first command installs the tagged release from GitHub. Recent npm versions do not run install scripts of dependencies, so the second command downloads the Chromium build that Playwright uses. To work from a clone of this repository instead, run `npm install` in it and render `examples/animation.html` directly.
+
+Give your agent the usage skill: copy `node_modules/multiplane/skills/multiplane` into the agent's skill directory (`~/.claude/skills/` for Claude Code, `~/.agents/skills/` for Codex), or let the desktop app install it.
+
+In a clone of this repository, `npm install` downloads that Chromium build itself, reusing it if already installed; in an offline environment, set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to skip the download, then run `npx playwright install chromium` later. On Linux, Chromium also needs system libraries: run `npx playwright install-deps chromium` once (`doctor` tells you when they are missing).
 
 ### FFmpeg
 
@@ -130,7 +135,7 @@ With `--json`, stdout contains one JSON event per line (NDJSON). The last line i
 - Exit codes: `0` success, `1` shot or check failure, `2` invalid arguments, `3` environment problem, `4` renderer internal error, `130` cancelled.
 - Each run writes `events.jsonl` (the same event stream) and `status.json` (the latest snapshot) under `out/jobs/<jobId>/`, allowing other programs to show progress. Rendering also maintains a preview thumbnail, `preview.png`.
 
-See [`docs/protocol.md`](docs/protocol.md) for event types, fields, and all error codes.
+See [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md) for event types, fields, and all error codes.
 
 ## User config and job index
 
@@ -139,7 +144,7 @@ The renderer reads config and registers jobs in a user directory: `%APPDATA%\mul
 - `config.json`: user defaults, with optional fields `ffmpeg`, `raster`, `encoder`, `workers`, and `jobsDir`. Priority: command-line options > environment variables > `config.json` > built-in defaults. The renderer reads this file but never writes it. `doctor` reports its location and which fields take effect.
 - `jobs.jsonl`: one line appended at the start and end of each job, allowing other programs to discover jobs across projects. The job directory's `status.json` is the authority for job status. Set `MULTIPLANE_NO_INDEX=1` to disable registration.
 
-Read or write failures in this directory do not affect rendering; they only produce a warning. See section 8 of [`docs/protocol.md`](docs/protocol.md) for the format.
+Read or write failures in this directory do not affect rendering; they only produce a warning. See section 8 of [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md) for the format.
 
 ## JS API
 
@@ -171,9 +176,9 @@ npm install three@0.180.0
 - **Environment**: check whether the browser, GPU rasterization, FFmpeg, and other requirements are ready. Install and update the Multiplane skill for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), without directly overwriting user modifications.
 - **Settings**: write the user config `config.json` described above.
 
-It communicates with the renderer only through the files and commands in [`docs/protocol.md`](docs/protocol.md). It is not required for rendering: agents can render from the command line without it.
+It communicates with the renderer only through the files and commands in [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md). It is not required for rendering: agents can render from the command line without it.
 
-The installers bundle a renderer of the same version, so the app works without a separate Node.js install. FFmpeg is not bundled (see above), and Chromium is downloaded on first use from the Environment page.
+Download an installer from the [Releases page](https://github.com/LBEILC/Multiplane/releases). The installers bundle a renderer of the same version, so the app works without a separate Node.js install. FFmpeg is not bundled (see above), and Chromium is downloaded on first use from the Environment page.
 
 | System | Package | First launch (the packages are not code-signed) |
 |---|---|---|

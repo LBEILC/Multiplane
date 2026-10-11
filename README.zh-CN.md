@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="app/design/icons/readme-dark.svg">
-  <img src="app/design/icons/readme-light.svg" width="72" height="72" alt="">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LBEILC/Multiplane/main/app/design/icons/readme-dark.svg">
+  <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/app/design/icons/readme-light.svg" width="72" height="72" alt="">
 </picture>
 
 # Multiplane
@@ -9,7 +9,7 @@
 
 给 AI agent 用的本地无头 HTML 视频渲染器。**镜头就是普通网页**：页面实现 `render(t)`，画面只由时间 `t` 决定；Multiplane 用无头 Chromium 逐帧截图，做超采样、运动模糊、胶片颗粒等后期，用 FFmpeg 合成视频，并能检查镜头是否确定。
 
-> 当前为预发布版本 `0.0.0`，尚未发布到 npm，接口在 v0.1 前可能调整。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。
+> 当前版本 `0.1.0`。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
 
 名字来自迪士尼的多层摄影台（multiplane camera）：一层层平面画稿放在不同深度、逐帧拍摄、带真实景深。对应这里的多层网页画面、三维卡片层和累积景深。
 
@@ -28,12 +28,17 @@
 需要 Node.js 24 或更新版本，以及支持 libx264 的 FFmpeg。
 
 ```sh
-npm install
+npm install github:LBEILC/Multiplane#v0.1.0
+npx playwright install chromium
 npx multiplane doctor
-npx multiplane render examples/animation.html
+npx multiplane render node_modules/multiplane/examples/animation.html
 ```
 
-`npm install` 会下载 Playwright 对应版本的 Chromium（已安装则复用）。离线环境可设 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 跳过，之后再运行 `npx playwright install chromium`。Linux 上 Chromium 还需要系统库：运行一次 `npx playwright install-deps chromium`（缺的时候 `doctor` 会提示）。
+这个包还没有发布到 npm 仓库，第一条命令是从 GitHub 安装带标签的发布版本。新版 npm 默认不运行依赖包的安装脚本，所以第二条命令用来下载 Playwright 使用的 Chromium。如果是克隆了本仓库，在仓库里运行 `npm install`，直接渲染 `examples/animation.html` 即可。
+
+把使用说明 skill 交给你的 agent：把 `node_modules/multiplane/skills/multiplane` 复制到 agent 的 skill 目录（Claude Code 为 `~/.claude/skills/`，Codex 为 `~/.agents/skills/`），或者让桌面软件来安装。
+
+在克隆的仓库里，`npm install` 会自己下载这个 Chromium（已安装则复用）。离线环境可设 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 跳过，之后再运行 `npx playwright install chromium`。Linux 上 Chromium 还需要系统库：运行一次 `npx playwright install-deps chromium`（缺的时候 `doctor` 会提示）。
 
 ### FFmpeg
 
@@ -130,7 +135,7 @@ Shot.define({
 - 退出码：`0` 成功，`1` 镜头或检查不通过，`2` 参数错误，`3` 环境问题，`4` 渲染器内部错误，`130` 被取消。
 - 每次运行在 `out/jobs/<jobId>/` 下写 `events.jsonl`（同一事件流）和 `status.json`（最新快照），其他程序可以据此展示进度；渲染时还会维护一张预览缩略图 `preview.png`。
 
-事件类型、字段和全部错误码见 [`docs/protocol.zh-CN.md`](docs/protocol.zh-CN.md)。
+事件类型、字段和全部错误码见 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md)。
 
 ## 用户配置与作业索引
 
@@ -139,7 +144,7 @@ Shot.define({
 - `config.json`：用户默认值，字段 `ffmpeg`、`raster`、`encoder`、`workers`、`jobsDir`，都可省略。优先级为命令行参数 > 环境变量 > `config.json` > 内置默认值。渲染器只读不写；`doctor` 会报告它的位置和哪些字段生效。
 - `jobs.jsonl`：每个作业开始、结束各追加一行，供其他程序发现各项目里的作业；作业状态以作业目录里的 `status.json` 为准。`MULTIPLANE_NO_INDEX=1` 关闭登记。
 
-这个目录读写失败不影响渲染，只会给出一条警告。格式见 [`docs/protocol.zh-CN.md`](docs/protocol.zh-CN.md) 第 8 节。
+这个目录读写失败不影响渲染，只会给出一条警告。格式见 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md) 第 8 节。
 
 ## JS API
 
@@ -171,9 +176,9 @@ npm install three@0.180.0
 - **环境**：检查浏览器、GPU 光栅、FFmpeg 等是否就绪；给 Claude Code（`~/.claude/skills/`）和 Codex（`~/.agents/skills/`）安装、更新 Multiplane 的 skill，自己改过的不会被直接覆盖。
 - **设置**：写入上文的用户配置 `config.json`。
 
-它只通过 [`docs/protocol.zh-CN.md`](docs/protocol.zh-CN.md) 的文件和命令行与渲染器打交道，不是渲染的必需品：不装它，agent 照样可以用命令行渲染。
+它只通过 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md) 的文件和命令行与渲染器打交道，不是渲染的必需品：不装它，agent 照样可以用命令行渲染。
 
-安装包里带一份同版本的渲染器，不需要另装 Node.js。FFmpeg 不随包提供（见上文），Chromium 在环境页首次使用时下载。
+从 [Releases 页面](https://github.com/LBEILC/Multiplane/releases) 下载安装包。安装包里带一份同版本的渲染器，不需要另装 Node.js。FFmpeg 不随包提供（见上文），Chromium 在环境页首次使用时下载。
 
 | 系统 | 安装包 | 首次打开（安装包没有代码签名） |
 |---|---|---|

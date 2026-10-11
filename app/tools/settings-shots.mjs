@@ -1,3 +1,4 @@
+import releasePackage from '../../package.json' with { type: 'json' };
 import { nativeRealpath } from '../../tools/native-realpath.mjs';
 import { _electron } from 'playwright';
 import { ensureElectron } from './electron.mjs';
@@ -97,18 +98,18 @@ try {
   await page.locator('[data-host-card=claude]').getByText('未安装', { exact: true }).waitFor();
   evidence.checks.push('real checkbox Space/row click; modal cancel default, focus trap, Escape, exact backup name, replace/remove styles and IPC');
   // Use protocol-shaped public fixtures for screenshots; never expose machine paths.
-  await app.evaluate(({ ipcMain }, { home }) => {
+  await app.evaluate(({ ipcMain }, { home, version }) => {
     globalThis.__ffmpeg = false;
     ipcMain.removeHandler('doctor');
     ipcMain.handle('doctor', () => ({ schema: 'multiplane/1', type: 'result', command: 'doctor', ok: false, code: 'ffmpeg_not_found', hint: 'Select an FFmpeg executable.', data: { checks: [
       { name: 'node', ok: true, detail: 'Node v24.21.0; version 24 or newer is required.' }, { name: 'browser', ok: true, detail: 'Chromium 145.0.7632.6 is available.' }, { name: 'gpu', ok: true, detail: 'Hardware rasterization is available.' },
       { name: 'ffmpeg', ok: globalThis.__ffmpeg, detail: globalThis.__ffmpeg ? 'FFmpeg is available.' : 'FFmpeg executable was not found.' }, { name: 'libx264', ok: globalThis.__ffmpeg, detail: 'Encoder list follows FFmpeg availability.' }, { name: 'three', ok: false, detail: 'Optional three.js is not installed.' }
     ], config: { path: 'D:/Multiplane/config.json', exists: true, applied: ['ffmpeg', 'raster', 'encoder', 'workers', 'jobsDir'] } } }));
-    const settingsHandler = { values: { ffmpeg: 'D:/tools/ffmpeg.exe', raster: 'gpu', encoder: 'x264', workers: null, jobsDir: null }, file: 'D:/Multiplane/config.json', overrides: { ffmpeg: 'D:/tools/ffmpeg.exe', jobsDir: 'D:/renders' }, own: { theme: 'system', notifications: true, wizardDone: true }, version: '0.0.0' };
+    const settingsHandler = { values: { ffmpeg: 'D:/tools/ffmpeg.exe', raster: 'gpu', encoder: 'x264', workers: null, jobsDir: null }, file: 'D:/Multiplane/config.json', overrides: { ffmpeg: 'D:/tools/ffmpeg.exe', jobsDir: 'D:/renders' }, own: { theme: 'system', notifications: true, wizardDone: true }, version: version };
     ipcMain.removeHandler('settings'); ipcMain.handle('settings', () => settingsHandler);
     ipcMain.removeHandler('save-setting'); ipcMain.handle('save-setting', (_event, key, value, own) => { (own ? settingsHandler.own : settingsHandler.values)[key] = value; return settingsHandler; });
-    ipcMain.removeHandler('environment'); ipcMain.handle('environment', () => ({ command: { path: 'D:/tools/multiplane.cmd', version: '0.1.0', error: null }, skills: ['claude', 'codex'].map(host => ({ host, detected: true, target: host === 'claude' ? '~/.claude/skills/multiplane' : '~/.agents/skills/multiplane', state: 'missing', version: null, availableVersion: '0.0.0' })) }));
-  }, { home });
+    ipcMain.removeHandler('environment'); ipcMain.handle('environment', () => ({ command: { path: 'D:/tools/multiplane.cmd', version: version + '-external', error: null }, skills: ['claude', 'codex'].map(host => ({ host, detected: true, target: host === 'claude' ? '~/.claude/skills/multiplane' : '~/.agents/skills/multiplane', state: 'missing', version: null, availableVersion: version })) }));
+  }, { home, version: releasePackage.version });
   await page.reload(); await page.locator('[data-page="环境"]').click();
   await page.getByText('版本与软件不同，作业以 agent 实际调用的版本为准。').waitFor();
   assert.equal(await page.locator('[data-check=node] .check-status').innerText(), '可用（v24.21.0）');

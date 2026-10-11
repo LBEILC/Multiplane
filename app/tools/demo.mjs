@@ -1,3 +1,4 @@
+import releasePackage from '../../package.json' with { type: 'json' };
 import { errorCodes } from '../../src/errors.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +28,7 @@ export async function demo() {
     const image = path.join(jobDir, 'preview.png');
     const svg = `<svg width="480" height="270"><rect width="480" height="270" fill="#eeeeea"/><rect x="${id === 'verify' ? 220 : 180}" y="95" width="80" height="80" rx="8" fill="#555550"/><path d="M40 210H440" stroke="#aaa"/></svg>`;
     await sharp(Buffer.from(svg)).png().toFile(image);
-    const events = [event('start', { jobId, shot, version: '0.0.0', options: { root, workers: 1, raster: 'gpu', encoder: 'x264', scale: 1, from: 0, to: 2 } }), event('environment', { node: 'v24', platform: process.platform, chromium: 'demo', gpu: { renderer: 'demo', hardware: true }, ffmpeg: { version: 'demo', path: 'ffmpeg' } }), event('shot', { width: 480, height: 270, duration: 2, fps: 30, cuts: [], post: {} }), event('progress', { phase: 'capture', done: 24, total: 60, fps: 12, etaMs: 3000 })];
+    const events = [event('start', { jobId, shot, version: releasePackage.version, options: { root, workers: 1, raster: 'gpu', encoder: 'x264', scale: 1, from: 0, to: 2 } }), event('environment', { node: 'v24', platform: process.platform, chromium: 'demo', gpu: { renderer: 'demo', hardware: true }, ffmpeg: { version: 'demo', path: 'ffmpeg' } }), event('shot', { width: 480, height: 270, duration: 2, fps: 30, cuts: [], post: {} }), event('progress', { phase: 'capture', done: 24, total: 60, fps: 12, etaMs: 3000 })];
     const artifacts = []; let data = {};
     if (id === 'success') {
       const out = await run(process.execPath, ['bin/multiplane', 'render', 'examples/animation.html', '--workers', '1', '--job-dir', path.join(home, 'seed'), '--json'], { cwd: root, env: { ...process.env, MULTIPLANE_NO_INDEX: '1' } });
