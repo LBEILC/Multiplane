@@ -1,8 +1,11 @@
 // The driver owns platform I/O; this state machine is testable with a virtual clock.
 export const isOperable = s => !s.isMinimized && !s.isFullScreen && s.isVisible && s.isFocused;
 export const isNormal = s => isOperable(s) && !s.isMaximized;
+export const isZoomed = (s, before) => isOperable(s) && (s.isMaximized || (s.bounds && s.workArea && before.bounds &&
+  ['x', 'y', 'width', 'height'].some(key => Math.abs(s.bounds[key] - before.bounds[key]) > 2) &&
+  ['x', 'y', 'width', 'height'].every(key => Math.abs(s.bounds[key] - s.workArea[key]) <= 2)));
 
-export async function runWindowActions(driver, check, { mac = false, timeout = 10000, interval = 100,
+export async function runWindowActions(driver, check, { mac = false, timeout = 10000, interval = 100, stableFor = 500,
   now = () => performance.now(), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   check.states = [];
   check.zoomAttempts = [];
@@ -11,11 +14,35 @@ export async function runWindowActions(driver, check, { mac = false, timeout = 1
     check.lastState = state;
     return state;
   };
-  const wait = async (step, predicate) => {
+  const leaveFullScreen = async step => {
+    // The driver waits for Electron's leave-full-screen event, then geometry must settle.
+    await driver.command('leave-full-screen');
+    let previous, stableSince;
+    return wait(`${step}:leave-full-screen`, s => {
+      const key = JSON.stringify(s);
+      if (s.isFullScreen || key !== previous) stableSince = now();
+      previous = key;
+      return !s.isFullScreen && now() - stableSince >= stableFor;
+    }, false).catch(error => {
+      error.windowStateTimeout = false;
+      throw error;
+    });
+  };
+  const wait = async (step, predicate, recoverFullScreen = true, rejectFullScreen = false) => {
     const start = now();
     let state;
     do {
       state = await sample(step);
+      if (state.isFullScreen && recoverFullScreen) {
+        check.states.push({ step, status: 'unexpected-full-screen', state });
+        await leaveFullScreen(step);
+        state = await sample(step);
+        if (rejectFullScreen) {
+          const error = Error(`${step} entered full screen instead of zoom; exited and waited for stable state`);
+          error.windowStateTimeout = true;
+          throw error;
+        }
+      }
       if (predicate(state)) {
         check.states.push({ step, status: 'passed', state });
         return state;
@@ -31,8 +58,7 @@ export async function runWindowActions(driver, check, { mac = false, timeout = 1
   const ready = async (step, normal = false) => {
     let state = await sample(step);
     if (state.isFullScreen) {
-      await driver.command('leave-full-screen');
-      await wait(`${step}:leave-full-screen`, s => !s.isFullScreen);
+      await leaveFullScreen(step);
     }
     state = await sample(step);
     if (state.isMinimized) {
@@ -59,9 +85,9 @@ export async function runWindowActions(driver, check, { mac = false, timeout = 1
 
     let verifiedZoom = !mac;
     if (mac) {
-      // Only explicit AX action failures or an observed zoom timeout may degrade.
+      // Only an observed lack of zoom (including unintended full screen) may degrade.
       // Missing helpers, invalid JSON, permissions and lost windows remain hard failures.
-      for (const method of ['AXZoomWindow', 'Option+AXPress']) {
+      for (const method of ['AXZoomWindow']) {
         await ready(`before-zoom:${method}`, true);
         const attempt = { method, before: await sample(method) };
         check.zoomAttempts.push(attempt);
@@ -70,12 +96,10 @@ export async function runWindowActions(driver, check, { mac = false, timeout = 1
         if (typeof result?.ok !== 'boolean' || !Number.isInteger(result.axError)) throw Error(`Invalid AX result: ${JSON.stringify(result)}`);
         if (!result.ok) {
           if (result.kind !== 'ax-action-error' || !Number.isInteger(result.axError)) throw Error(`Invalid zoom failure: ${JSON.stringify(result)}`);
-          attempt.status = 'unavailable';
-          attempt.state = await sample(method);
-          continue;
         }
         try {
-          attempt.state = await wait(`maximize:${method}`, s => isOperable(s) && s.isMaximized);
+          // AX may return an error after successfully changing the native window.
+          attempt.state = await wait(`maximize:${method}`, s => isZoomed(s, attempt.before), true, true);
           attempt.status = 'passed';
           verifiedZoom = true;
           check.zoomMethod = method;

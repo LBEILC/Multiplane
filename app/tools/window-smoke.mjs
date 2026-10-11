@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import sharp from 'sharp';
 import { runWindowActions } from './window-actions.mjs';
+import { runAccessibilityAction } from './window-selection.mjs';
 
 const execute = promisify(execFile);
 const tool = name => fileURLToPath(new URL(name, import.meta.url));
@@ -63,7 +64,7 @@ async function geometry(app) {
     const bounds = win.getBounds(), content = win.getContentBounds();
     return { bounds, content, display: screen.getDisplayMatching(bounds), source: win.getMediaSourceId(),
       handle: (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString(),
-      electron: process.versions.electron, pid: process.pid };
+      electron: process.versions.electron, pid: process.pid, title: win.getTitle(), id: win.id };
   });
 }
 
@@ -132,6 +133,10 @@ export async function checkWindowControls(app, page, work, out, evidence) {
   let macHelper;
   try {
     const info = await geometry(app);
+    const macAction = (action, method = 'AXPress') => runAccessibilityAction(
+      async (operation, nativeMethod, index) => JSON.parse((await run(macHelper,
+        [String(info.pid), operation, info.title, ...(index === undefined ? [] : [nativeMethod, String(index)])])).stdout),
+      { pid: info.pid, title: info.title }, action, method, check);
     check.electron = info.electron;
     const lock = JSON.parse(await readFile(tool('../package.json'), 'utf8')).devDependencies.electron;
     assert.equal(info.electron, lock, 'Runtime Electron must match the locked version');
@@ -139,7 +144,7 @@ export async function checkWindowControls(app, page, work, out, evidence) {
     if (process.platform === 'darwin') {
       macHelper = path.join(work, 'window-accessibility');
       await execute('xcrun', ['swiftc', tool('window-accessibility.swift'), '-o', macHelper], { timeout: 120000 });
-      check.buttons = JSON.parse((await run(macHelper, [String(info.pid), 'inspect'])).stdout);
+      check.buttons = await macAction('inspect');
       // Compare visible brand children, not the padded wrapper that intentionally contains the lights.
       check.brand = await page.locator('.titlebar > .brand-lockup').evaluate(el => [...el.children].map(child => {
         const { x, y, width, height } = child.getBoundingClientRect(); return { x, y, width, height };
@@ -164,22 +169,33 @@ export async function checkWindowControls(app, page, work, out, evidence) {
       check.method = process.platform === 'win32' ? 'WM_SYSCOMMAND (native caption system commands)' : 'X11 window-manager commands (xdotool / wmctrl)';
     }
     const trigger = async (action, method = 'AXPress') => {
-      if (process.platform === 'darwin') return JSON.parse((await run(macHelper, [String(info.pid), action, method])).stdout);
+      if (process.platform === 'darwin') return macAction(action, method);
       else if (process.platform === 'win32') await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', tool('window-system.ps1'), '-WindowHandle', info.handle, '-OwnerPid', String(info.pid), '-Action', action]);
       else if (action === 'minimize') await run('xdotool', ['windowminimize', info.handle]);
       else if (action === 'close') await run('wmctrl', ['-i', '-c', info.handle]);
       else await run('wmctrl', ['-i', '-r', info.handle, '-b', `${action === 'maximize' ? 'add' : 'remove'},maximized_vert,maximized_horz`]);
     };
     await runWindowActions({
-      state: () => app.evaluate(({ BrowserWindow }) => {
-        const win = BrowserWindow.getAllWindows()[0];
+      state: () => app.evaluate(({ BrowserWindow, screen }, id) => {
+        const win = BrowserWindow.fromId(id);
         if (!win || win.isDestroyed()) throw Error('Smoke window is no longer available');
         return { isMinimized: win.isMinimized(), isMaximized: win.isMaximized(),
-          isFullScreen: win.isFullScreen(), isVisible: win.isVisible(), isFocused: win.isFocused() };
-      }),
-      command: action => app.evaluate(({ app, BrowserWindow }, action) => {
-        const win = BrowserWindow.getAllWindows()[0];
-        if (action === 'leave-full-screen') win.setFullScreen(false);
+          isFullScreen: win.isFullScreen(), isVisible: win.isVisible(), isFocused: win.isFocused(),
+          bounds: win.getBounds(), workArea: screen.getDisplayMatching(win.getBounds()).workArea };
+      }, info.id),
+      command: action => app.evaluate(async ({ app, BrowserWindow }, { action, id }) => {
+        const win = BrowserWindow.fromId(id);
+        if (action === 'leave-full-screen') {
+          await new Promise((resolve, reject) => {
+            const done = () => { clearTimeout(timer); resolve(); };
+            const timer = setTimeout(() => {
+              win.removeListener('leave-full-screen', done);
+              reject(Error('leave-full-screen event timed out after 10000ms'));
+            }, 10000);
+            win.once('leave-full-screen', done);
+            win.setFullScreen(false);
+          });
+        }
         // Electron restore maps to NSWindow deminiaturize for a minimized window.
         else if (action === 'deminiaturize') win.restore();
         else if (action === 'maximize') win.maximize();
@@ -188,7 +204,7 @@ export async function checkWindowControls(app, page, work, out, evidence) {
           if (process.platform === 'darwin') app.focus({ steal: true });
           win.show(); win.focus();
         } else throw Error('Unknown window setup action: ' + action);
-      }, action),
+      }, { action, id: info.id }),
       native: trigger,
       close: async () => {
         // Keep the child handle before close disposes Playwright's Electron dispatcher.
