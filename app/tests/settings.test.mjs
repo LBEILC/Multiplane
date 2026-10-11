@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, realpath } from 'node:fs/promises';
 import { Configuration, Skills, parseDoctor, rendererRoot, pathVersion } from '../src/main/settings.mjs';
 import { Preferences } from '../src/main/store.mjs';
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'multiplane-settings-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-settings-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const source = path.join(root, 'source'); await mkdir(source); await writeFile(path.join(source, 'SKILL.md'), 'v1');
   const user = path.join(root, 'user'); await mkdir(path.join(user, '.claude'), { recursive: true });

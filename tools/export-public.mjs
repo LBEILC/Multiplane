@@ -6,12 +6,28 @@ import { npm } from './process.mjs';
 
 export const excluded = name => ['AGENTS.md', 'docs/requirements.md', 'docs/internal.md', 'docs/design.md'].includes(name) || ['docs/roles/', 'docs/specs/', 'tools/reports/', '.claude/'].some(prefix => name.startsWith(prefix));
 const git = (root, args) => execFileSync('git', args, { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-async function noLinks(file) {
-  for (let current = path.resolve(file); ; current = path.dirname(current)) {
+async function noLinks(file, root) {
+  for (let current = path.resolve(file); current !== root; current = path.dirname(current)) {
     try { if ((await lstat(current)).isSymbolicLink()) throw Error(`Symbolic links are not allowed: ${file}`); }
     catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
-    if (current === path.dirname(current)) return;
+    if (current === path.dirname(current)) throw Error('Path is outside the validation root');
   }
+}
+export async function resolveExportPaths(root, output, { paths = path, canonical = realpath } = {}) {
+  // Resolve existing ancestors too: a new output may sit below an OS path alias.
+  const resolveOutput = async file => {
+    try { return await canonical(file); }
+    catch (error) {
+      const parent = paths.dirname(file);
+      if (error.code !== 'ENOENT' || parent === file) throw error;
+      return paths.join(await resolveOutput(parent), paths.basename(file));
+    }
+  };
+  root = await canonical(paths.resolve(root));
+  output = await resolveOutput(paths.resolve(output));
+  const relation = paths.relative(output, root);
+  if (!relation || (!relation.startsWith('..' + paths.sep) && relation !== '..' && !paths.isAbsolute(relation))) throw Error('Output cannot be the repository or its ancestor');
+  return { root, output };
 }
 function localLinks(source) {
   const text = source.replace(/^\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\1\s*$/gm, '').replace(/`[^`\n]+`/g, '');
@@ -23,15 +39,12 @@ function localLinks(source) {
 }
 export async function exportPublic(root, output, log = console.log, { message } = {}) {
   if (!output) throw Error('Usage: npm run export:public -- <output-directory>');
-  await noLinks(root); root = await realpath(root); output = path.resolve(output);
-  await noLinks(output);
-  const relation = path.relative(output, root);
-  if (!relation || (!relation.startsWith('..' + path.sep) && relation !== '..' && !path.isAbsolute(relation))) throw Error('Output cannot be the repository or its ancestor');
+  ({ root, output } = await resolveExportPaths(root, output));
   let incremental = false, previous = [];
   try {
     if (!(await lstat(output)).isDirectory()) throw Error('Output directory must be empty or a marked public repository');
     if ((await readdir(output)).length) {
-      await noLinks(path.join(output, '.git'));
+      await noLinks(path.join(output, '.git'), output);
       if (!(await lstat(path.join(output, '.git')).catch(() => null))?.isDirectory()) throw Error('Output directory must be empty or a marked public repository');
       let marker;
       try { marker = git(output, ['config', '--local', '--get', 'multiplane.publicExport']).trim(); } catch {}
@@ -61,7 +74,7 @@ export async function exportPublic(root, output, log = console.log, { message } 
   for (const name of files) {
     if (!['100644', '100755'].includes(tracked.get(name))) throw Error(`Symbolic links and submodules are not allowed: ${name}`);
     if (path.isAbsolute(name) || name.split('/').includes('..')) throw Error('Unsafe tracked path');
-    const file = path.join(root, name); await noLinks(file);
+    const file = path.join(root, name); await noLinks(file, root);
     const info = await lstat(file);
     if (!info.isFile()) throw Error(`Not a regular file: ${name}`);
     const bytes = await readFile(file);
@@ -100,7 +113,7 @@ export async function exportPublic(root, output, log = console.log, { message } 
       }
     };
     for (const entry of entries) {
-      const target = destination(entry.name); await noLinks(target);
+      const target = destination(entry.name); await noLinks(target, output);
       try {
         const info = await lstat(target);
         if (info.isDirectory()) {
@@ -110,7 +123,7 @@ export async function exportPublic(root, output, log = console.log, { message } 
         else if (!previous.includes(entry.name)) throw Error(`Export would replace an untracked file: ${entry.name}`);
       } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
     }
-    for (const name of previous) await noLinks(destination(name));
+    for (const name of previous) await noLinks(destination(name), output);
   }
   // Resolve identity and all validation before writing any output.
   const name = git(root, ['config', 'user.name']).trim(), email = git(root, ['config', 'user.email']).trim();

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, realpath, rename } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import { exportPublic } from '../tools/export-public.mjs';
+import { exportPublic, resolveExportPaths } from '../tools/export-public.mjs';
 
 async function fixture(t) {
-  const base = await mkdtemp(path.join(os.tmpdir(), 'multiplane-export-'));
+  const base = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-export-')));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'source'), output = path.join(base, 'public'); await mkdir(root);
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
@@ -51,17 +51,72 @@ test('rejects nonempty destinations without changing their contents', async t =>
   await assert.rejects(exportPublic(f.root, f.output, () => {}), /must be empty/);
   assert.equal(await readFile(path.join(f.output, 'keep'), 'utf8'), 'original');
   await assert.rejects(exportPublic(f.root, f.root), /ancestor/);
+  await assert.rejects(exportPublic(f.root, f.base), /ancestor/);
 });
-test('rejects symbolic output ancestors and tracked source directory junctions', async t => {
+test('resolves aliases above source and output, including nonexistent output descendants', async t => {
+  const f = await fixture(t), link = path.join(f.base, 'alias');
+  await symlink(f.base, link, process.platform === 'win32' ? 'junction' : 'dir');
+  const source = path.join(link, 'source');
+  await assert.rejects(exportPublic(source, f.root), /ancestor/);
+  await assert.rejects(exportPublic(f.root, source), /ancestor/);
+  await assert.rejects(exportPublic(source, link), /ancestor/);
+  const output = path.join(link, 'new', 'public');
+  await exportPublic(source, output, () => {});
+  assert.equal(await readFile(path.join(f.base, 'new/public/README.md'), 'utf8'), '[Guide](docs/protocol.md)\n');
+  await exportPublic(source, output, () => {}, { message: 'Export via alias' });
+  const outputLink = path.join(f.base, 'output-alias');
+  await symlink(path.join(f.base, 'new/public'), outputLink, process.platform === 'win32' ? 'junction' : 'dir');
+  await exportPublic(source, outputLink, () => {}, { message: 'Export via output root alias' });
+});
+
+test('canonical path comparison handles Windows drive aliases, short names and casing on every host', async () => {
+  const aliases = new Map([
+    ['C:\\TEMP\\SOURCE', 'D:\\Temp\\source'],
+    ['D:\\TEMP\\SOURCE', 'D:\\Temp\\source'],
+    ['D:\\TEM~1\\SOURCE', 'D:\\Temp\\source'],
+    ['C:\\TEMP', 'D:\\Temp'],
+    ['D:\\TEM~1', 'D:\\Temp'],
+    ['C:\\OTHER', 'C:\\Other']
+  ]);
+  const options = { paths: path.win32, canonical: async file => {
+    const result = aliases.get(file.toUpperCase());
+    if (!result) throw Object.assign(Error('Missing fixture path'), { code: 'ENOENT' });
+    return result;
+  } };
+  for (const output of ['C:\\Temp\\source', 'D:\\Temp\\source', 'd:\\temp\\SOURCE', 'D:\\TEM~1\\source', 'C:\\Temp', 'D:\\TEM~1']) {
+    await assert.rejects(resolveExportPaths('C:\\Temp\\source', output, options), /ancestor/);
+  }
+  assert.deepEqual(await resolveExportPaths('C:\\Temp\\source', 'C:\\Other\\new\\public', options), {
+    root: 'D:\\Temp\\source', output: 'C:\\Other\\new\\public'
+  });
+  assert.deepEqual(await resolveExportPaths('C:\\Temp\\source', 'D:\\TEM~1\\source-other', options), {
+    root: 'D:\\Temp\\source', output: 'D:\\Temp\\source-other'
+  });
+});
+
+test('rejects tracked source directory junctions beneath the canonical root', async t => {
   const f = await fixture(t), outside = path.join(f.base, 'outside'); await mkdir(outside);
-  const link = path.join(f.base, 'linked'); await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
-  await assert.rejects(exportPublic(f.root, path.join(link, 'public')), /Symbolic links/);
   await f.file('nested/item.txt', 'safe');
   await rm(path.join(f.root, 'nested'), { recursive: true });
   await writeFile(path.join(outside, 'item.txt'), 'safe');
   await symlink(outside, path.join(f.root, 'nested'), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(exportPublic(f.root, f.output), /Symbolic links/);
 });
+test('rejects junctions inside the public repository without changing their targets', async t => {
+  for (const name of ['docs', '.git']) {
+    const f = await fixture(t);
+    await exportPublic(f.root, f.output, () => {});
+    const original = path.join(f.output, name), outside = path.join(f.base, 'outside');
+    await rename(original, outside);
+    await symlink(outside, original, process.platform === 'win32' ? 'junction' : 'dir');
+    const file = path.join(outside, name === '.git' ? 'index' : 'protocol.md');
+    const before = await readFile(file);
+    // POSIX Git reports the directory-to-symlink change before file validation.
+    await assert.rejects(exportPublic(f.root, f.output, () => {}, { message: 'Update' }), /Symbolic links|clean working tree/);
+    assert.deepEqual(await readFile(file), before);
+  }
+});
+
 test('rejects indexed symlinks even when Windows checks them out as plain text', async t => {
   const f = await fixture(t); await f.file('link', 'README.md');
   const hash = f.git(['hash-object', 'link']).trim();

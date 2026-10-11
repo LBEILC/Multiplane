@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, chmod } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, chmod, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
@@ -36,7 +36,7 @@ test('packaging uses native targets, unsigned DMGs and standard renderer resourc
   assert.equal(rendererRoot(true, '/Applications/Multiplane.app/Contents/Resources', '/unused'), path.join('/Applications/Multiplane.app/Contents/Resources', 'renderer'));
 });
 test('POSIX PATH ignores nonexecutable files and runs a Node command without a shell', { skip: process.platform === 'win32' }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'multiplane-posix-path-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-posix-path-'))); t.after(() => rm(root, { recursive: true, force: true }));
   const first = path.join(root, 'first'), second = path.join(root, 'second'); await mkdir(first); await mkdir(second);
   await writeFile(path.join(first, 'multiplane'), 'not executable');
   const command = path.join(second, 'multiplane'); await writeFile(command, '#!/usr/bin/env node\nconsole.log("1.2.3");\n'); await chmod(command, 0o755);
