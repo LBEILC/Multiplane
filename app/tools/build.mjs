@@ -13,7 +13,8 @@ await Promise.all([
   copyFile('node_modules/remixicon/License', 'dist/ICON_LICENSE'),
   ...['LICENSE', 'REFERENCE_LICENSE', 'THIRD_PARTY_NOTICES.md'].map(file => copyFile(file, `dist/${file}`))
 ]);
-try { await checkFont(); } catch { try { await prepareFont(); } catch (e) { console.warn('Official font download unavailable:', e.message); } }
+if (process.env.MULTIPLANE_FONT_CACHE_ONLY === '1') await prepareFont();
+else try { await checkFont(); } catch { try { await prepareFont(); } catch (e) { console.warn('Official font download unavailable:', e.message); } }
 await copyFont('dist');
 
 await cp('build/icons', 'dist/brand', { recursive: true });

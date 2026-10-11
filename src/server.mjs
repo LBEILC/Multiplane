@@ -1,16 +1,16 @@
+import { normalizeResourcePath, isInsideResourceRoot } from './resource-path.mjs';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const root = process.cwd();
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json' };
-const inside = (base, target) => { const relative = path.relative(base, target); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 
 export async function startServer(port = 0, root = process.cwd()) {
-  const base = await realpath(root);
+  const base = await normalizeResourcePath(root);
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
@@ -29,13 +29,13 @@ export async function startServer(port = 0, root = process.cwd()) {
           resourcePath = pathname.slice('/multiplane/vendor/three'.length);
           if (!/^\/(build|examples\/jsm)\/.*\.js$/.test(resourcePath)) { res.writeHead(403); return res.end(); }
         } else { res.writeHead(404); return res.end(); }
-        resourceBase = await realpath(resourceRoot);
+        resourceBase = await normalizeResourcePath(resourceRoot);
       }
       let target = path.resolve(resourceRoot, `.${resourcePath}`);
-      if (!inside(resourceRoot, target)) { res.writeHead(403); return res.end(); }
+      if (!await isInsideResourceRoot(resourceRoot, target)) { res.writeHead(403); return res.end(); }
       if ((await stat(target)).isDirectory()) target = path.join(target, 'index.html');
-      target = await realpath(target);
-      if (!inside(resourceBase, target)) { res.writeHead(403); return res.end(); }
+      target = await normalizeResourcePath(target);
+      if (!await isInsideResourceRoot(resourceBase, target)) { res.writeHead(403); return res.end(); }
       const info = await stat(target);
       const contentType = { '.wav': 'audio/wav', '.srt': 'text/plain; charset=utf-8', '.mp4': 'video/mp4' }[path.extname(target)] ?? mime[path.extname(target)] ?? 'application/octet-stream';
       const headers = { 'Content-Type': contentType, 'Content-Length': info.size, 'Accept-Ranges': 'bytes' };

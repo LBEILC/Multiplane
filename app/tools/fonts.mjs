@@ -57,7 +57,7 @@ async function remoteEntry(request, url, pattern) {
   if (response.status !== 206) { throw Error('Official download no longer supports range requests'); }
   return unpack(response.bytes, entry.method);
 }
-export async function prepareFont({ file = fontFile, cacheOnly = false, ...network } = {}) {
+export async function prepareFont({ file = fontFile, cacheOnly = process.env.MULTIPLANE_FONT_CACHE_ONLY === '1', ...network } = {}) {
   try { await checkFont(file); console.log('Using verified MiSans cache.'); return; }
   catch (error) { if (cacheOnly) throw new Error('Cached MiSans verification failed: ' + error.message, { cause: error }); }
   const request = createRequester(network);
@@ -96,4 +96,4 @@ export async function copyFont(out, source = fontFile) {
   try { const bytes = await checkFont(source); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, bytes); return true; }
   catch (error) { await rm(target, { force: true }); console.warn(`Warning: MiSans is missing or has an incorrect SHA-256; using system fonts. Run npm run fonts. ${error.code || error.message}`); return false; }
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await prepareFont({ cacheOnly: process.argv.includes('--cache-only') });
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await prepareFont({ cacheOnly: process.argv.includes('--cache-only') || process.env.MULTIPLANE_FONT_CACHE_ONLY === '1' });

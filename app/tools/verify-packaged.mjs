@@ -10,11 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { run } from '../../tools/process.mjs';
 import { fontHash } from './fonts.mjs';
 import { verifyNotices } from './notices.mjs';
+import { findInstaller } from './installer-file.mjs';
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(appRoot, '..');
 const windows = process.platform === 'win32', mac = process.platform === 'darwin';
 const pkg = JSON.parse(await readFile(path.join(appRoot, 'package.json'), 'utf8'));
-const installer = path.join(appRoot, 'release', windows ? `Multiplane-Setup-${pkg.version}-x64.exe` : `Multiplane-${pkg.version}-${process.arch}.${mac ? 'dmg' : 'AppImage'}`);
+const installer = await findInstaller(path.join(appRoot, 'release'));
 const out = path.join(root, 'out/013-packaged'); await mkdir(out, { recursive: true });
 const require = createRequire(import.meta.url), { UUID } = require('builder-util-runtime');
 const { appId } = require('../electron-builder.config.cjs');

@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { browserClosed, crashedError, recoveryBudget, MAX_BROWSER_RESTARTS } from './browser-recovery.mjs';
-import { access, realpath } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { launchBrowser } from './environment.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { startServer } from './server.mjs';
+import { normalizeResourcePath, isInsideResourceRoot } from './resource-path.mjs';
 
 export function number(value, label, { positive = false } = {}) {
   const result = Number(value);
@@ -23,13 +24,17 @@ async function openShotOnce(shot, scale = 1, options = {}) {
   const raster = options.raster ?? 'gpu';
   if (!['software', 'gpu'].includes(raster)) throw invalidOption('--raster', '--raster must be software or gpu.');
   number(scale, '--scale', { positive: true });
-  const root = path.resolve(options.root ?? process.cwd());
-  const relative = path.relative(root, path.resolve(root, shot));
-  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new MultiplaneError('shot_outside_root');
-  if (path.extname(relative) !== '.html') throw invalidOption('shot', 'Shot must be an HTML file.');
-  try { await access(path.resolve(root, shot)); } catch { throw new MultiplaneError('shot_not_found'); }
-  const realRelative = path.relative(await realpath(root), await realpath(path.resolve(root, shot)));
-  if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) throw new MultiplaneError('shot_outside_root');
+  const inputRoot = path.resolve(options.root ?? process.cwd());
+  const root = await normalizeResourcePath(inputRoot);
+  const entry = path.resolve(inputRoot, shot);
+  if (!await isInsideResourceRoot(root, entry)) throw new MultiplaneError('shot_outside_root');
+  // Preserve the requested URL for in-root symlinks and their relative resources.
+  let relative = path.relative(inputRoot, entry);
+  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+    relative = path.relative(root, await normalizeResourcePath(entry));
+  }
+  if (path.extname(relative).toLowerCase() !== '.html') throw invalidOption('shot', 'Shot must be an HTML file.');
+  try { await access(entry); } catch { throw new MultiplaneError('shot_not_found'); }
   const server = await startServer(0, root);
   let browser, page, crashed = false;
   try {

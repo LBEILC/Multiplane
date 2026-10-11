@@ -59,10 +59,28 @@ test('wrong font hash never replaces the existing file; invalid cache hits never
     calls++;
     return new Response(String(url) === downloadPage ? '"/MiSans%20VF.ttf"' : 'wrong font');
   };
-  await assert.rejects(prepareFont({ file, fetchImpl }), /SHA-256.*refusing/);
+  await assert.rejects(prepareFont({ file, fetchImpl, cacheOnly: false }), /SHA-256.*refusing/);
   assert.equal(calls, 2); assert.equal(await readFile(file, 'utf8'), 'old');
   assert.deepEqual(await readdir(directory), ['MiSansVF.ttf']);
   calls = 0;
   await assert.rejects(prepareFont({ file, fetchImpl, cacheOnly: true }), /Cached MiSans verification failed/);
+  assert.equal(calls, 0);
+});
+
+test('CI cache-only mode rejects missing and corrupt fonts without network fallback', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'multiplane-font-offline-'));
+  const previous = process.env.MULTIPLANE_FONT_CACHE_ONLY;
+  process.env.MULTIPLANE_FONT_CACHE_ONLY = '1';
+  t.after(async () => {
+    if (previous === undefined) delete process.env.MULTIPLANE_FONT_CACHE_ONLY;
+    else process.env.MULTIPLANE_FONT_CACHE_ONLY = previous;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const file = path.join(directory, 'MiSansVF.ttf');
+  let calls = 0;
+  const fetchImpl = async () => { calls++; throw Error('Unexpected font network request'); };
+  await assert.rejects(prepareFont({ file, fetchImpl }), /Cached MiSans verification failed/);
+  await writeFile(file, 'corrupt');
+  await assert.rejects(prepareFont({ file, fetchImpl }), /Cached MiSans verification failed.*SHA-256/);
   assert.equal(calls, 0);
 });

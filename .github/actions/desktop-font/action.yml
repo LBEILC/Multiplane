@@ -1,5 +1,9 @@
 name: Verified desktop font
 description: Cache only the pinned official MiSans font and verify every cache hit
+inputs:
+  prepare:
+    description: Allow the Ubuntu prerequisite job to download and save a missing cache
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -12,20 +16,29 @@ runs:
       uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: app/build/fonts/MiSansVF.ttf
-        key: misans-${{ runner.os }}-${{ steps.font.outputs.sha256 }}
+        key: misans-v2-${{ steps.font.outputs.sha256 }}
+        enableCrossOsArchive: true
+        fail-on-cache-miss: ${{ inputs.prepare != 'true' }}
+    - name: Explain missing font cache
+      if: failure() && inputs.prepare != 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::error::Verified MiSans cache is missing. The Ubuntu prepare-font job must save the exact font cache before this job can run; downstream jobs never download fonts."
+        exit 1
     - name: Verify cached font without network access
       if: steps.cache.outputs.cache-hit == 'true'
       shell: bash
       working-directory: app
       run: node tools/fonts.mjs --cache-only
     - name: Download and verify official font
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: inputs.prepare == 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: app
       run: node tools/fonts.mjs
     - name: Save verified font
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: inputs.prepare == 'true' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: app/build/fonts/MiSansVF.ttf
-        key: misans-${{ runner.os }}-${{ steps.font.outputs.sha256 }}
+        key: misans-v2-${{ steps.font.outputs.sha256 }}
+        enableCrossOsArchive: true

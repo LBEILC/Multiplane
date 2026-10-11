@@ -1,5 +1,6 @@
+import { normalizeResourcePath, isInsideResourceRoot } from './resource-path.mjs';
 import path from 'node:path';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { parse as parseJS } from 'acorn';
 import { parse as parseHTML } from 'parse5';
 import postcss from 'postcss';
@@ -25,20 +26,19 @@ const rules = {
   lint_directive_invalid: ['warning', 'The lint directive has no valid rule codes.', 'List rule codes after multiplane-disable-next-line.'],
   lint_incomplete: ['warning', 'Source parsing failed.', 'Correct the source syntax to complete lint coverage.'],
 };
-const inside = (root, file) => { const p = path.relative(root, file); return p !== '..' && !p.startsWith('..' + path.sep) && !path.isAbsolute(p); };
 const children = node => Object.values(node).flatMap(v => Array.isArray(v) ? v : [v]).filter(v => v && typeof v.type === 'string');
 const walk = (node, fn, parents = []) => { fn(node, parents); for (const child of children(node)) walk(child, fn, [...parents, node]); };
 const member = n => n?.type === 'Identifier' ? n.name : n?.type === 'MemberExpression' && !n.computed ? `${member(n.object)}.${n.property.name}` : '';
 const literal = n => n?.type === 'Literal' && typeof n.value === 'string' ? n.value : n?.type === 'TemplateLiteral' && !n.expressions.length ? n.quasis[0].value.cooked : null;
 
 export async function scanShot(shot, options = {}) {
-  const root = await realpath(path.resolve(options.root ?? process.cwd()));
+  const root = await normalizeResourcePath(path.resolve(options.root ?? process.cwd()));
   const entry = path.resolve(root, shot);
-  if (!inside(root, entry)) throw new MultiplaneError('shot_outside_root');
+  if (!await isInsideResourceRoot(root, entry)) throw new MultiplaneError('shot_outside_root');
   let entryReal;
-  try { entryReal = await realpath(entry); if (!(await stat(entryReal)).isFile()) throw Error(); }
+  try { entryReal = await normalizeResourcePath(entry); if (!(await stat(entryReal)).isFile()) throw Error(); }
   catch { throw new MultiplaneError('shot_not_found'); }
-  if (!inside(root, entryReal)) throw new MultiplaneError('shot_outside_root');
+  if (!await isInsideResourceRoot(root, entryReal)) throw new MultiplaneError('shot_outside_root');
   const sources = new Map(), pending = [], findings = [], directives = new Map(), seen = new Set();
   const state = { stage: null, width: false, height: false, shot: false, define: null, runtime: false, fonts: false, fontFace: null, fontLoad: false };
   const location = (file, offset) => {
@@ -222,9 +222,9 @@ export async function scanShot(shot, options = {}) {
     try {
       const decoded = decodeURIComponent(url.split(/[?#]/)[0]);
       target = path.resolve(decoded.startsWith('/') ? root : path.dirname(file), decoded.replace(/^\//, ''));
-      if (!inside(root, target)) throw Error();
-      target = await realpath(target);
-      if (!inside(root, target) || !(await stat(target)).isFile()) throw Error();
+      if (!await isInsideResourceRoot(root, target)) throw Error();
+      target = await normalizeResourcePath(target);
+      if (!await isInsideResourceRoot(root, target) || !(await stat(target)).isFile()) throw Error();
     } catch { add('resource_missing', file, offset); continue; }
     if (kind) await scan(target, kind);
   }

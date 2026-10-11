@@ -4,7 +4,22 @@ on:
 permissions:
   contents: read
 jobs:
+  prepare-font:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Prepare verified cross-platform font cache
+        uses: ./.github/actions/desktop-font
+        with:
+          prepare: 'true'
   package:
+    needs: prepare-font
     strategy:
       fail-fast: false
       matrix:
@@ -21,6 +36,7 @@ jobs:
     timeout-minutes: 50
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      MULTIPLANE_FONT_CACHE_ONLY: '1'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       MULTIPLANE_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
@@ -31,6 +47,8 @@ jobs:
         with:
           node-version: '24'
           architecture: ${{ matrix.arch }}
+      - name: Verified desktop font
+        uses: ./.github/actions/desktop-font
       - name: FFmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg --yes --no-progress
@@ -46,8 +64,6 @@ jobs:
         run: node tools/ci-run.mjs renderer-install . npm ci
       - name: Desktop dependencies and tests
         uses: ./.github/actions/desktop-test
-      - name: Verified desktop font
-        uses: ./.github/actions/desktop-font
       - name: Package for the native host architecture
         run: node tools/ci-run.mjs desktop-dist app npm run dist
       - name: Verify installed application (Windows and macOS)
@@ -65,7 +81,11 @@ jobs:
             app/release/*.exe
             app/release/*.dmg
             app/release/*.AppImage
-            out/ci/
-            out/013-packaged/
+            out/ci/**/*.log
+            out/ci/**/*.json
+            out/ci/**/*.png
+            out/013-packaged/**/*.log
+            out/013-packaged/**/*.json
+            out/013-packaged/**/*.png
           if-no-files-found: warn
           retention-days: 14
