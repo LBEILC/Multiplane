@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Typography</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>
+@font-face{font-family:ExampleSans;src:url('./assets/Roboto-Variable.ttf') format('truetype');font-weight:100 900;font-display:swap}
+#stage{width:640px;height:360px;background:#eee;color:#222;font-family:ExampleSans,sans-serif}
+h1{position:absolute;left:48px;top:72px;font-size:48px;font-weight:400;margin:0}
+p{position:absolute;left:48px;top:168px;font-size:24px;margin:0}
+</style>
+<div id="stage"><h1>Multiplane</h1><p>Frames in time</p></div>
+<script src="/multiplane/runtime/shot.js"></script>
+<script>
+const heading = document.querySelector('h1'), line = document.querySelector('p');
+Shot.define({ duration: 2, fps: 12, fonts: [['48px ExampleSans', 'MultiplaneFrames in time']],
+  render(t) { heading.style.transform = `translateX(${24 * t}px)`; line.style.opacity = String(Math.min(1, t * 2)); }
+});
+</script></html>

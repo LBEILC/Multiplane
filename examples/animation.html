@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Geometry</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>#stage{width:640px;height:360px}#shape{position:absolute;top:140px;width:80px;height:80px;background:#888}</style>
+<div id="stage"><div id="shape"></div></div>
+<script src="/multiplane/runtime/shot.js"></script>
+<script>
+// TODO(design): Review the neutral examples before publication.
+const stage = document.querySelector('#stage'), shape = document.querySelector('#shape');
+Shot.define({ duration: 2, fps: 12, cuts: [1], post: { motionBlur: 5, shutter: 0.8, grain: 0 },
+  render(t) {
+    stage.style.background = t < 1 ? '#eee' : '#222';
+    shape.style.borderRadius = t < 1 ? '0' : '50%';
+    shape.style.transform = `translateX(${40 + 480 * (t < 1 ? t : t - 1)}px)`;
+  }
+});
+</script></html>

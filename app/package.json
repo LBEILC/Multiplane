@@ -1,0 +1,31 @@
+{
+  "name": "multiplane-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "start": "npm run build && electron .",
+    "demo": "npm run build && node tools/demo.mjs",
+    "shots": "npm run build && node tools/shots.mjs",
+    "shots:settings": "npm run build && node tools/settings-shots.mjs",
+    "test": "tsc --noEmit && node --test tests/*.test.mjs",
+    "brand": "node tools/brand.mjs",
+    "brand:verify": "node tools/verify-brand.mjs",
+    "fonts": "node tools/fonts.mjs",
+    "dist": "node tools/dist.mjs",
+    "verify:packaged": "node tools/verify-packaged.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "electron": "43.7.5",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.27.3",
+    "typescript": "5.9.3"
+  },
+  "dependencies": { "remixicon": "4.9.1" },
+  "allowScripts": { "esbuild@0.27.3": true }
+}

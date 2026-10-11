@@ -1,0 +1,65 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      MULTIPLANE_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress
+      - name: FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: FFmpeg and Xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg xvfb
+      - name: Renderer dependencies
+        run: node tools/ci-run.mjs renderer-install . npm ci
+      - name: Chromium (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install chromium
+      - name: Chromium and system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install --with-deps chromium
+      - name: Renderer tests
+        run: node tools/ci-run.mjs renderer-test . npm test
+      - name: Desktop dependencies
+        run: node tools/ci-run.mjs desktop-install app npm ci
+      - name: Desktop type check and tests
+        run: node tools/ci-run.mjs desktop-test app npm test
+      - name: Desktop build
+        run: node tools/ci-run.mjs desktop-build app npm run build
+      - name: Desktop smoke (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: node tools/ci-run.mjs desktop-smoke app node tools/smoke.mjs
+      - name: Desktop smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node tools/ci-run.mjs desktop-smoke app node tools/smoke.mjs
+      - name: Test logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-${{ matrix.os }}
+          path: out/ci/
+          if-no-files-found: warn
+          retention-days: 14

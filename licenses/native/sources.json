@@ -1,0 +1,240 @@
+{
+  "sharp": "0.35.5",
+  "platform": "win32-x64",
+  "entries": [
+    {
+      "component": "aom",
+      "version": "3.15.1",
+      "file": "aom-LICENSE",
+      "url": "https://aomedia.googlesource.com/aom/+/refs/tags/v3.15.1/LICENSE?format=TEXT",
+      "encoding": "base64",
+      "sha256": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2"
+    },
+    {
+      "component": "aom",
+      "version": "3.15.1",
+      "file": "aom-PATENTS",
+      "url": "https://aomedia.googlesource.com/aom/+/refs/tags/v3.15.1/PATENTS?format=TEXT",
+      "encoding": "base64",
+      "sha256": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61"
+    },
+    {
+      "component": "archive",
+      "version": "3.8.9",
+      "file": "archive-COPYING",
+      "url": "https://raw.githubusercontent.com/libarchive/libarchive/v3.8.9/COPYING",
+      "sha256": "30e556b3959e3985d66efefec5eaac51d4995053caa1d3cffe6eb916f146f229"
+    },
+    {
+      "component": "cairo",
+      "version": "1.18.6",
+      "file": "cairo-COPYING",
+      "url": "https://gitlab.freedesktop.org/cairo/cairo/-/raw/1.18.6/COPYING",
+      "sha256": "67228a9f7c5f9b67c58f556f1be178f62da4d9e2e6285318d8c74d567255abdf"
+    },
+    {
+      "component": "cairo",
+      "version": "1.18.6",
+      "file": "cairo-COPYING-MPL-1.1",
+      "url": "https://gitlab.freedesktop.org/cairo/cairo/-/raw/1.18.6/COPYING-MPL-1.1",
+      "sha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f"
+    },
+    {
+      "component": "cgif",
+      "version": "0.5.4",
+      "file": "cgif-LICENSE",
+      "url": "https://raw.githubusercontent.com/dloebl/cgif/v0.5.4/LICENSE",
+      "sha256": "7264dede477abab4ac3fe8236beb8153845c04ccd33b18f281085087e219fc6d"
+    },
+    {
+      "component": "exif",
+      "version": "0.6.26",
+      "file": "exif-COPYING",
+      "url": "https://raw.githubusercontent.com/libexif/libexif/v0.6.26/COPYING",
+      "sha256": "36b6d3fa47916943fd5fec313c584784946047ec1337a78b440e5992cb595f89"
+    },
+    {
+      "component": "expat",
+      "version": "2.8.5",
+      "file": "expat-COPYING",
+      "url": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_8_5/expat/COPYING",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+    },
+    {
+      "component": "ffi",
+      "version": "3.8.0",
+      "file": "ffi-LICENSE",
+      "url": "https://raw.githubusercontent.com/libffi/libffi/v3.8.0/LICENSE",
+      "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+    },
+    {
+      "component": "fontconfig",
+      "version": "2.18.3",
+      "file": "fontconfig-COPYING",
+      "url": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/raw/2.18.3/COPYING",
+      "sha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067"
+    },
+    {
+      "component": "freetype",
+      "version": "2.14.3",
+      "file": "freetype-FTL.TXT",
+      "url": "https://raw.githubusercontent.com/freetype/freetype/VER-2-14-3/docs/FTL.TXT",
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f"
+    },
+    {
+      "component": "fribidi",
+      "version": "1.0.17",
+      "file": "fribidi-COPYING",
+      "url": "https://raw.githubusercontent.com/fribidi/fribidi/v1.0.17/COPYING",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    {
+      "component": "glib",
+      "version": "2.90.0",
+      "file": "glib-COPYING",
+      "url": "https://raw.githubusercontent.com/GNOME/glib/2.90.0/LICENSES/LGPL-2.1-or-later.txt",
+      "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb"
+    },
+    {
+      "component": "harfbuzz",
+      "version": "14.5.0",
+      "file": "harfbuzz-COPYING",
+      "url": "https://raw.githubusercontent.com/harfbuzz/harfbuzz/14.5.0/COPYING",
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+    },
+    {
+      "component": "highway",
+      "version": "1.4.0",
+      "file": "highway-LICENSE",
+      "url": "https://raw.githubusercontent.com/google/highway/1.4.0/LICENSE",
+      "sha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af"
+    },
+    {
+      "component": "heif",
+      "version": "1.23.5",
+      "file": "heif-COPYING",
+      "url": "https://raw.githubusercontent.com/strukturag/libheif/v1.23.5/COPYING",
+      "sha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596"
+    },
+    {
+      "component": "imagequant",
+      "version": "2.4.1",
+      "file": "imagequant-COPYRIGHT",
+      "url": "https://raw.githubusercontent.com/lovell/libimagequant/v2.4.1/COPYRIGHT",
+      "sha256": "7391bfbcde4404cefb9849553362c3ab436f929f5cc1abb57071ec045590ee99"
+    },
+    {
+      "component": "lcms",
+      "version": "2.19.1",
+      "file": "lcms-COPYING",
+      "url": "https://raw.githubusercontent.com/mm2/Little-CMS/lcms2.19.1/LICENSE",
+      "sha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31"
+    },
+    {
+      "component": "mozjpeg",
+      "version": "0826579",
+      "file": "mozjpeg-LICENSE.md",
+      "url": "https://raw.githubusercontent.com/mozilla/mozjpeg/0826579/LICENSE.md",
+      "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430"
+    },
+    {
+      "component": "pango",
+      "version": "1.58.2",
+      "file": "pango-COPYING",
+      "url": "https://raw.githubusercontent.com/GNOME/pango/1.58.2/COPYING",
+      "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+    },
+    {
+      "component": "pixman",
+      "version": "0.46.4",
+      "file": "pixman-COPYING",
+      "url": "https://gitlab.freedesktop.org/pixman/pixman/-/raw/pixman-0.46.4/COPYING",
+      "sha256": "fac9270f0987b96ff4533fca3548c633e02083cbba4a0172a3b149b2e4019793"
+    },
+    {
+      "component": "png",
+      "version": "1.6.58",
+      "file": "png-LICENSE",
+      "url": "https://raw.githubusercontent.com/pnggroup/libpng/v1.6.58/LICENSE",
+      "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526"
+    },
+    {
+      "component": "proxy-libintl",
+      "version": "0.5",
+      "file": "proxy-libintl-COPYING",
+      "url": "https://raw.githubusercontent.com/frida/proxy-libintl/0.5/COPYING",
+      "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+    },
+    {
+      "component": "rsvg",
+      "version": "2.63.2",
+      "file": "rsvg-COPYING.LIB",
+      "url": "https://raw.githubusercontent.com/GNOME/librsvg/2.63.2/COPYING.LIB",
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    },
+    {
+      "component": "tiff",
+      "version": "4.7.2",
+      "file": "tiff-LICENSE.md",
+      "url": "https://gitlab.com/libtiff/libtiff/-/raw/v4.7.2/LICENSE.md",
+      "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade"
+    },
+    {
+      "component": "uhdr",
+      "version": "2.0.2",
+      "file": "uhdr-LICENSE",
+      "url": "https://raw.githubusercontent.com/google/libultrahdr/v2.0.2/LICENSE",
+      "sha256": "c9247b5cb07866938643cc238292434e6f2af8642e1fce10771c0e4cc7909316"
+    },
+    {
+      "component": "vips",
+      "version": "8.18.7",
+      "file": "vips-COPYING",
+      "url": "https://raw.githubusercontent.com/libvips/libvips/v8.18.7/LICENSE",
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    },
+    {
+      "component": "webp",
+      "version": "1.6.0",
+      "file": "webp-COPYING",
+      "url": "https://raw.githubusercontent.com/webmproject/libwebp/v1.6.0/COPYING",
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+    },
+    {
+      "component": "webp",
+      "version": "1.6.0",
+      "file": "webp-PATENTS",
+      "url": "https://raw.githubusercontent.com/webmproject/libwebp/v1.6.0/PATENTS",
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    },
+    {
+      "component": "xml2",
+      "version": "2.15.4",
+      "file": "xml2-Copyright",
+      "url": "https://raw.githubusercontent.com/GNOME/libxml2/v2.15.4/Copyright",
+      "sha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626"
+    },
+    {
+      "component": "zlib-ng",
+      "version": "2.3.3",
+      "file": "zlib-ng-LICENSE.md",
+      "url": "https://raw.githubusercontent.com/zlib-ng/zlib-ng/2.3.3/LICENSE.md",
+      "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee"
+    },
+    {
+      "component": "nsgif",
+      "bundledWith": "vips",
+      "version": "8.18.7",
+      "file": "nsgif-COPYING",
+      "url": "https://raw.githubusercontent.com/libvips/libvips/v8.18.7/libvips/foreign/libnsgif/COPYING",
+      "sha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c"
+    },
+    {
+      "component": "mozjpeg",
+      "version": "0826579",
+      "file": "README.ijg",
+      "url": "https://raw.githubusercontent.com/mozilla/mozjpeg/0826579/README.ijg",
+      "sha256": "f4a85f8677ca4e41b185c0a9f7c31a30ddb9ce43c561483ee92ef12db37c2a10"
+    }
+  ]
+}

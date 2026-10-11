@@ -1,0 +1,9 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+#stage {
+  position: absolute; left: 0; top: 0;
+  width: 1920px; height: 1080px;
+  transform-origin: 0 0;
+  overflow: hidden;
+  background: var(--paper, #fff);
+}
+#stage > svg { display: block; }

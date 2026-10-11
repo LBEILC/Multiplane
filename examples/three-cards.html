@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Cards</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>#stage{width:640px;height:360px;background:#ddd}</style>
+<script type="importmap">{"imports":{"three":"/multiplane/vendor/three/build/three.module.js","three/addons/":"/multiplane/vendor/three/examples/jsm/"}}</script>
+<div id="stage"></div>
+<script src="/multiplane/runtime/shot.js"></script>
+<script type="module">
+import { createThreeLayer } from '/multiplane/three.js';
+const layer = createThreeLayer({ samples: 16, maxSamples: 64, aperture: 0.12, focusDistance: 10 });
+const cards = [-2, 0, 2].map((z, i) => layer.card({ src: './assets/card.svg', width: 2.5, height: 2.5,
+  position: [(i - 1) * 2.3, 0, z], rotation: [0, (i - 1) * 0.2, 0] }));
+window.EXAMPLE_LAYER = layer;
+Shot.define({ duration: 2, fps: 12, setup: () => layer.ready,
+  render(t) { cards.forEach((card, i) => { card.position.y = Math.sin(t + i) * 0.3; }); layer.render({ t, focusDistance: 10 - t }); }
+});
+</script></html>

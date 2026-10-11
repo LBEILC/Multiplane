@@ -1,0 +1,4 @@
+# npm normalizes the executable shebang; keep the entire entry point consistent.
+bin/multiplane text eol=lf
+# Preserve upstream license bytes so the checked provenance hashes remain valid.
+licenses/native/* -text

@@ -1,0 +1,59 @@
+#!/usr/bin/env node
+import { renderShot, stillsShot, verifyShot, lintShot, doctor, statusJob, cancelJob } from '../src/index.mjs';
+import { postArgs, scaleArgs } from '../src/post.mjs';
+import { createEvents, version } from '../src/events.mjs';
+import { asError, invalidOption } from '../src/errors.mjs';
+
+const args = process.argv.slice(2), json = args.includes('--json');
+const common = [...postArgs, ...scaleArgs, 'fps', 'raster', 'root', 'job-dir', 'no-lint', 'overwrite'];
+const allowed = {
+  render: [...common, 'out', 'from', 'to', 'workers', 'encoder', 'max-bitrate', 'audio', 'audio-offset', 'ffmpeg'],
+  stills: [...common, 'out', 'at', 'every'], verify: [...common, 'out', 'at', 'workers'],
+  lint: ['root'], doctor: ['ffmpeg', 'raster'], status: ['job-dir'], cancel: ['job-dir', 'wait'],
+};
+let reported = false;
+const onEvent = event => {
+  if (event.type === 'result') reported = true;
+  if (json) process.stdout.write(JSON.stringify(event) + '\n');
+  else if (event.type === 'result') {
+    if (event.ok) console.log(JSON.stringify(event.data, null, 2));
+    else console.error(event.code + ': ' + event.message + (event.hint ? '\n' + event.hint : ''));
+  } else if (['progress', 'warning', 'finding'].includes(event.type)) console.error(JSON.stringify(event));
+};
+let command = args[0] ?? 'doctor';
+try {
+  if (args.length === 1 && args[0] === '--version') console.log(version);
+  else if (args.length === 0 || args[0] === '--help') {
+    console.log('Usage: multiplane <render|stills|verify|lint> <shot.html> [--json] [--option value]\n'
+      + '       multiplane <status|cancel> <jobId|jobDir> [--json] [--wait seconds]\n'
+      + '       multiplane doctor [--json] [--ffmpeg path]\n'
+      + Object.entries(allowed).map(([name, flags]) => name + ': ' + flags.map(f => '--' + f).join(' ')).join('\n'));
+  } else {
+    if (!allowed[command]) throw invalidOption('command', 'Unknown command: ' + command);
+    if (args.includes('--help')) {
+      console.log('Usage: multiplane ' + command + (command === 'doctor' ? '' : ['status', 'cancel'].includes(command) ? ' <jobId|jobDir>' : ' <shot.html>') + ' [options]\nOptions: --json --help ' + allowed[command].map(f => '--' + f + (['overwrite', 'no-lint', 'no-post'].includes(f) ? '' : ' <value>')).join(' '));
+    } else {
+      const needsTarget = command !== 'doctor';
+      const target = needsTarget ? args[1] : undefined;
+      if (needsTarget && (!target || target.startsWith('--'))) throw invalidOption('target', 'Provide a shot or job path.');
+      const flags = args.slice(needsTarget ? 2 : 1), options = {};
+      for (let i = 0; i < flags.length;) {
+        const flag = flags[i], key = flag.replace(/^--/, '');
+        if (!flag.startsWith('--') || !(allowed[command].includes(key) || key === 'json') || key in options) throw invalidOption(flag, 'Invalid or duplicate option: ' + flag);
+        if (['json', 'no-post', 'overwrite', 'no-lint'].includes(key)) { options[key] = true; i++; }
+        else {
+          if (flags[i + 1] === undefined || flags[i + 1].startsWith('--')) throw invalidOption(flag, 'Missing option value: ' + flag);
+          options[key] = flags[i + 1]; i += 2;
+        }
+      }
+      delete options.json;
+      options.onEvent = onEvent;
+      const action = { render: renderShot, stills: stillsShot, verify: verifyShot, lint: lintShot, doctor, status: statusJob, cancel: cancelJob }[command];
+      if (needsTarget) await action(target, options); else await action(options);
+    }
+  }
+} catch (failure) {
+  const error = asError(failure);
+  if (!reported) createEvents(command, null, { onEvent }).finish({}, error);
+  process.exitCode = error.exitCode;
+}
