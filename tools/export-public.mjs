@@ -1,5 +1,6 @@
+import { nativeRealpath } from './native-realpath.mjs';
 import { execFileSync } from 'node:child_process';
-import { readFile, lstat, realpath, mkdir, readdir, writeFile, rm, rmdir, chmod } from 'node:fs/promises';
+import { readFile, lstat, mkdir, readdir, writeFile, rm, rmdir, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { npm } from './process.mjs';
@@ -13,7 +14,7 @@ async function noLinks(file, root) {
     if (current === path.dirname(current)) throw Error('Path is outside the validation root');
   }
 }
-export async function resolveExportPaths(root, output, { paths = path, canonical = realpath } = {}) {
+export async function resolveExportPaths(root, output, { paths = path, canonical = nativeRealpath } = {}) {
   // Resolve existing ancestors too: a new output may sit below an OS path alias.
   const resolveOutput = async file => {
     try { return await canonical(file); }

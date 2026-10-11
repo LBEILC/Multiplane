@@ -1,3 +1,4 @@
+import { useShortTempDirectory } from '../../tests/short-path.mjs';
 import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -99,7 +100,8 @@ test('npm command shim version is executed as an argument array without shell', 
 });
 
 const linkDirectory = (target, link) => symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir');
-for (const host of ['claude', 'codex']) for (const level of ['user', 'agent', 'skills']) test(`${host}: linked ${level} ancestor supports install, update, backup and removal in the real root`, async t => {
+for (const shortTemp of [false, true]) for (const host of ['claude', 'codex']) for (const level of ['user', 'agent', 'skills']) test(`${host}: linked ${level} ancestor supports install, update, backup and removal in the real root${shortTemp ? ' with a real 8.3 system temp path' : ''}`, { skip: shortTemp && process.platform !== 'win32' }, async t => {
+  if (shortTemp && !await useShortTempDirectory(t)) return;
   const f = await fixture(t), physical = path.join(f.root, 'physical'); await mkdir(physical);
   const agent = host === 'claude' ? '.claude' : '.agents';
   await mkdir(path.join(f.user, agent), { recursive: true });

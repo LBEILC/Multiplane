@@ -1,4 +1,5 @@
-import { readdir, readFile, realpath } from 'node:fs/promises';
+import { nativeRealpath } from '../../tools/native-realpath.mjs';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -10,7 +11,7 @@ export async function verifyRendererBundle(source, destination) {
       if (entry.isDirectory()) { await walk(relative); continue; }
       if (entry.isSymbolicLink()) {
         // npm creates executable shims as symlinks on POSIX systems.
-        const resolved = await realpath(path.join(source, relative));
+        const resolved = await nativeRealpath(path.join(source, relative));
         const inside = path.relative(source, resolved);
         if (inside === '..' || inside.startsWith('..' + path.sep) || path.isAbsolute(inside)) throw Error(`Renderer symlink escapes bundle: ${relative}`);
       }

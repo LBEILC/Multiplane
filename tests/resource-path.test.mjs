@@ -2,7 +2,7 @@ import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, symlink, rm } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { windowsShortPath } from './short-path.mjs';
 import path from 'node:path';
 import { normalizeResourcePath, isInsideResourceRoot, relativeResourcePath } from '../src/resource-path.mjs';
 import { scanShot } from '../src/lint.mjs';
@@ -53,15 +53,8 @@ test('Windows comparison folds case and preserves cross-drive and UNC boundaries
 
 test('real Windows short names work in lint, server and CLI rendering with identical pixels', { skip: process.platform !== 'win32' }, async t => {
   const { root, work } = await fixture(t);
-  const short = execFileSync('powershell.exe', ['-NoProfile', '-Command', `
-    Add-Type -TypeDefinition 'using System; using System.Text; using System.Runtime.InteropServices; public class ShortPath { [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern uint GetShortPathName(string path, StringBuilder result, uint size); }';
-    $result = New-Object System.Text.StringBuilder 32768;
-    if ([ShortPath]::GetShortPathName($env:MULTIPLANE_SHORT_PATH, $result, 32768) -eq 0) { throw 'GetShortPathName failed'; }
-    $result.ToString()
-  `], {
-    encoding: 'utf8', windowsHide: true, env: { ...process.env, MULTIPLANE_SHORT_PATH: root }
-  }).trim();
-  if (!short.includes('~')) { t.skip('The test volume has no 8.3 aliases'); return; }
+  const short = windowsShortPath(root);
+  if (!path.basename(short).includes('~')) { t.skip('The test volume has no 8.3 aliases'); return; }
   // This is the old lint comparison that rejected a valid shot before reading it.
   assert.ok(path.relative(await normalizeResourcePath(root), path.join(short, 'shot.html')).startsWith('..'));
   assert.equal(await normalizeResourcePath(short), await normalizeResourcePath(root));

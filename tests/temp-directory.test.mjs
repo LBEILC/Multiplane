@@ -1,13 +1,31 @@
+import { nativeRealpath } from '../tools/native-realpath.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { readdir, readFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
+import { normalizeResourcePath } from '../src/resource-path.mjs';
+import { useShortTempDirectory } from './short-path.mjs';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
 import { createTempDirectory } from './helpers.mjs';
 import { createTempDirectory as createAppTempDirectory } from '../app/tests/helpers.mjs';
 
 const forbidden = new Set(['tmpdir', 'mkdtemp', 'mkdtempSync', 'mkdtempDisposable', 'mkdtempDisposableSync']);
+
+for (const [name, create] of [['renderer', createTempDirectory], ['desktop', createAppTempDirectory]]) {
+  test(`${name} temporary-directory helper expands the real Windows short system temp path`, { skip: process.platform !== 'win32' }, async t => {
+    const fixture = await useShortTempDirectory(t);
+    if (!fixture) return;
+    const directory = create('child-');
+    assert.equal(path.dirname(directory), fixture.long);
+    assert.equal(directory, await normalizeResourcePath(directory));
+    const target = create('target-'), link = path.join(fixture.short, 'alias');
+    await symlink(target, link, 'junction');
+    const linked = create(path.join(link, 'child-'));
+    assert.equal(linked, await nativeRealpath(linked));
+    assert.equal(path.dirname(linked), target);
+  });
+}
 
 function bypassesHelper(source) {
   const tree = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
@@ -63,7 +81,7 @@ test('both temporary-directory helpers resolve a linked parent immediately', asy
   await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir');
   for (const create of [createTempDirectory, createAppTempDirectory]) {
     const directory = create(path.join(link, 'child-'));
-    assert.equal(directory, await realpath(directory));
+    assert.equal(directory, await nativeRealpath(directory));
     assert.equal(path.dirname(directory), target);
   }
 });
