@@ -9,7 +9,7 @@ English · [简体中文](README.zh-CN.md)
 
 A local, headless HTML video renderer for AI agents. **A shot is an ordinary web page**: the page implements `render(t)`, and the image depends only on time `t`. Multiplane captures frames with headless Chromium, applies post-processing such as supersampling, motion blur, and film grain, encodes video with FFmpeg, and checks whether a shot is deterministic.
 
-> This is a pre-release (`0.0.0`), not yet published to npm. Interfaces may change before v0.1. Windows has been verified on a real machine; macOS and Linux are being brought up through CI and are not verified yet.
+> This is a pre-release (`0.0.0`), not yet published to npm. Interfaces may change before v0.1. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine.
 
 The name comes from Disney's multiplane camera: flat artwork placed at different depths, photographed frame by frame with real depth of field. Here, this corresponds to layered web content, a 3D card layer, and accumulated depth of field.
 
@@ -206,7 +206,7 @@ npm --prefix app start
 - `verify` uses sampling: by default, it checks frames near 0%, 25%, 50%, and 75% of the duration, plus consecutive frames from the first second. Passing does not mean every time has been checked.
 - Adaptive motion blur estimates the sample count from image changes. It is an approximation.
 - Output is currently limited to opaque video (H.264 / HEVC, MP4).
-- Windows 10/11 has been verified on a real machine. macOS and Linux run the same test suite in CI; until that is green on all three, treat them as unverified.
+- The renderer and desktop app pass the same test suite in CI on Windows, macOS (Apple silicon) and Linux (x64, X11 under Xvfb). Windows 10/11 has also been verified on a real machine; macOS and Linux have not yet been tried on real machines, and Wayland has not been tested. CI on Linux has no GPU, so it covers software rasterization there; GPU rasterization on Linux is untested.
 
 ## Related projects
 
