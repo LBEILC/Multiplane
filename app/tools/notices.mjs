@@ -2,6 +2,7 @@ import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { ensureElectron } from './electron.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 async function packageRoots(modules) {
@@ -36,6 +37,7 @@ async function allFiles(root, prefix = '') {
   return files.sort();
 }
 export async function generateNotices(root, app, renderer, output) {
+  await ensureElectron(app);
   const entries = [], inventory = [];
   const add = async (source, name) => {
     const bytes = await readFile(source);

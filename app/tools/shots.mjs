@@ -1,3 +1,4 @@
+import { ensureElectron } from './electron.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -14,7 +15,7 @@ const require = createRequire(path.join(root, 'package.json'));
 const { _electron } = require('playwright');
 const fixture = await demo(), out = path.join(root, 'out', 'app-shots'); await mkdir(out, { recursive: true });
 await writeFile(path.join(fixture.appData, 'preferences.json'), JSON.stringify({ theme: 'system', notifications: true, hidden: [], wizardDone: true }));
-const electron = await _electron.launch({ args: [path.join(root, 'app')], executablePath: (await import('electron')).default, env: fixture.env });
+const electron = await _electron.launch({ args: [path.join(root, 'app')], executablePath: await ensureElectron(), env: fixture.env });
 const errors = []; const evidence = { screenshots: [], notifications: [], real: {} };
 let child;
 try {

@@ -8,7 +8,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "build": "node tools/build.mjs",
-    "start": "npm run build && electron .",
+    "start": "node tools/electron.mjs && npm run build && electron .",
     "demo": "npm run build && node tools/demo.mjs",
     "shots": "npm run build && node tools/shots.mjs",
     "shots:settings": "npm run build && node tools/settings-shots.mjs",

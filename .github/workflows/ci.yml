@@ -45,6 +45,8 @@ jobs:
         run: node tools/ci-run.mjs renderer-test . npm test
       - name: Desktop dependencies and tests
         uses: ./.github/actions/desktop-test
+      - name: Verified desktop font
+        uses: ./.github/actions/desktop-font
       - name: Desktop build
         run: node tools/ci-run.mjs desktop-build app npm run build
       - name: Desktop smoke (Windows and macOS)

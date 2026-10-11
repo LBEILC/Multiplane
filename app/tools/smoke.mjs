@@ -1,5 +1,5 @@
 import { _electron } from 'playwright';
-import electron from 'electron';
+import { ensureElectron } from './electron.mjs';
 import { mkdir, mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -27,7 +27,7 @@ let app, page, windowManager;
 const errors = [], evidence = { platform: process.platform, arch: process.arch, args: args.slice(1), screenshots: [], wholeWindow: { status: 'not-attempted', reason: 'Smoke stopped before native capture' }, windowControls: { status: 'not-attempted', reason: 'Smoke stopped before window-control checks' } };
 try {
   windowManager = await ensureWindowManager(evidence);
-  app = await _electron.launch({ executablePath: electron, args, env });
+  app = await _electron.launch({ executablePath: await ensureElectron(), args, env });
   page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => document.documentElement.dataset.platform);
   assert.equal(await page.locator('html').getAttribute('data-platform'), process.platform);

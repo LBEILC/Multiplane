@@ -5,9 +5,11 @@ import { createRequire } from 'node:module';
 import { checkFont, prepareFont } from './fonts.mjs';
 import { generateNotices } from './notices.mjs';
 import { npm, run } from '../../tools/process.mjs';
+import { ensureElectron } from './electron.mjs';
 
 const app = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(app, '..');
 process.chdir(app);
+await ensureElectron(app);
 if (!['win32', 'darwin', 'linux'].includes(process.platform) || !['arm64', 'x64'].includes(process.arch)) throw Error('Unsupported packaging host');
 const pkg = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
 const rendererPackage = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));

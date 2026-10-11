@@ -1,5 +1,5 @@
 import { _electron } from 'playwright';
-import electronPath from 'electron';
+import { ensureElectron } from './electron.mjs';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,7 +12,7 @@ for (const dir of [home, data, path.join(user, '.claude'), path.join(user, '.cod
 const env = { ...process.env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data, MULTIPLANE_TEST_USER_HOME: user, USERPROFILE: user, HOME: user, CODEX_HOME: path.join(user, '.codex'), CLAUDE_CONFIG_DIR: path.join(user, '.claude'), MULTIPLANE_FFMPEG: 'Z:/missing/ffmpeg.exe', MULTIPLANE_JOBS_DIR: 'D:/renders' };
 delete env.ELECTRON_RUN_AS_NODE;
 const out = path.join(root, 'out', '008-settings'); await mkdir(out, { recursive: true });
-const app = await _electron.launch({ executablePath: electronPath, args: [path.join(root, 'app')], env });
+const app = await _electron.launch({ executablePath: await ensureElectron(), args: [path.join(root, 'app')], env });
 const evidence = { screenshots: [], realDoctor: {}, checks: [] }, errors = [];
 try {
   const page = await app.firstWindow(); page.setDefaultTimeout(30000); page.on('pageerror', e => errors.push(e.message));

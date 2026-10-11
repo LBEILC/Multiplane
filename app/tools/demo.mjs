@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile, copyFile, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import electron from 'electron';
+import { ensureElectron } from './electron.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const require = createRequire(path.join(root, 'package.json'));
 const sharp = require('sharp');
@@ -64,5 +64,5 @@ export async function demo() {
   return { home, appData, env };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const fixture = await demo(); await run(electron, ['.'], { cwd: path.join(root, 'app'), env: fixture.env, stdio: 'inherit' });
+  const fixture = await demo(); await run(await ensureElectron(), ['.'], { cwd: path.join(root, 'app'), env: fixture.env, stdio: 'inherit' });
 }

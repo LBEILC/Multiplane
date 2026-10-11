@@ -1,0 +1,31 @@
+name: Verified desktop font
+description: Cache only the pinned official MiSans font and verify every cache hit
+runs:
+  using: composite
+  steps:
+    - name: Font cache identity
+      id: font
+      shell: bash
+      run: node --input-type=module -e "import { appendFileSync } from 'node:fs'; import { fontHash } from './app/tools/fonts.mjs'; appendFileSync(process.env.GITHUB_OUTPUT, 'sha256=' + fontHash + '\n');"
+    - name: Restore verified font
+      id: cache
+      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: app/build/fonts/MiSansVF.ttf
+        key: misans-${{ runner.os }}-${{ steps.font.outputs.sha256 }}
+    - name: Verify cached font without network access
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      working-directory: app
+      run: node tools/fonts.mjs --cache-only
+    - name: Download and verify official font
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: app
+      run: node tools/fonts.mjs
+    - name: Save verified font
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: app/build/fonts/MiSansVF.ttf
+        key: misans-${{ runner.os }}-${{ steps.font.outputs.sha256 }}

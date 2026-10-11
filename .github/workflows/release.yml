@@ -46,6 +46,8 @@ jobs:
         run: node tools/ci-run.mjs renderer-install . npm ci
       - name: Desktop dependencies and tests
         uses: ./.github/actions/desktop-test
+      - name: Verified desktop font
+        uses: ./.github/actions/desktop-font
       - name: Package for the native host architecture
         run: node tools/ci-run.mjs desktop-dist app npm run dist
       - name: Verify installed application (Windows and macOS)
