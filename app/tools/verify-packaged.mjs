@@ -35,11 +35,16 @@ await cp(path.join(root, 'examples/animation.html'), path.join(project, 'animati
 const env = { ...process.env, ...(windows ? {} : { HOME: user, XDG_CACHE_HOME: path.join(work, 'cache') }), ...(mac || windows ? {} : { APPIMAGE_EXTRACT_AND_RUN: '1' }), MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data, MULTIPLANE_TEST_USER_HOME: user, LOCALAPPDATA: path.join(work, 'local') };
 delete env.ELECTRON_RUN_AS_NODE; delete env.MULTIPLANE_JOBS_DIR; delete env.MULTIPLANE_NO_INDEX;
 delete env.PLAYWRIGHT_BROWSERS_PATH;
+// Playwright also accepts npm config aliases. Do not let them bypass isolation.
+delete env.npm_config_playwright_browsers_path; delete env.npm_package_config_playwright_browsers_path;
+// Always isolate the platform default, including on runners with preinstalled browsers.
+// The packaged app, downloader and renderer inherit the same LOCALAPPDATA/HOME/XDG_CACHE_HOME.
 const browserCache = windows ? path.join(env.LOCALAPPDATA, 'ms-playwright') : mac ? path.join(user, 'Library/Caches/ms-playwright') : path.join(env.XDG_CACHE_HOME, 'ms-playwright');
 const resources = windows ? path.join(installation, 'resources') : mac ? path.join(installation, 'Multiplane.app/Contents/Resources') : path.join(installation, 'resources');
 const executable = windows ? path.join(installation, 'Multiplane.exe') : mac ? path.join(installation, 'Multiplane.app/Contents/MacOS/Multiplane') : installer;
 const launchArgs = !windows && !mac && process.env.MULTIPLANE_NO_SANDBOX === '1' ? ['--no-sandbox'] : [];
 const evidence = { platform: process.platform, arch: process.arch, launchArgs, appImageExtractAndRun: env.APPIMAGE_EXTRACT_AND_RUN === '1', version: pkg.version, screenshots: [], checks: [], work, install: false, uninstall: false };
+evidence.browserDownload = { cache: browserCache, isolation: windows ? 'LOCALAPPDATA' : mac ? 'HOME' : 'XDG_CACHE_HOME', before: null, after: null };
 let application, installed = false;
 async function bytesIn(dir) {
   let size = 0;
@@ -51,6 +56,8 @@ async function waitFor(predicate, message, timeout = 30000) {
   while (!await predicate()) { if (Date.now() >= end) throw Error(message); await new Promise(resolve => setTimeout(resolve, 200)); }
 }
 try {
+  evidence.browserDownload.cacheExistedBefore = await exists(browserCache);
+  assert.equal(evidence.browserDownload.cacheExistedBefore, false, 'Verification requires a fresh isolated browser cache; existing caches must never be removed');
   if (windows) await run(installer, ['/S', '/currentuser', `/D=${installation}`], { env, timeout: 120000 });
   else if (mac) { await mkdir(installation); await run('hdiutil', ['attach', installer, '-nobrowse', '-readonly', '-mountpoint', installation]); }
   else {
@@ -60,6 +67,26 @@ try {
   installed = true; evidence.install = true;
   console.log('Temporary installation completed; checking bundled files and licenses.');
   const renderer = path.join(resources, 'renderer');
+  // Ask the bundled Playwright in the packaged runtime, rather than trusting our path calculation.
+  const probe = `const {createRequire}=require('node:module'); const path=require('node:path'); const fs=require('node:fs');
+    const req=createRequire(path.join(process.argv[1],'package.json'));
+    const core=createRequire(req.resolve('playwright-core/package.json'));
+    const {registry:{registry}}=core('./lib/coreBundle');
+    console.log(JSON.stringify(['chromium','chromium-headless-shell'].map(name=>{
+      const entry=registry.findExecutable(name), executable=entry.executablePath();
+      return {name,directory:entry.directory,executable,exists:fs.existsSync(executable),complete:fs.existsSync(path.join(entry.directory,'INSTALLATION_COMPLETE'))};
+    })));`;
+  const browserState = async () => {
+    const result = await run(executable, ['-e', probe, renderer], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, capture: true });
+    const entries = JSON.parse(result.stdout.trim());
+    for (const entry of entries) assert.equal(path.dirname(entry.directory), browserCache, 'Packaged Playwright must use the isolated platform cache');
+    return entries;
+  };
+  evidence.browserDownload.before = await browserState();
+  for (const entry of evidence.browserDownload.before) {
+    assert.equal(entry.exists, false, 'Chromium must be absent before the UI download');
+    assert.equal(entry.complete, false, 'No completed browser installation may be reused');
+  }
   assert.ok(await exists(executable)); assert.equal(await exists(path.join(renderer, 'node_modules/three')), false);
   assert.equal(JSON.parse(await readFile(path.join(renderer, 'package.json'))).version, pkg.version);
   assert.ok((await readdir(path.join(renderer, `node_modules/@img/sharp-${process.platform}-${process.arch}/lib`))).some(name => /^sharp-.*\.node$/.test(name)));
@@ -90,6 +117,7 @@ try {
   });
   await page.getByRole('button', { name: '安装浏览器', exact: true }).click();
   await waitFor(async () => { const state = await page.evaluate(() => window.multiplane.browserInstallState()); return state.running && state.text.includes('Downloading'); }, 'Browser download did not start', 60000);
+  evidence.browserDownload.progressObserved = true;
   await page.getByRole('button', { name: '取消安装', exact: true }).click();
   await waitFor(async () => !(await page.evaluate(() => window.multiplane.browserInstallState())).running, 'Browser cancellation did not finish');
   await waitFor(async () => !await exists(path.join(browserCache, '__dirlock')), 'Cancellation left the Playwright cache locked');
@@ -98,6 +126,11 @@ try {
   await waitFor(async () => { const state = await page.evaluate(() => window.multiplane.browserInstallState()); return !state.running && (state.text === '浏览器安装完成' || state.text.startsWith('安装失败')); }, 'Browser download did not finish', 300000);
   const browserResult = await page.evaluate(() => window.multiplane.browserInstallState());
   assert.equal(browserResult.text, '浏览器安装完成', browserResult.text);
+  evidence.browserDownload.after = await browserState();
+  for (const entry of evidence.browserDownload.after) {
+    assert.equal(entry.exists, true, 'UI download must create the Chromium executable');
+    assert.equal(entry.complete, true, 'UI download must complete the browser installation');
+  }
   await page.waitForFunction(() => document.querySelector('[data-check=browser] .check-status')?.textContent.startsWith('可用'));
   evidence.checks.push('Fresh browser download: official confirmation, progress, cancellation, lock release, retry and successful installation into the default cache under isolated platform cache');
   const doctor = await page.evaluate(() => window.multiplane.doctor());

@@ -44,13 +44,8 @@ jobs:
           sudo apt-get install --yes ffmpeg xvfb
       - name: Renderer dependencies
         run: node tools/ci-run.mjs renderer-install . npm ci
-      - name: Chromium system libraries (Linux)
-        if: runner.os == 'Linux'
-        run: node tools/ci-run.mjs chromium-deps . node node_modules/playwright/cli.js install-deps chromium
-      - name: Desktop dependencies
-        run: node tools/ci-run.mjs desktop-install app npm ci
-      - name: Desktop type check and tests
-        run: node tools/ci-run.mjs desktop-test app npm test
+      - name: Desktop dependencies and tests
+        uses: ./.github/actions/desktop-test
       - name: Package for the native host architecture
         run: node tools/ci-run.mjs desktop-dist app npm run dist
       - name: Verify installed application (Windows and macOS)

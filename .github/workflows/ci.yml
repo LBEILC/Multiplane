@@ -43,10 +43,8 @@ jobs:
         run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install --with-deps chromium
       - name: Renderer tests
         run: node tools/ci-run.mjs renderer-test . npm test
-      - name: Desktop dependencies
-        run: node tools/ci-run.mjs desktop-install app npm ci
-      - name: Desktop type check and tests
-        run: node tools/ci-run.mjs desktop-test app npm test
+      - name: Desktop dependencies and tests
+        uses: ./.github/actions/desktop-test
       - name: Desktop build
         run: node tools/ci-run.mjs desktop-build app npm run build
       - name: Desktop smoke (Windows and macOS)

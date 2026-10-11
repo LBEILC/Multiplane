@@ -1,0 +1,11 @@
+name: Desktop dependencies and tests
+description: Install desktop dependencies and isolated test browsers, then type check and test
+runs:
+  using: composite
+  steps:
+    - name: Desktop dependencies
+      shell: bash
+      run: node tools/ci-run.mjs desktop-install app npm ci
+    - name: Desktop type check and tests
+      shell: bash
+      run: node tools/ci-run.mjs desktop-test . node tools/desktop-test.mjs
