@@ -80,7 +80,7 @@
 | 0 | 成功 | — |
 | 1 | 镜头或检查不通过 | `shot_not_found`、`shot_outside_root`、`shot_load_failed`（HTTP 或脚本错误）、`shot_contract_invalid`（缺 `SHOT`、`render` 不是函数、`duration`/`fps`/`cuts` 不合法等）、`stage_size_invalid`（缺 `#stage`、尺寸不是正整数或随视口变化）、`ready_timeout`、`render_threw`（`render(t)` 抛错，`details` 带 `t`）、`resource_failed`（字体或素材加载失败）、`nondeterministic_output`、`lint_failed`、`cancel_timeout`（`cancel --wait` 到时作业仍未结束） |
 | 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` 找不到作业或快照损坏） |
-| 3 | 环境问题 | `ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node` |
+| 3 | 环境问题 | `ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
 | 4 | 渲染器内部 | `worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败；已知时带 `details.t`）、`encode_failed`、`internal_error` |
 | 130 | 被取消 | `cancelled` |
 

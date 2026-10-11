@@ -28,6 +28,7 @@ test('browser download uses bundled Playwright, shared cache, output events and 
   assert.equal(calls[0].options.env.PLAYWRIGHT_BROWSERS_PATH, undefined);
   assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, '1');
   assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.cwd, os.tmpdir());
   child.stdout.write('50% downloaded'); assert.match(installer.state.text, /50%/);
   await installer.cancel();
   assert.deepEqual(installer.state, { running: false, text: '已取消安装' });

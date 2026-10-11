@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { packagedLaunch, packagedNodeCommand } from '../tools/packaged-launch.mjs';
 import { bundledInvocation } from '../src/main/settings.mjs';
+import os from 'node:os';
 
 test('Linux probes bypass AppImage and AppRun while GUI retains its sandbox flags', () => {
   for (const noSandbox of [true, false]) {
@@ -38,7 +39,8 @@ test('app doctor and render use the running binary, never the APPIMAGE wrapper o
       const command = bundledInvocation(root, args, execPath, env);
       assert.equal(command.file, execPath);
       assert.deepEqual(command.args, [path.join(root, 'bin/multiplane'), ...args]);
-      assert.equal(command.options.cwd, root);
+      assert.equal(command.options.cwd, os.tmpdir());
+      assert.equal(bundledInvocation(root, args, execPath, env, '/temporary-project').options.cwd, '/temporary-project');
       assert.deepEqual(command.options.env, { ...env, ELECTRON_RUN_AS_NODE: '1' });
       assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);
     }

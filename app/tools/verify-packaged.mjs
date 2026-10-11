@@ -12,6 +12,7 @@ import { fontHash } from './fonts.mjs';
 import { verifyNotices } from './notices.mjs';
 import { findInstaller } from './installer-file.mjs';
 import { packagedLaunch, packagedNodeCommand } from './packaged-launch.mjs';
+import { fileSnapshot } from './file-snapshot.mjs';
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(appRoot, '..');
 const windows = process.platform === 'win32', mac = process.platform === 'darwin';
@@ -48,6 +49,7 @@ const executable = launch.gui, launchArgs = launch.guiArgs;
 const evidence = { platform: process.platform, arch: process.arch, launchArgs, appImageExtractAndRun: env.APPIMAGE_EXTRACT_AND_RUN === '1', version: pkg.version, screenshots: [], checks: [], work, install: false, uninstall: false };
 evidence.browserDownload = { cache: browserCache, isolation: windows ? 'LOCALAPPDATA' : mac ? 'HOME' : 'XDG_CACHE_HOME', before: null, after: null };
 let application, installed = false;
+const snapshots = new Map();
 async function bytesIn(dir) {
   let size = 0;
   for (const item of await readdir(dir, { withFileTypes: true })) size += item.isDirectory() ? await bytesIn(path.join(dir, item.name)) : (await stat(path.join(dir, item.name))).size;
@@ -67,6 +69,7 @@ try {
     await chmod(installer, 0o755); await run(installer, ['--appimage-extract'], { cwd: work, env: extractionEnv, capture: true });
   }
   installed = true; evidence.install = true;
+  snapshots.set(installation, await fileSnapshot(installation));
   console.log('Temporary installation completed; checking bundled files and licenses.');
   const renderer = path.join(resources, 'renderer');
   // Ask the bundled Playwright in the packaged runtime, rather than trusting our path calculation.
@@ -118,6 +121,8 @@ try {
     assert.notEqual(evidence.runtime.execPath, installer, 'App must call the mounted Electron binary, not the AppImage shell');
     assert.equal(path.basename(evidence.runtime.execPath), 'multiplane-desktop');
     assert.equal(evidence.runtime.renderer, path.join(path.dirname(evidence.runtime.execPath), 'resources/renderer'));
+    const runtimeInstallation = path.dirname(evidence.runtime.execPath);
+    if (runtimeInstallation !== installation) snapshots.set(runtimeInstallation, await fileSnapshot(runtimeInstallation));
   }
   const page = await application.firstWindow(); page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -194,11 +199,13 @@ try {
     const { bundledCommand, rendererRoot } = require(app.getAppPath());
     const path = require('node:path');
     const root = rendererRoot(app.isPackaged, process.resourcesPath, app.getAppPath());
-    return bundledCommand(root, ['render', path.join(project, 'animation.html'), '--root', project, '--workers', '1', '--to', '0.5', '--json']);
+    return bundledCommand(root, ['render', path.join(project, 'animation.html'), '--root', project, '--job-dir', path.join(project, 'out/jobs'), '--workers', '1', '--to', '0.5', '--json'], process.env, project);
   }, { project });
   assert.equal(rendered.code, 0, rendered.stderr || rendered.stdout);
   const events = rendered.stdout.trim().split('\n').map(JSON.parse), result = events.at(-1);
   assert.equal(result.ok, true); assert.equal(result.data.frames, 6);
+  for (const artifact of result.artifacts) assert.ok(artifact.path.startsWith(project + path.sep), 'Render artifacts must stay in the temporary project');
+  assert.ok(await exists(path.join(project, 'out/jobs', result.jobId, 'status.json')));
   evidence.render = { command: result.command, ok: result.ok, frames: result.data.frames, bundledRenderer: true, launchedByAppMain: true, execPath: evidence.runtime.execPath, renderer: evidence.runtime.renderer };
   console.log('Packaged renderer produced the real verification video.');
   await page.locator('[data-page="作业"]').click();
@@ -209,6 +216,11 @@ try {
   await shot('job.png');
   evidence.checks.push('Installed renderer produced a real six-frame video, listed and playable in packaged UI');
   assert.deepEqual(errors, []);
+  // AppImage extract-and-run may remove its runtime tree on exit.
+  for (const [directory, before] of snapshots) if (directory !== installation) {
+    assert.deepEqual(await fileSnapshot(directory), before, 'Runtime installation changed during verification');
+    snapshots.delete(directory);
+  }
   await application.close(); application = undefined;
   if (process.platform === 'linux') {
     // Also observe AppRun's default policy, independently of the CI GUI override.
@@ -231,6 +243,14 @@ try {
   throw error;
 } finally {
   if (application) await application.close();
+  let snapshotError;
+  if (snapshots.has(installation)) {
+    try {
+      assert.deepEqual(await fileSnapshot(installation), snapshots.get(installation), 'Installed files changed during verification');
+      evidence.installationUnchanged = true;
+      evidence.checks.push('Installation file inventory, SHA-256 contents and modification metadata unchanged');
+    } catch (error) { snapshotError = error; evidence.installationUnchanged = false; evidence.failure ??= error.message; }
+  }
   if (windows && (installed || await exists(path.join(installation, 'Uninstall Multiplane.exe')))) {
     // Let NSIS copy itself outside the installation, then wait for its worker to finish.
     await run(path.join(installation, 'Uninstall Multiplane.exe'), ['/S', '/currentuser'], { env, timeout: 120000 });
@@ -246,5 +266,6 @@ try {
     evidence.uninstall = true; evidence.checks.push(mac ? 'DMG detached; no system installation was created' : 'AppImage extraction removed; no system installation was created');
   }
   await writeFile(path.join(out, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n');
+  if (snapshotError) throw snapshotError;
 }
 console.log(JSON.stringify({ ...evidence, work: '<temporary verification directory>' }, null, 2));

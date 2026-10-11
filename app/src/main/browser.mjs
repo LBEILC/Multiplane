@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import { userError } from '../shared/errors.mjs';
 import { spawn } from 'node:child_process';
 
@@ -17,7 +18,7 @@ export class BrowserInstaller {
     this.publish({ running: true, text: '正在连接 Playwright 下载服务…' });
     // Keep certificate checks enabled; scope the Electron/BoringSSL compatibility setting to downloads.
     const tls = process.platform === 'win32' ? ['--tls-max-v1.2'] : [];
-    const child = this.child = this.launch(process.execPath, [...tls, this.worker, path.join(this.root, 'node_modules/playwright/cli.js'), 'install', 'chromium'], { cwd: this.root, env, shell: false, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    const child = this.child = this.launch(process.execPath, [...tls, this.worker, path.join(this.root, 'node_modules/playwright/cli.js'), 'install', 'chromium'], { cwd: os.tmpdir(), env, shell: false, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     const output = bytes => this.publish({ text: (this.state.text + '\n' + bytes.toString().replace(/\x1b\[[0-9;]*m/g, '')).slice(-6000) });
     child.stdout.on('data', output); child.stderr.on('data', output);
     child.once('error', error => { this.child = null; this.publish({ running: false, text: `安装失败：${userError(error)}` }); });

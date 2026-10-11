@@ -2,7 +2,7 @@ import path from 'node:path';
 import { checkLint } from './lint.mjs';
 import { requireNewOutput, directoryOutput } from './artifacts.mjs';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, mkdirSync, renameSync, writeFileSync, existsSync, statSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, renameSync, writeFileSync, existsSync, statSync, readFileSync, unlinkSync } from 'node:fs';
 import { stopSignals, ffmpegName } from './platform.mjs';
 import { asError, MultiplaneError, invalidOption } from './errors.mjs';
 import { defaultWorkers } from './render-pool.mjs';
@@ -18,11 +18,22 @@ export function createEvents(command, shot, options = {}, job = false) {
   const artifacts = [];
   if (job) {
     const stamp = startedAt.replaceAll('-', '').replaceAll(':', '').replace('T', '-').slice(0, 15);
-    mkdirSync(jobDirectory(options), { recursive: true });
-    for (;;) {
-      jobId = `${stamp}-${path.parse(shot).name}-${randomBytes(2).toString('hex')}`;
-      directory = path.join(jobDirectory(options), jobId);
-      try { mkdirSync(directory); break; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    try {
+      mkdirSync(jobDirectory(options), { recursive: true });
+      for (;;) {
+        jobId = `${stamp}-${path.parse(shot).name}-${randomBytes(2).toString('hex')}`;
+        directory = path.join(jobDirectory(options), jobId);
+        try { mkdirSync(directory); break; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+      }
+      // Exercise actual file creation, writing and removal before launching a browser.
+      const probe = path.join(directory, '.write-check');
+      writeFileSync(probe, 'write check', { flag: 'wx' });
+      unlinkSync(probe);
+    } catch (cause) {
+      throw new MultiplaneError('job_dir_unwritable', undefined, {
+        cause, details: { path: jobDirectory(options) },
+        hint: 'Use --job-dir or MULTIPLANE_JOBS_DIR to select a writable job directory.',
+      });
     }
     options.out = path.resolve(options.out ?? (command === 'render' ? path.join(directory, `${path.parse(shot).name}.mp4`) : path.join(directory, command)));
   }
