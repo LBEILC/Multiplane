@@ -9,6 +9,9 @@ import { JobStore, Preferences, homeDirectory } from './store.mjs';
 import type { Job, Snapshot } from '../shared/types';
 import { BrowserInstaller } from './browser.mjs';
 
+// Main-process verification uses the same functions as doctor, without adding IPC.
+export { bundledCommand, rendererRoot };
+
 protocol.registerSchemesAsPrivileged([{ scheme: 'multiplane-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 if (process.env.MULTIPLANE_APP_DATA) app.setPath('userData', path.resolve(process.env.MULTIPLANE_APP_DATA));
 let win: BrowserWindow;

@@ -18,7 +18,13 @@ export function execute(file, args, { env = process.env, cwd, timeout = 60000 } 
   });
 }
 export function bundledCommand(root, args, env = process.env) {
-  return execute(process.execPath, [path.join(root, 'bin', 'multiplane'), ...args], { cwd: root, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } });
+  const command = bundledInvocation(root, args, process.execPath, env);
+  return execute(command.file, command.args, command.options);
+}
+// execPath is the running Electron binary, including inside an AppImage mount.
+// APPIMAGE and the GUI's process.argv must never replace it or supply Node flags.
+export function bundledInvocation(root, args, execPath, env) {
+  return { file: execPath, args: [path.join(root, 'bin', 'multiplane'), ...args], options: { cwd: root, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } } };
 }
 export async function findCommand(name, env = process.env) {
   const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];

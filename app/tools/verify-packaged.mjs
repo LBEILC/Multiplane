@@ -11,6 +11,7 @@ import { run } from '../../tools/process.mjs';
 import { fontHash } from './fonts.mjs';
 import { verifyNotices } from './notices.mjs';
 import { findInstaller } from './installer-file.mjs';
+import { packagedLaunch, packagedNodeCommand } from './packaged-launch.mjs';
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(appRoot, '..');
 const windows = process.platform === 'win32', mac = process.platform === 'darwin';
@@ -42,8 +43,8 @@ delete env.npm_config_playwright_browsers_path; delete env.npm_package_config_pl
 // The packaged app, downloader and renderer inherit the same LOCALAPPDATA/HOME/XDG_CACHE_HOME.
 const browserCache = windows ? path.join(env.LOCALAPPDATA, 'ms-playwright') : mac ? path.join(user, 'Library/Caches/ms-playwright') : path.join(env.XDG_CACHE_HOME, 'ms-playwright');
 const resources = windows ? path.join(installation, 'resources') : mac ? path.join(installation, 'Multiplane.app/Contents/Resources') : path.join(installation, 'resources');
-const executable = windows ? path.join(installation, 'Multiplane.exe') : mac ? path.join(installation, 'Multiplane.app/Contents/MacOS/Multiplane') : installer;
-const launchArgs = !windows && !mac && process.env.MULTIPLANE_NO_SANDBOX === '1' ? ['--no-sandbox'] : [];
+const launch = packagedLaunch(process.platform, installation, installer, process.env.MULTIPLANE_NO_SANDBOX === '1');
+const executable = launch.gui, launchArgs = launch.guiArgs;
 const evidence = { platform: process.platform, arch: process.arch, launchArgs, appImageExtractAndRun: env.APPIMAGE_EXTRACT_AND_RUN === '1', version: pkg.version, screenshots: [], checks: [], work, install: false, uninstall: false };
 evidence.browserDownload = { cache: browserCache, isolation: windows ? 'LOCALAPPDATA' : mac ? 'HOME' : 'XDG_CACHE_HOME', before: null, after: null };
 let application, installed = false;
@@ -78,15 +79,24 @@ try {
       return {name,directory:entry.directory,executable,exists:fs.existsSync(executable),complete:fs.existsSync(path.join(entry.directory,'INSTALLATION_COMPLETE'))};
     })));`;
   const browserState = async () => {
-    const result = await run(executable, ['-e', probe, renderer], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, capture: true });
+    const command = packagedNodeCommand(launch.node, ['-e', probe, renderer], env);
+    const result = await run(command.file, command.args, { env: command.env, capture: true });
     const entries = JSON.parse(result.stdout.trim());
     for (const entry of entries) assert.equal(path.dirname(entry.directory), browserCache, 'Packaged Playwright must use the isolated platform cache');
     return entries;
   };
-  evidence.browserDownload.before = await browserState();
-  for (const entry of evidence.browserDownload.before) {
-    assert.equal(entry.exists, false, 'Chromium must be absent before the UI download');
-    assert.equal(entry.complete, false, 'No completed browser installation may be reused');
+  assert.ok(await exists(launch.node), 'Packaged Node must be the extracted executable');
+  if (process.platform === 'linux') {
+    const binary = await readFile(launch.node);
+    assert.equal(binary.subarray(0, 4).toString('hex'), '7f454c46', 'Node entry must be an ELF binary, not AppRun');
+    const appRun = await readFile(path.join(installation, 'AppRun'), 'utf8');
+    const desktop = await readFile(path.join(installation, 'multiplane-desktop.desktop'), 'utf8');
+    evidence.linuxSandbox = {
+      chromeSandboxMode: ((await stat(path.join(installation, 'chrome-sandbox'))).mode & 0o7777).toString(8),
+      desktopExec: desktop.split('\n').find(line => line.startsWith('Exec=')),
+      appRunChecksUserNamespaces: appRun.includes('unshare -Ur true'),
+      appRunCanDisableSandbox: appRun.includes('NO_SANDBOX=(--no-sandbox)')
+    };
   }
   assert.ok(await exists(executable)); assert.equal(await exists(path.join(renderer, 'node_modules/three')), false);
   assert.equal(JSON.parse(await readFile(path.join(renderer, 'package.json'))).version, pkg.version);
@@ -99,6 +109,16 @@ try {
   assert.equal(evidence.fontSha256, fontHash);
   application = await _electron.launch({ executablePath: executable, args: launchArgs, env });
   assert.equal(await application.evaluate(({ app }) => app.isPackaged), true);
+  evidence.runtime = await application.evaluate(({ app }) => {
+    const require = process.getBuiltinModule('module').createRequire(`${app.getAppPath()}/package.json`);
+    const { rendererRoot } = require(app.getAppPath());
+    return { execPath: process.execPath, renderer: rendererRoot(app.isPackaged, process.resourcesPath, app.getAppPath()), argv: process.argv, noSandbox: app.commandLine.hasSwitch('no-sandbox') };
+  });
+  if (process.platform === 'linux') {
+    assert.notEqual(evidence.runtime.execPath, installer, 'App must call the mounted Electron binary, not the AppImage shell');
+    assert.equal(path.basename(evidence.runtime.execPath), 'multiplane-desktop');
+    assert.equal(evidence.runtime.renderer, path.join(path.dirname(evidence.runtime.execPath), 'resources/renderer'));
+  }
   const page = await application.firstWindow(); page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const shot = async name => {
@@ -107,8 +127,31 @@ try {
     evidence.screenshots.push(name);
   };
   await page.locator('[data-page="环境"]').click();
-  await page.locator('[data-check=node]').waitFor();
-  assert.equal((await page.evaluate(() => window.multiplane.doctor())).data.checks.find(c => c.name === 'browser').ok, false);
+  const checkDoctor = async browserAvailable => {
+    // These rows only exist after the environment page's real IPC doctor completes.
+    await page.waitForFunction(() => document.querySelectorAll('[data-check]').length === 6);
+    for (const name of ['node', 'ffmpeg', 'libx264']) assert.match(await page.locator(`[data-check=${name}] .check-status`).innerText(), /^可用/);
+    assert.match(await page.locator('[data-check=browser] .check-status').innerText(), browserAvailable ? /^可用/ : /^未安装$/);
+    assert.equal(await page.locator('[data-check=three] .check-status').innerText(), '由项目自己安装');
+    const doctor = await page.evaluate(() => window.multiplane.doctor());
+    assert.deepEqual(doctor.data.checks.map(c => c.name).sort(), ['browser', 'ffmpeg', 'gpu', 'libx264', 'node', 'three']);
+    for (const name of ['node', 'ffmpeg', 'libx264']) assert.equal(doctor.data.checks.find(c => c.name === name).ok, true, name);
+    assert.equal(doctor.data.checks.find(c => c.name === 'browser').ok, browserAvailable);
+    assert.equal(doctor.data.checks.find(c => c.name === 'three').ok, false);
+    const gpu = doctor.data.checks.find(c => c.name === 'gpu');
+    assert.equal(typeof gpu.ok, 'boolean');
+    if (!browserAvailable) assert.equal(gpu.ok, false);
+    assert.equal(await page.locator('[data-check=gpu] .check-status').innerText(), gpu.ok ? '硬件加速可用' : '只能用软件光栅，渲染会变慢');
+    assert.equal(doctor.data.config.path, path.join(home, 'config.json'));
+    return doctor;
+  };
+  evidence.doctorBeforeDownload = (await checkDoctor(false)).data.checks;
+  console.log('Real packaged environment page passed before any verification-side Node probe.');
+  evidence.browserDownload.before = await browserState();
+  for (const entry of evidence.browserDownload.before) {
+    assert.equal(entry.exists, false, 'Chromium must be absent before the UI download');
+    assert.equal(entry.complete, false, 'No completed browser installation may be reused');
+  }
   await shot('browser-missing.png');
   await application.evaluate(({ dialog }) => {
     dialog.showMessageBox = async (_window, options) => {
@@ -134,12 +177,7 @@ try {
   }
   await page.waitForFunction(() => document.querySelector('[data-check=browser] .check-status')?.textContent.startsWith('可用'));
   evidence.checks.push('Fresh browser download: official confirmation, progress, cancellation, lock release, retry and successful installation into the default cache under isolated platform cache');
-  const doctor = await page.evaluate(() => window.multiplane.doctor());
-  assert.equal(doctor.data.checks.length, 6);
-  assert.equal(doctor.data.checks.find(c => c.name === 'browser').ok, true);
-  assert.equal(doctor.data.checks.find(c => c.name === 'three').ok, false);
-  assert.equal(doctor.data.config.path, path.join(home, 'config.json'));
-  assert.equal(await page.locator('[data-check=three] .check-status').innerText(), '由项目自己安装');
+  const doctor = await checkDoctor(true);
   evidence.doctor = doctor.data.checks.map(({ name, ok }) => ({ name, ok }));
   console.log('Fresh browser installation and packaged doctor passed.');
   await shot('environment.png');
@@ -149,10 +187,19 @@ try {
   assert.equal(JSON.parse(await readFile(path.join(home, 'config.json'))).workers, 2);
   evidence.checks.push('Settings page persisted workers=2 in isolated MULTIPLANE_HOME');
   await shot('settings.png');
-  const rendered = await run(executable, [path.join(renderer, 'bin/multiplane'), 'render', path.join(project, 'animation.html'), '--root', project, '--workers', '1', '--to', '0.5', '--json'], { cwd: project, env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, capture: true });
+  // Run inside the live app, using its actual bundledCommand + rendererRoot.
+  // The companion has no render-submission UI; do not add a test-only IPC endpoint.
+  const rendered = await application.evaluate(async ({ app }, { project }) => {
+    const require = process.getBuiltinModule('module').createRequire(`${app.getAppPath()}/package.json`);
+    const { bundledCommand, rendererRoot } = require(app.getAppPath());
+    const path = require('node:path');
+    const root = rendererRoot(app.isPackaged, process.resourcesPath, app.getAppPath());
+    return bundledCommand(root, ['render', path.join(project, 'animation.html'), '--root', project, '--workers', '1', '--to', '0.5', '--json']);
+  }, { project });
+  assert.equal(rendered.code, 0, rendered.stderr || rendered.stdout);
   const events = rendered.stdout.trim().split('\n').map(JSON.parse), result = events.at(-1);
   assert.equal(result.ok, true); assert.equal(result.data.frames, 6);
-  evidence.render = { command: result.command, ok: result.ok, frames: result.data.frames, bundledRenderer: true };
+  evidence.render = { command: result.command, ok: result.ok, frames: result.data.frames, bundledRenderer: true, launchedByAppMain: true, execPath: evidence.runtime.execPath, renderer: evidence.runtime.renderer };
   console.log('Packaged renderer produced the real verification video.');
   await page.locator('[data-page="作业"]').click();
   await page.locator(`[data-job="${result.jobId}"]`).waitFor();
@@ -163,6 +210,14 @@ try {
   evidence.checks.push('Installed renderer produced a real six-frame video, listed and playable in packaged UI');
   assert.deepEqual(errors, []);
   await application.close(); application = undefined;
+  if (process.platform === 'linux') {
+    // Also observe AppRun's default policy, independently of the CI GUI override.
+    const defaultEnv = { ...env }; delete defaultEnv.MULTIPLANE_NO_SANDBOX;
+    application = await _electron.launch({ executablePath: executable, args: [], env: defaultEnv });
+    await application.firstWindow();
+    evidence.linuxSandbox.withoutCiOverride = await application.evaluate(({ app }) => ({ noSandbox: app.commandLine.hasSwitch('no-sandbox'), argv: process.argv }));
+    await application.close(); application = undefined;
+  }
   for (const agent of ['.agents', '.claude', '.codex']) assert.equal(await exists(path.join(user, agent)), false);
   evidence.checks.push('Isolated skill directories remained empty');
 } catch (error) {

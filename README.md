@@ -179,7 +179,7 @@ The installers bundle a renderer of the same version, so the app works without a
 |---|---|---|
 | Windows | NSIS installer (`.exe`) | SmartScreen shows a warning: choose "More info", then "Run anyway". |
 | macOS | `.dmg`, one for Apple silicon and one for Intel | Gatekeeper blocks the first launch: right-click the app and choose "Open", or allow it under System Settings → Privacy & Security. |
-| Linux | AppImage | Make it executable (`chmod +x`), then run it. It needs FUSE; without FUSE, run it with `--appimage-extract-and-run`. |
+| Linux | AppImage | Make it executable (`chmod +x`), then run it. It needs FUSE; without FUSE, run it with `--appimage-extract-and-run`. On systems where unprivileged user namespaces are unavailable, the AppImage launcher starts the app with the Chromium sandbox turned off. |
 
 To build a package for the system you are on, or to run the app during development:
 

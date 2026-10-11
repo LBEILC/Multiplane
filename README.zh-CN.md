@@ -179,7 +179,7 @@ npm install three@0.180.0
 |---|---|---|
 | Windows | NSIS 安装程序（`.exe`） | SmartScreen 会提示：点“更多信息”，再点“仍要运行”。 |
 | macOS | `.dmg`，Apple 芯片和 Intel 各一个 | 首次打开会被拦下：右键点应用选“打开”，或在“系统设置 → 隐私与安全性”里放行。 |
-| Linux | AppImage | 先加可执行权限（`chmod +x`）再运行；需要 FUSE，没有 FUSE 时加 `--appimage-extract-and-run` 运行。 |
+| Linux | AppImage | 先加可执行权限（`chmod +x`）再运行；需要 FUSE，没有 FUSE 时加 `--appimage-extract-and-run` 运行。在不支持非特权用户命名空间的系统上，AppImage 的启动入口会关闭 Chromium 沙箱来启动软件。 |
 
 在当前系统上构建安装包，或在开发时启动：
 
