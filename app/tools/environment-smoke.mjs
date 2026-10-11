@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, symlink, unlink, writeFile, rmdir } from 'node:fs/promises';
+import { privacyMasks } from './smoke-diagnostics.mjs';
 
 export async function checkEnvironmentIsolation(app, page, user, work, out, evidence, doctor) {
   const refresh = async () => {
@@ -22,7 +23,7 @@ export async function checkEnvironmentIsolation(app, page, user, work, out, evid
   await codex.getByText('已是最新', { exact: true }).waitFor();
   await page.locator('[data-check=node]').waitFor();
   const screenshot = async name => {
-    await page.screenshot({ path: path.join(out, name), fullPage: true, mask: [page.locator('.path-value'), page.locator('.check-detail'), page.locator('.info-row .mono'), page.locator('[data-host-card] .mono')] });
+    await page.screenshot({ path: path.join(out, name), fullPage: true, mask: privacyMasks(page) });
     evidence.screenshots.push(name);
   };
   await claude.scrollIntoViewIfNeeded();

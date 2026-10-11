@@ -483,6 +483,7 @@ progress::-webkit-progress-value {
 #about-brand { font-size: 30px; line-height: 1.5; gap: 12px; }
 code { font-family: var(--font-mono); user-select: text; }
 :root { --font-mono: "Cascadia Mono", "SF Mono", Menlo, "DejaVu Sans Mono", monospace; }
+:root:not([data-platform]) .titlebar > .brand-lockup { visibility: hidden; }
 :root[data-platform="darwin"] .titlebar > .brand-lockup { padding-left: 78px; white-space: nowrap; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.primary:hover { background: var(--accent-hover); }

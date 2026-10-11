@@ -66,7 +66,7 @@ export class SettingsView {
     }).join('');
   }
   private infoRow(label: string, value: string) { return `<div class="info-row"><span>${label}</span><div>${value}</div></div>`; }
-  private configPath(file: string) { return `<div class="path-value"><span class="mono muted">${esc(displayPath(file))}</span>${this.button('在文件夹中显示', 'open-config')}</div>`; }
+  private configPath(file: string) { return `<div class="path-value"><span class="mono muted">${esc(displayPath(file))}</span>${this.button(revealLabel(), 'open-config')}</div>`; }
   private environmentPage() {
     const command = this.environment?.command, config = this.doctor?.data?.config;
     const mismatch = command?.version && command.version.replace(/^multiplane\s+/, '') !== this.settings?.version;

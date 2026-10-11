@@ -6,6 +6,7 @@ import { SettingsView } from './settings';
 import './skillConfirmation';
 import { initPlatform, displayPath, revealLabel } from './platform';
 const api = window.multiplane;
+let platformReady = false;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const escape = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const base = (v: string) => v.split(/[\\/]/).filter(Boolean).at(-1) ?? v;
@@ -21,6 +22,7 @@ let state: Snapshot = { jobs: [], runningCount: 0, theme: 'light' }, selected = 
 const fail = (e: unknown) => { $('#error').textContent = userError(e); $('#error').hidden = false; };
 const media = (j: Job, file: string, version = '') => escape(api.media(j.jobId, file, version));
 function navigate(next: string) {
+  if (!platformReady) { page = next; return; }
   page = next; $('#heading').textContent = page; $('#jobs').hidden = page !== '作业'; $('#placeholder').hidden = page === '作业';
   document.querySelectorAll('[data-page]').forEach(el => el.setAttribute('aria-current', (el as HTMLElement).dataset.page === page ? 'page' : 'false'));
   $('.page-h').classList.remove('stuck'); preferences.mount(page); render();
@@ -28,6 +30,7 @@ function navigate(next: string) {
 const preferences = new SettingsView($('#placeholder'), navigate);
 function rows(data: Record<string, unknown> = {}) { return Object.entries(data).map(([k, v]) => `<div class="kv"><span>${escape(k)}</span><pre>${escape(typeof v === 'object' ? JSON.stringify(v, null, 2) : v)}</pre></div>`).join(''); }
 function renderList() {
+  if (!platformReady) return;
   const filter = stateFilter;
   const jobs = state.jobs.filter(j => (!projectFilter || project(j) === projectFilter) && (filter === 'all' || (filter === 'running' ? j.state === 'running' : ['failed', 'cancelled'].includes(j.state))))
     .sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running') || b.startedAt.localeCompare(a.startedAt));
@@ -71,6 +74,7 @@ function events(j: Job) {
   return merged.map(e => `<div class="event ${escape(e.type)} ${e.type === 'result' && !e.ok ? 'failure' : ''}"><time>${escape(new Date(e.ts).toLocaleTimeString('zh-CN'))}</time><span>${escape(e.type === 'progress' ? `${labels[e.phase] ?? e.phase} · ${e.done} / ${e.total ?? '—'}` : e.message ?? (e.type === 'result' ? labels[j.state] : e.type))}</span>${e.code ? `<div class="mono">${escape(e.code)}</div>` : ''}${e.hint ? `<p>${escape(e.hint)}</p>` : ''}</div>`).join('');
 }
 function renderDetail() {
+  if (!platformReady) return;
   const j = state.jobs.find(j => j.jobId === selected);
   if (!j) { $('#detail').innerHTML = '<div class="empty">选择一个作业</div>'; contentKey = ''; headerKey = ''; return; }
   if (!$('#detail').querySelector('.detail-head')) $('#detail').innerHTML = '<div class="detail-head"></div><div id="banner"></div><div class="tabs" role="tablist"></div><div id="tab-content" role="tabpanel"></div>';
@@ -87,7 +91,7 @@ function renderDetail() {
   const key = JSON.stringify([selected, tab, j.state, tab === '预览' ? (j.command === 'render' ? j.previewVersion : j.events.length) : j.events.length]);
   if (key !== contentKey) {
     contentKey = key;
-    $('#tab-content').innerHTML = tab === '预览' ? preview(j) : tab === '事件' ? events(j) : tab === '参数' ? rows(j.events.find(e => e.type === 'start')?.options) : `<h3>结果</h3>${rows(j.result?.data)}<h3>产物</h3>${(j.result?.artifacts ?? j.events.filter(e => e.type === 'artifact')).map((a: any) => `<div class="artifact"><div class="mono">${escape(displayPath(a.path))}</div><small>${escape(a.kind)} · ${escape(a.bytes)} bytes</small><br><button data-open="${escape(a.path)}">打开</button><button data-reveal="${escape(a.path)}">在文件夹中显示</button></div>`).join('')}<h3>环境</h3>${rows(Object.fromEntries(Object.entries(j.events.find(e => e.type === 'environment') ?? {}).filter(([k]) => !['schema', 'type', 'command', 'ts'].includes(k))))}`;
+    $('#tab-content').innerHTML = tab === '预览' ? preview(j) : tab === '事件' ? events(j) : tab === '参数' ? rows(j.events.find(e => e.type === 'start')?.options) : `<h3>结果</h3>${rows(j.result?.data)}<h3>产物</h3>${(j.result?.artifacts ?? j.events.filter(e => e.type === 'artifact')).map((a: any) => `<div class="artifact"><div class="mono">${escape(displayPath(a.path))}</div><small>${escape(a.kind)} · ${escape(a.bytes)} bytes</small><br><button data-open="${escape(a.path)}">打开</button><button data-reveal="${escape(a.path)}">${revealLabel()}</button></div>`).join('')}<h3>环境</h3>${rows(Object.fromEntries(Object.entries(j.events.find(e => e.type === 'environment') ?? {}).filter(([k]) => !['schema', 'type', 'command', 'ts'].includes(k))))}`;
     document.querySelectorAll<HTMLImageElement>('img[data-bbox]').forEach(img => {
       const place = () => { const b = JSON.parse(img.dataset.bbox!); if (!b || !img.naturalWidth) return; const box = img.nextElementSibling as HTMLElement; box.hidden = false; Object.assign(box.style, { left: `${b.x / img.naturalWidth * 100}%`, top: `${b.y / img.naturalHeight * 100}%`, width: `${b.w / img.naturalWidth * 100}%`, height: `${b.h / img.naturalHeight * 100}%` }); };
       img.addEventListener('load', place); if (img.complete) place();
@@ -95,6 +99,7 @@ function renderDetail() {
   }
 }
 function render() {
+  if (!platformReady) return;
   document.documentElement.dataset.theme = state.theme;
   $('#count').textContent = `${state.runningCount} 个作业进行中`;
   if (projectFilter && !state.jobs.some(j => project(j) === projectFilter)) projectFilter = '';
@@ -128,5 +133,9 @@ for (const id of ['state-filter', 'project-filter']) {
 }
 for (const selector of ['#detail', '#list']) $(selector).addEventListener('scroll', () => $('.page-h').classList.toggle('stuck', $('#detail').scrollTop > 0 || $('#list').scrollTop > 0));
 installScrollMaterial(document.body);
-api.subscribe(accept); void initPlatform().then(async () => { accept(await api.snapshot()); await preferences.init(); }).catch(fail);
+void initPlatform().then(async () => {
+  api.subscribe(accept); accept(await api.snapshot());
+  await preferences.init();
+  platformReady = true; navigate(page);
+}).catch(fail);
 setInterval(() => { if (state.jobs.some(j => j.state === 'running') && page === '作业') { renderList(); renderDetail(); } }, 1000);
