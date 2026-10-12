@@ -91,10 +91,45 @@ test('probe uses rational fps and the decoded final frame duration', async () =>
     '[Parsed_showinfo_0] n: 0 pts: 0 pts_time:0 duration: 33 duration_time:0.033 fmt:yuv420p s:64x48',
     '[Parsed_showinfo_0] n: 1 pts: 33 pts_time:0.033 duration: 67 duration_time:0.067 fmt:yuv420p s:64x48',
   ].join('\n');
-  const actual = await probeVideo('', '', undefined, () => spawn(process.execPath, ['-e', `process.stderr.write(${JSON.stringify(log)})`], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }));
+  const actual = await probeVideo('', '', undefined, (exe, args) => spawn(process.execPath, ['-e', `process.stderr.write(${JSON.stringify(args.includes('copy') ? 'Output stream #0:0 (video): 2 packets muxed\n' : log)})`], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }));
   assert.equal(actual.fps, 30000 / 1001); assert.equal(actual.durationSeconds, 0.1); assert.equal(actual.frames, 2);
   const missingAudio = 'Stream #0:1: Audio: aac\n' + log;
-  await assert.rejects(probeVideo('', '', undefined, () => spawn(process.execPath, ['-e', `process.stderr.write(${JSON.stringify(missingAudio)})`], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })), /audio duration could not be parsed/);
+  await assert.rejects(probeVideo('', '', undefined, (exe, args) => spawn(process.execPath, ['-e', `process.stderr.write(${JSON.stringify(args.includes('copy') ? 'Output stream #0:0 (video): 2 packets muxed\n' : missingAudio)})`], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })), /audio duration could not be parsed/);
+});
+
+test('isolated probes reject packet/frame disagreement without an unverified warning', async () => {
+  const video = [
+    'Stream #0:0: Video: h264', 'Stream #0:1: Audio: aac', 'Stream mapping:',
+    '[Parsed_showinfo_0] config in time_base: 1/24, frame_rate: 24/1',
+    '[Parsed_showinfo_0] n: 0 pts: 0 pts_time:0 fmt:yuv420p s:64x48',
+    '[Parsed_showinfo_0] n: 1 pts: 1 pts_time:0.0416667 fmt:yuv420p s:64x48',
+  ].join('\n');
+  for (const packets of [1, 2, 3]) {
+    const calls = [];
+    const fakeSpawn = (exe, args) => {
+      calls.push(args);
+      const log = args.includes('copy') ? 'Output stream #0:0 (video): ' + packets + ' packets muxed\n'
+        : args.includes('-vn') ? '[Parsed_ashowinfo_0] pts_time:0 rate:48000 nb_samples:4000' : video;
+      return spawn(process.execPath, ['-e', 'process.stderr.write(' + JSON.stringify(log) + ')'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    };
+    const observer = { check() {}, warning() { assert.fail('Count mismatch must never be unverified'); } };
+    const check = checkVideo('', '', { frames: 2, fps: 24, width: 64, height: 48, durationSeconds: 2 / 24 }, observer,
+      (exe, file, events) => probeVideo(exe, file, events, fakeSpawn));
+    if (packets === 2) {
+      const result = await check;
+      assert.equal(result.verified, true);
+      assert.equal(result.audioDurationSeconds, 2 / 24);
+      assert.ok(calls[2].includes('-vn')); assert.equal(calls[2][calls[2].indexOf('-map') + 1], '0:a:0');
+    } else await assert.rejects(check, error => {
+      assert.equal(error.code, 'output_invalid');
+      assert.deepEqual(error.details, { reason: 'video_count_mismatch', packetCount: packets, decodedFrames: 2 });
+      return true;
+    });
+    for (const args of calls.slice(0, 2)) {
+      assert.ok(args.includes('-an'));
+      assert.deepEqual(args.filter((v, i) => args[i - 1] === '-map'), ['0:v:0']);
+    }
+  }
 });
 
 test('cancelling a running probe stops its child and does not publish an unverified result', { timeout: 10000 }, async () => {
