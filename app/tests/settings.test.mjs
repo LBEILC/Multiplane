@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import { useShortTempDirectory } from '../../tests/short-path.mjs';
 import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
@@ -135,8 +136,8 @@ for (const inside of [false, true]) test(`a ${inside ? 'nested' : 'target'} skil
   const link = inside ? path.join(target, 'nested') : target;
   await linkDirectory(outside, link);
   const status = await skills.status('claude');
-  assert.equal(status.state, 'modified'); assert.equal(status.blocked, true); assert.match(status.error, /符号链接/);
-  for (const action of ['install', 'remove']) await assert.rejects(skills.change('claude', action, status.signature), /符号链接/);
+  assert.equal(status.state, 'modified'); assert.equal(status.blocked, true); assert.match(status.error, /symbolic links/);
+  for (const action of ['install', 'remove']) await assert.rejects(skills.change('claude', action, status.signature), /symbolic links/);
   assert.equal(await readFile(path.join(outside, 'keep'), 'utf8'), 'untouched');
   assert.equal((await lstat(link)).isSymbolicLink(), true);
   await unlink(link);
@@ -147,16 +148,16 @@ test('agent and PATH failures remain local to their own environment cards', asyn
   await writeFile(path.join(f.user, '.claude', 'skills'), 'not a directory');
   await skills.change('codex', 'install', null);
   const environment = await readEnvironment(skills, async () => { throw Object.assign(Error('denied'), { code: 'EACCES' }); });
-  assert.match(environment.command.error, /没有权限/);
-  assert.equal(environment.skills[0].state, 'error'); assert.match(environment.skills[0].error, /不是目录/);
+  assert.match(environment.command.error, /Permission denied/);
+  assert.equal(environment.skills[0].state, 'error'); assert.match(environment.skills[0].error, /not a directory/);
   assert.equal(environment.skills[1].state, 'latest');
   const healthyCommand = await readEnvironment(skills, async () => '/multiplane', async () => '1.0.0');
   assert.equal(healthyCommand.command.version, '1.0.0'); assert.equal(healthyCommand.skills[1].state, 'latest');
 });
 
-test('IPC errors have a bounded Chinese explanation without Electron wrappers or stacks', () => {
+test('IPC errors have a bounded localized explanation without Electron wrappers or stacks', () => {
   assert.equal(userError(Error("Error invoking remote method 'environment': Error: 不支持符号链接安装目录")), '不支持符号链接安装目录');
-  assert.match(userError("Error: Error invoking remote method 'open': Error: EACCES: access denied"), /^没有权限.*EACCES/);
-  assert.equal(userError(Error('Unknown failure\n    at private/path')), '操作失败，请重新检查');
-  assert.equal(userError(Error('安装状态已变化，请重新检查\nprivate/path')), '安装状态已变化，请重新检查');
+  assert.match(userError("Error: Error invoking remote method 'open': Error: EACCES: access denied"), /^Permission denied.*EACCES/);
+  assert.equal(userError(Error('Unknown failure\n    at private/path')), copy.checkError);
+  assert.equal(userError(Error('安装状态已变化，请重新检查\nprivate/path')), copy.skillChanged);
 });

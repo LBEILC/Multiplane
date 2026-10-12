@@ -1,7 +1,10 @@
-import { userError } from '../shared/errors.mjs';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, Snapshot, SkillConfirmation } from '../shared/types';
-const invoke = (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args).catch(error => { throw Error(userError(error)); });
+const invoke = (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args).catch(error => {
+  let message = String(error?.message ?? error);
+  for (;;) { const clean = message.replace(/^(?:Error:\s*|Error invoking remote method '[^']+':\s*)/, ''); if (clean === message) break; message = clean; }
+  throw Error(message);
+});
 const bridge: Bridge = {
   platform: () => invoke('platform'),
   browserInstallState: () => invoke('browser-install-state'),

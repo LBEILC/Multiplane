@@ -26,7 +26,7 @@
 
 | `type` | 何时 | 额外字段 |
 |---|---|---|
-| `start` | 参数解析成功后第一行 | `version`（包版本）、`shot`（绝对路径，无镜头的命令为 `null`）、`jobId`（有作业时）、`options`（加载镜头前就能确定的生效参数，含渲染器默认值；镜头自己声明的 `fps`、`post` 等见 `shot` 事件，最终生效值见 `result.data`） |
+| `start` | 参数解析成功后第一行（给了 `--draft`、或镜头可能声明 `alpha` 默认值时，在预检之后发出：预检会加载镜头但不调用 `render(t)`，这样 `options` 里才是最终值；它仍是第一条事件） | `version`（包版本）、`shot`（绝对路径，无镜头的命令为 `null`）、`jobId`（有作业时）、`options`（加载镜头前就能确定的生效参数，含渲染器默认值；镜头自己声明的 `fps`、`post` 等见 `shot` 事件，最终生效值见 `result.data`） |
 | `environment` | 浏览器启动后一次 | `node`、`platform`、`chromium`、`gpu`（`{renderer, hardware}`）、`ffmpeg`（`{path, version}`，不需要时为 `null`） |
 | `shot` | 镜头加载完一次 | `width`、`height`、`duration`、`fps`、`cuts`、`post`（镜头声明的默认后期参数） |
 | `progress` | 进度变化时，最多每 250 ms 一行 | `phase`（`launch` / `load` / `capture` / `encode` / `compare` / `finalize`）、`done`、`total`、`unit`（`"frame"` 等）、`fps`（实测速度，可为 `null`）、`etaMs`（可为 `null`） |
@@ -53,9 +53,9 @@
 
 `data` 按命令：
 
-- `render`：`{ output, frames, fps, from, to, width, height, encoder, post: {motionBlur, shutter, adaptiveBlur, grain}, renderScale, scale }`。
-- `stills`：`{ stills: [{t, frame, path}], contactSheet }`。
-- `verify`：`{ passed, times, workers, checks: [{name, passed}] , findings: n }`。不一致时 `ok: false`、`code: "nondeterministic_output"`，`finding` 事件里有细节。
+- `render`：`{ output, frames, fps, from, to, width, height, encoder, post: {motionBlur, shutter, adaptiveBlur, grain}, renderScale, scale, draft, format, alpha, outputCheck, resources }`。`format` 为 `mp4`、`webm` 或 `mov`；走透明路径时 `alpha` 为 `true`。给了 `--draft` 时 `draft` 为 `true`（快速预览的预设：渲染倍率不超过 0.5、不做运动模糊、不加颗粒；显式给出的参数优先于预设，预设优先于用户配置和镜头默认值；输出尺寸、帧率、编码器、并行数不变；舞台尺寸找不到不超过 0.5 的合法倍率时以 `invalid_scale` 失败）。`outputCheck` 是成品发布前从编码后的文件里读回来的信息：`{ verified, frames, durationSeconds, width, height, fps, codec, pixelFormat, audioDurationSeconds }`（`audioDurationSeconds` 只在成品有音轨时出现）；无法探测文件时 `verified` 为 `false`（见 `output_unverified`）。`pixelFormat` 是解码文件时报告的格式，可能与编码输入不同。透明输出另外解码首帧和中间帧（VP9 用 `libvpx-vp9` 解码，默认的 VP9 解码器会丢掉 alpha），与源帧的 alpha 比较；任一像素差超过 2/255 或 alpha 丢失，以 `output_invalid` 结束（透明输出不会未经核对就发布）。`resources` 为整个进程树（渲染器、浏览器进程、worker、编码器）的 `{ peakMemoryBytes, memorySamples, workers, cpuCount }`；测不到的值为 `null`。`peakMemoryBytes` 是周期采样中的最大值，不是操作系统的精确峰值；`memorySamples` 只计成功的采样；`workers` 是实际用到的最大数量。`stills` 和 `verify` 的结果同样带 `resources`。
+- `stills`：`{ stills: [{t, frame, path}], contactSheet, draft, format, alpha }`。`draft` 含义同 `render`；`format` 恒为 `png`；带 `alpha` 时抽帧保留透明，联系表合成在棋盘格底上。
+- `verify`：`{ passed, times, workers, checks: [{name, passed}] , findings: n, format, alpha }`（`format` 为 `png`；带 `alpha` 时四个通道都比较）。不一致时 `ok: false`、`code: "nondeterministic_output"`，`finding` 事件里有细节。
 - `lint`：`{ files: [...扫描过的文件，相对资源根], errors, warnings, suppressed }`。有 error 时 `ok: false`、`code: "lint_failed"`；只有 warning 时 `ok: true`。`render` / `stills` / `verify` 默认先跑 lint，它的 `finding` 进入同一事件流；`--no-lint` 跳过。
 - `doctor`：`{ checks: [{name, ok, detail}] }`，检查 Node 版本、浏览器、GPU 光栅、FFmpeg 和 libx264、可选 three.js。
 - `status` / `cancel`：作业状态快照（第 6 节）。
@@ -71,6 +71,17 @@
 | `location` | 可选：`{file, line, column}`（源码位置，`lint` 用）或 `{t, frame}`（时间位置，`verify` 用）。 |
 | `details` | 可选。`verify` 至少给：`check`（`reorder` / `reload` / `workers:<n>` / `range`）、`changedPixels`、`maxChannelDiff`、`bbox`（`{x, y, w, h}`，变化区域外接框）、`images`（`{reference, actual, diff}`：参考帧、实际帧、差异图的路径）。 |
 
+## 4a. 输出格式与透明
+
+- `render --format mp4|webm|mov`。不给 `--format` 时按 `--out` 的扩展名决定，两者都没有时为 `mp4`；扩展名矛盾或未知时以 `invalid_option` 失败。默认作业文件名用该格式的扩展名。
+- `mp4`：H.264 或 HEVC（`--encoder x264|nvenc-h264|nvenc-hevc`），只能不透明。
+- `webm`：VP9（`libvpx-vp9`），透明为 `yuva420p`，不透明为 `yuv420p`；音频为 Opus。这一版的质量参数固定。
+- `mov`：ProRes 4444（`prores_ks`），透明为 `yuva444p10le`，不透明为 `yuv444p10le`。
+- `--encoder` 只对 `mp4` 有效；和其他格式一起用以 `invalid_option` 失败。
+- `--alpha`（`render`、`stills`、`verify` 都支持）保留透明通道。页面背景是透明的；镜头自己画的东西，包括 `#stage` 的背景色，照样不透明。镜头可以用 `post: { alpha: true }` 声明默认值，命令行优先。`--alpha` 配 `mp4` 以 `invalid_option` 失败。
+- 透明路径里，运动模糊的平均和缩放都在预乘后的线性光里做；alpha 线性平均；全透明输出像素的颜色为 0；颗粒只改变可见颜色。不带 `--alpha` 时输出与以前的版本完全相同。
+- FFmpeg 构建缺少所需编码器时以 `ffmpeg_unusable` 结束；`doctor` 把 `libvpx-vp9`、`prores_ks` 列为可选检查。
+
 ## 5. 错误码与退出码
 
 错误码是稳定的小写下划线字符串，**只增不改**。
@@ -81,10 +92,10 @@
 | 1 | 镜头或检查不通过 | `shot_not_found`、`shot_outside_root`、`shot_load_failed`（HTTP 或脚本错误）、`shot_contract_invalid`（缺 `SHOT`、`render` 不是函数、`duration`/`fps`/`cuts` 不合法等）、`stage_size_invalid`（缺 `#stage`、尺寸不是正整数或随视口变化）、`ready_timeout`、`render_threw`（`render(t)` 抛错，`details` 带 `t`）、`resource_failed`（字体或素材加载失败）、`nondeterministic_output`、`lint_failed`、`cancel_timeout`（`cancel --wait` 到时作业仍未结束） |
 | 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` 找不到作业或快照损坏） |
 | 3 | 环境问题 | `ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
-| 4 | 渲染器内部 | `worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败；已知时带 `details.t`）、`encode_failed`、`internal_error` |
+| 4 | 渲染器内部 | `output_invalid`（编码后的文件与渲染内容不符：帧数、时长、尺寸或帧率；`details.expected` 与 `details.actual`；文件不会发布）、`worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败；已知时带 `details.t`）、`encode_failed`、`internal_error` |
 | 130 | 被取消 | `cancelled` |
 
-警告码（只出现在 `warning` 事件，不影响退出码）：`browser_restarted`（浏览器进程或页面意外关闭，已重新启动并重渲受影响的帧；`render(t)` 只由 `t` 决定，所以不会改变像素；`details.attempt`）、`gpu_software_fallback`（要求 GPU 光栅但实际落到软件渲染器）、`home_unavailable`（用户级目录读写失败，见第 8 节）、`config_invalid`（用户配置某字段非法，已忽略；整份文件损坏或顶层不是对象时 `details.field` 为 `"$"`）、`preview_failed`（预览帧写入失败，每个作业只报一次，此后不再更新预览，渲染照常）。
+警告码（只出现在 `warning` 事件，不影响退出码）：`browser_restarted`（浏览器进程或页面意外关闭，已重新启动并重渲受影响的帧；`render(t)` 只由 `t` 决定，所以不会改变像素；`details.attempt`）、`output_unverified`（无法探测编码后的文件，未经核对就发布了；`details.reason`）、`gpu_software_fallback`（要求 GPU 光栅但实际落到软件渲染器）、`home_unavailable`（用户级目录读写失败，见第 8 节）、`config_invalid`（用户配置某字段非法，已忽略；整份文件损坏或顶层不是对象时 `details.field` 为 `"$"`）、`preview_failed`（预览帧写入失败，每个作业只报一次，此后不再更新预览，渲染照常）。
 
 lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_animation`、`web_animations`、`media_playback`、`remote_resource`、`resource_missing`、`stage_missing`、`shot_missing`、`runtime_missing`、`async_render` 为 error；`timer_driven`、`animated_image`、`stage_size_unfixed`、`font_not_awaited`、`lint_directive_invalid`、`lint_incomplete`（某段源码无法解析、被跳过，扫描覆盖不完整）为 warning。lint 的 `location` 为 `{file, line, column}`（相对资源根，从 1 开始），`details.snippet` 为该行源码。问题行的上一行写注释 `multiplane-disable-next-line <规则码>` 可豁免。
 
@@ -97,7 +108,7 @@ lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_ani
 - 产物位置：不给 `--out` 时产物写在作业目录里（视频 `<jobDir>/<镜头名>.mp4`，抽帧 `<jobDir>/stills/`，检查报告和差异图 `<jobDir>/verify/`），每次运行互不覆盖。给了 `--out` 而目标已存在时以 `output_exists` 失败，加 `--overwrite` 才覆盖：先完整写到临时位置再替换（目录产物整个替换），失败时原产物不动。
 - 目录内容：
   - `events.jsonl`：与 `--json` 的 stdout **完全相同**的事件流（不管开没开 `--json` 都写）。
-  - `status.json`：最新快照，原子写入（写临时文件再改名）：`{schema, jobId, command, shot, pid, state, phase, done, total, fps, etaMs, startedAt, updatedAt, result}`；`state` 为 `running` / `succeeded` / `failed` / `cancelled`；`result` 结束时等于 `result` 事件的内容，运行中为 `null`。
+  - `status.json`：最新快照，原子写入（写临时文件再改名）：`{schema, jobId, command, shot, pid, state, phase, done, total, fps, etaMs, previewFrame, memoryBytes, startedAt, updatedAt, result}`；`state` 为 `running` / `succeeded` / `failed` / `cancelled`；`result` 结束时等于 `result` 事件的内容，运行中为 `null`。
   - 停止请求：在目录里创建 `stop` 文件。渲染器检测到后清理并以 `cancelled` 结束。
 - `multiplane status <jobId|jobDir> [--json]`：读 `status.json`；进程已不在而 `state` 仍是 `running` 时报告为 `failed` / `internal_error`（不改文件）。`status` 本身的 `ok` 只表示读到了快照，原作业的成败看 `data.state` 和 `data.result`。
 - `multiplane cancel <jobId|jobDir> [--json]`：创建 `stop` 文件，等待作业结束（`--wait` 秒，默认 30），输出最终状态；作业已经结束时直接返回原终态；到时仍未结束返回 `cancel_timeout`。

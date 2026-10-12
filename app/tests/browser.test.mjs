@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import { rmSync } from 'node:fs';
 import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
@@ -36,10 +37,10 @@ test('browser download uses bundled Playwright, shared cache, output events and 
   assert.equal(calls[0].options.cwd, temporary);
   child.stdout.write('50% downloaded'); assert.match(installer.state.text, /50%/);
   await installer.cancel();
-  assert.deepEqual(installer.state, { running: false, text: '已取消安装' });
+  assert.deepEqual(installer.state, { running: false, text: copy.installCancelled });
   assert.equal(calls.length, 1, 'normal cancellation needs no forced process termination');
   assert.equal(installer.start(), true); child.emit('close', 0);
-  assert.equal(installer.state.text, '浏览器安装完成');
+  assert.equal(installer.state.text, copy.browserInstalled);
   assert.ok(states.length >= 4);
 });
 test('worker awaits the asynchronous CLI and rejects incomplete browser caches', async t => {

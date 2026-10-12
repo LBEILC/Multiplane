@@ -22,6 +22,7 @@ module.exports = {
   dmg: { sign: false },
   linux: { target: ['AppImage'], icon: 'build/icons/app-512.png', category: 'AudioVideo', artifactName: 'Multiplane-${version}-${arch}.${ext}', maintainer: 'Multiplane contributors' },
   nsis: {
+    installerLanguages: ['en_US', 'zh_CN'], displayLanguageSelector: false,
     include: 'tools/installer.nsh',
     oneClick: false, perMachine: false, allowElevation: false,
     allowToChangeInstallationDirectory: true, packElevateHelper: false,

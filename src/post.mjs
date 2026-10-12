@@ -1,3 +1,4 @@
+import { averageAlpha, resizeAlpha, clearHiddenColors } from './alpha.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { number, validateScale } from './capture.mjs';
 import { decodePNG, encodePNG } from './png.mjs';
@@ -124,6 +125,8 @@ export function addGrain(image, grain, frame) {
 }
 
 export function createPostCapture(capture, options = {}, fps = capture.fps) {
+  const alpha = options.alpha ?? capture.alpha ?? capture.post?.alpha ?? false;
+  const average = alpha ? averageAlpha : averageLinear;
   const sizes = resolveScale(options);
   validateScale(capture.width, capture.height, sizes.scale);
   validateScale(capture.width, capture.height, sizes.renderScale, '--render-scale');
@@ -134,8 +137,13 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
   const decode = async (png, reuse = false) => {
     if (reuse && decodedCache?.png.equals(png)) { stats.reusedDecodes++; return decodedCache.image; }
     const start = performance.now();
-    const image = options.decoder === 'js' ? decodePNG(png) : await decodeNativePNG(png);
+    let image = options.decoder === 'js' ? decodePNG(png) : await decodeNativePNG(png);
     stats.decodeMs += performance.now() - start;
+    if (alpha && sizes.renderScale < 1) {
+      const resizeStart = performance.now();
+      image = resizeAlpha(image, capture.width * sizes.renderScale, capture.height * sizes.renderScale, sizes.upscale);
+      stats.resizeMs += performance.now() - resizeStart;
+    }
     if (reuse) decodedCache = { png: Buffer.from(png), image };
     return image;
   };
@@ -189,17 +197,17 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       if (motionBlur === 1) ({ png, image: result } = await sample(t));
       else if (hooked) {
         await sampleMany(times);
-        result = timed('averageMs', () => averageLinear(times.map(time => cache.get(time).image)));
+        result = timed('averageMs', () => average(times.map(time => cache.get(time).image)));
       } else if (adaptive > 0) {
         await sampleMany([times[0], times.at(-1)], true);
         const first = cache.get(times[0]), last = cache.get(times.at(-1));
         const identical = first.image.data === last.image.data || first.image.data.equals(last.image.data);
-        if (identical || imageDifference(first.image, last.image) < adaptive) {
+        if (identical || (!alpha && imageDifference(first.image, last.image) < adaptive)) {
           png = first.png; result = first.image; stats.adaptiveFrames++;
           if (identical) stats.staticFrames++;
         } else {
           await sampleMany(times);
-          result = timed('averageMs', () => averageLinear(times.map(time => cache.get(time).image)));
+          result = timed('averageMs', () => average(times.map(time => cache.get(time).image)));
         }
       } else {
         await sampleMany([times[0], times.at(-1), t]);
@@ -209,18 +217,20 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         } else {
           await sampleMany(times);
           const images = times.map(time => cache.get(time).image);
-          result = timed('averageMs', () => averageLinear(images));
+          result = timed('averageMs', () => average(images));
         }
       }
       stats.frames++;
       if (sizes.renderScale !== sizes.scale) {
         result ??= await decode(png);
         const start = performance.now();
-        result = await resizeImage(result, capture.width * sizes.scale, capture.height * sizes.scale, sizes.upscale);
+        result = await (alpha ? resizeAlpha : resizeImage)(result, capture.width * sizes.scale, capture.height * sizes.scale, sizes.upscale);
         stats.resizeMs += performance.now() - start;
         png = undefined;
       }
       if (post.grain > 0) result = timed('grainMs', () => addGrain(result, post.grain, frame));
+      // Grain changes straight visible RGB only; never alpha or hidden output colors.
+      if (alpha) { result = clearHiddenColors(result ?? await decode(png)); png = undefined; }
       if (options.verify) {
         const image = result ??= await decode(png);
         if (image.width !== capture.width * sizes.scale || image.height !== capture.height * sizes.scale) throw new MultiplaneError('internal_error', 'Pixel verification dimensions do not match output.');

@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import { nativeRealpath } from '../../tools/native-realpath.mjs';
 import { _electron } from 'playwright';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, stat, lstat, cp, chmod, rm } from 'node:fs/promises';
@@ -14,6 +15,7 @@ import { verifyNotices } from './notices.mjs';
 import { findInstaller } from './installer-file.mjs';
 import { packagedLaunch, packagedNodeCommand } from './packaged-launch.mjs';
 import { fileSnapshot } from './file-snapshot.mjs';
+import { privacyMasks } from './smoke-diagnostics.mjs';
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(appRoot, '..');
 const windows = process.platform === 'win32', mac = process.platform === 'darwin';
@@ -34,7 +36,7 @@ for (const file of [...shortcuts, ...(cache ? [cache] : [])]) assert.equal(await
 const work = await nativeRealpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-packaged-')));
 const installation = path.join(work, windows ? 'installed' : mac ? 'mount' : 'squashfs-root'), home = path.join(work, 'renderer-home'), data = path.join(work, 'desktop-home'), user = path.join(work, 'user'), project = path.join(work, 'example');
 for (const dir of [home, data, user, project]) await mkdir(dir, { recursive: true });
-await writeFile(path.join(data, 'preferences.json'), JSON.stringify({ wizardDone: true, notifications: false, theme: 'dark', hidden: [] }));
+await writeFile(path.join(data, 'preferences.json'), JSON.stringify({ language: 'en', wizardDone: true, notifications: false, theme: 'dark', hidden: [] }));
 await cp(path.join(root, 'examples/animation.html'), path.join(project, 'animation.html'));
 const env = { ...process.env, ...(windows ? {} : { HOME: user, XDG_CACHE_HOME: path.join(work, 'cache') }), ...(mac || windows ? {} : { APPIMAGE_EXTRACT_AND_RUN: '1' }), MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data, MULTIPLANE_TEST_USER_HOME: user, LOCALAPPDATA: path.join(work, 'local') };
 delete env.ELECTRON_RUN_AS_NODE; delete env.MULTIPLANE_JOBS_DIR; delete env.MULTIPLANE_NO_INDEX;
@@ -129,25 +131,26 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const shot = async name => {
     await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: path.join(out, name), mask: [page.locator('.path-value'), page.locator('[data-host-card] .mono'), page.locator('.info-row .mono'), page.locator('.setting-row .mono'), page.locator('.job-id'), page.locator('.check-detail')], maskColor: '#777777' });
+    await page.screenshot({ path: path.join(out, name), mask: [...privacyMasks(page), page.locator('.job-id')], maskColor: '#777777' });
     evidence.screenshots.push(name);
   };
-  await page.locator('[data-page="环境"]').click();
+  await page.locator('[data-page="environment"]').click();
   const checkDoctor = async browserAvailable => {
     // These rows only exist after the environment page's real IPC doctor completes.
-    await page.waitForFunction(() => document.querySelectorAll('[data-check]').length === 6);
-    for (const name of ['node', 'ffmpeg', 'libx264']) assert.match(await page.locator(`[data-check=${name}] .check-status`).innerText(), /^可用/);
-    assert.match(await page.locator('[data-check=browser] .check-status').innerText(), browserAvailable ? /^可用/ : /^未安装$/);
-    assert.equal(await page.locator('[data-check=three] .check-status').innerText(), '由项目自己安装');
+    const requiredChecks = ['browser', 'ffmpeg', 'gpu', 'libx264', 'node', 'three'];
+    await page.waitForFunction(names => names.every(name => document.querySelector(`[data-check="${name}"]`)), requiredChecks);
+    assert.equal(await page.locator('[data-check=three] .check-status').innerText(), copy.projectInstalled);
     const doctor = await page.evaluate(() => window.multiplane.doctor());
-    assert.deepEqual(doctor.data.checks.map(c => c.name).sort(), ['browser', 'ffmpeg', 'gpu', 'libx264', 'node', 'three']);
+    const checkNames = doctor.data.checks.map(c => c.name).sort();
+    for (const name of requiredChecks) assert.ok(checkNames.includes(name), `Missing required doctor check: ${name}`);
+    assert.deepEqual(await page.locator('[data-check]').evaluateAll(rows => rows.map(row => row.dataset.check).sort()), checkNames);
     for (const name of ['node', 'ffmpeg', 'libx264']) assert.equal(doctor.data.checks.find(c => c.name === name).ok, true, name);
     assert.equal(doctor.data.checks.find(c => c.name === 'browser').ok, browserAvailable);
     assert.equal(doctor.data.checks.find(c => c.name === 'three').ok, false);
     const gpu = doctor.data.checks.find(c => c.name === 'gpu');
     assert.equal(typeof gpu.ok, 'boolean');
     if (!browserAvailable) assert.equal(gpu.ok, false);
-    assert.equal(await page.locator('[data-check=gpu] .check-status').innerText(), gpu.ok ? '硬件加速可用' : '只能用软件光栅，渲染会变慢');
+    for (const c of doctor.data.checks.filter(c => c.name !== 'three')) assert.equal(await page.locator(`[data-check=${c.name}] .check-status`).textContent(), c.detail);
     assert.equal(doctor.data.config.path, path.join(home, 'config.json'));
     return doctor;
   };
@@ -159,36 +162,36 @@ try {
     assert.equal(entry.complete, false, 'No completed browser installation may be reused');
   }
   await shot('browser-missing.png');
-  await application.evaluate(({ dialog }) => {
+  await application.evaluate(({ dialog }, expected) => {
     dialog.showMessageBox = async (_window, options) => {
-      if (!options.detail.includes('Playwright 的官方下载服务') || !options.detail.includes('300–500 MB')) throw Error('Download confirmation is missing source or size');
+      if (options.detail !== expected) throw Error('Download confirmation is missing source or size');
       return { response: 1, checkboxChecked: false };
     };
-  });
-  await page.getByRole('button', { name: '安装浏览器', exact: true }).click();
+  }, copy.browserConfirmDetail);
+  await page.getByRole('button', { name: copy.installBrowser, exact: true }).click();
   await waitFor(async () => { const state = await page.evaluate(() => window.multiplane.browserInstallState()); return state.running && state.text.includes('Downloading'); }, 'Browser download did not start', 60000);
   evidence.browserDownload.progressObserved = true;
-  await page.getByRole('button', { name: '取消安装', exact: true }).click();
+  await page.getByRole('button', { name: copy.cancelInstall, exact: true }).click();
   await waitFor(async () => !(await page.evaluate(() => window.multiplane.browserInstallState())).running, 'Browser cancellation did not finish');
   await waitFor(async () => !await exists(path.join(browserCache, '__dirlock')), 'Cancellation left the Playwright cache locked');
   console.log('Browser cancellation released the cache lock; retrying the official download.');
-  await page.getByRole('button', { name: '安装浏览器', exact: true }).click();
-  await waitFor(async () => { const state = await page.evaluate(() => window.multiplane.browserInstallState()); return !state.running && (state.text === '浏览器安装完成' || state.text.startsWith('安装失败')); }, 'Browser download did not finish', 300000);
+  await page.getByRole('button', { name: copy.installBrowser, exact: true }).click();
+  await waitFor(async () => { const state = await page.evaluate(() => window.multiplane.browserInstallState()); return !state.running && (state.text === copy.browserInstalled || [copy.installError, copy.installExitError].some(text => state.text.startsWith(text.split('{')[0]))); }, 'Browser download did not finish', 300000);
   const browserResult = await page.evaluate(() => window.multiplane.browserInstallState());
-  assert.equal(browserResult.text, '浏览器安装完成', browserResult.text);
+  assert.equal(browserResult.text, copy.browserInstalled, browserResult.text);
   evidence.browserDownload.after = await browserState();
   for (const entry of evidence.browserDownload.after) {
     assert.equal(entry.exists, true, 'UI download must create the Chromium executable');
     assert.equal(entry.complete, true, 'UI download must complete the browser installation');
   }
-  await page.waitForFunction(() => document.querySelector('[data-check=browser] .check-status')?.textContent.startsWith('可用'));
+  await page.waitForFunction(() => document.querySelector('[data-check=browser] > span')?.classList.contains('succeeded'));
   evidence.checks.push('Fresh browser download: official confirmation, progress, cancellation, lock release, retry and successful installation into the default cache under isolated platform cache');
   const doctor = await checkDoctor(true);
   evidence.doctor = doctor.data.checks.map(({ name, ok }) => ({ name, ok }));
   console.log('Fresh browser installation and packaged doctor passed.');
   await shot('environment.png');
-  await page.locator('[data-page="设置"]').click();
-  await page.getByLabel('并行数', { exact: true }).fill('2'); await page.getByLabel('并行数', { exact: true }).press('Tab');
+  await page.locator('[data-page="settings"]').click();
+  await page.getByLabel(copy.workers, { exact: true }).fill('2'); await page.getByLabel(copy.workers, { exact: true }).press('Tab');
   await page.waitForFunction(() => !document.querySelector('#input-workers').disabled);
   assert.equal(JSON.parse(await readFile(path.join(home, 'config.json'))).workers, 2);
   evidence.checks.push('Settings page persisted workers=2 in isolated MULTIPLANE_HOME');
@@ -209,7 +212,7 @@ try {
   assert.ok(await exists(path.join(project, 'out/jobs', result.jobId, 'status.json')));
   evidence.render = { command: result.command, ok: result.ok, frames: result.data.frames, bundledRenderer: true, launchedByAppMain: true, execPath: evidence.runtime.execPath, renderer: evidence.runtime.renderer };
   console.log('Packaged renderer produced the real verification video.');
-  await page.locator('[data-page="作业"]').click();
+  await page.locator('[data-page="jobs"]').click();
   await page.locator(`[data-job="${result.jobId}"]`).waitFor();
   await page.locator(`[data-job="${result.jobId}"]`).click();
   await page.locator('video').waitFor();

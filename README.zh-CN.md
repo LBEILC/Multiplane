@@ -112,12 +112,14 @@ Shot.define({
 | `--from` / `--to` | 只渲染一段（秒，不含结束时刻） |
 | `--fps` | 覆盖镜头帧率 |
 | `--scale` | 输出倍率，如 `2` 把 1920×1080 的镜头输出为 3840×2160 |
+| `--draft` | 快速预览的预设：以不超过 0.5 的倍率截图再放大，不做运动模糊、不加颗粒。画质有意降低；显式给出的参数会覆盖它。`stills` 也支持 |
 | `--render-scale`、`--upscale` | 以较低倍率截图再放大（`lanczos` / `neighbor`），不得高于 `--scale` |
 | `--motion-blur`、`--shutter`、`--adaptive-blur` | 每帧时间采样数、快门占比、自适应采样 |
 | `--grain` | 胶片颗粒强度 |
 | `--no-post` | 关闭全部后期 |
 | `--workers` | 并行浏览器进程数，默认按 CPU、内存和分辨率估算 |
 | `--raster` | `gpu`（默认）或 `software` |
+| `--format`、`--alpha` | 输出格式 `mp4`（默认）、`webm`（VP9）或 `mov`（ProRes 4444）；`--alpha` 保留透明（只限 WebM 和 MOV，`stills`、`verify` 也支持）。见下文“透明视频” |
 | `--encoder`、`--max-bitrate` | 编码器、码率上限（Mbps） |
 | `--audio`、`--audio-offset` | 混入一条音轨及其偏移（秒） |
 
@@ -160,6 +162,23 @@ const result = await renderShot('examples/animation.html', {
 
 返回值与 `result` 事件结构相同（不含 `schema`、`type`、`ts`）；失败时抛出带 `code` 的 `MultiplaneError`。
 
+## 透明视频
+
+渲染背景透明的镜头，用来叠在别的画面上：
+
+```sh
+npx multiplane render examples/alpha.html --format webm --alpha
+npx multiplane render examples/alpha.html --format mov --alpha
+npx multiplane stills examples/alpha.html --alpha --at 0,1
+```
+
+页面背景会变成透明；镜头自己画的东西，包括 `#stage` 的背景色，照样不透明。想要整层透明，就别给 `#stage` 设背景。镜头可以用 `post: { alpha: true }` 把透明设为默认。
+
+- `webm` 用带 alpha 的 VP9。不少播放器会忽略 VP9 的 alpha；用 FFmpeg 检查时要加 `-c:v libvpx-vp9` 解码，默认的 VP9 解码器会丢掉 alpha。
+- `mov` 用 ProRes 4444，大多数剪辑软件能读出 alpha。
+- 运动模糊和缩放都按预乘颜色计算，移动的边缘不会出现暗边或色边。发布前渲染器会解码首帧和中间帧，确认 alpha 编码后仍在（每个像素误差不超过 2/255）。
+- FFmpeg 构建需要带 `libvpx-vp9`（WebM）和 `prores_ks`（MOV），`doctor` 会报告这两项。
+
 ## 三维层
 
 ```sh
@@ -175,6 +194,7 @@ npm install three@0.180.0
 - **作业**：列出各项目里的渲染、抽帧、检查作业，实时显示进度和预览帧，查看成片、联系表和检查不通过时的差异图，可以停止进行中的作业。
 - **环境**：检查浏览器、GPU 光栅、FFmpeg 等是否就绪；给 Claude Code（`~/.claude/skills/`）和 Codex（`~/.agents/skills/`）安装、更新 Multiplane 的 skill，自己改过的不会被直接覆盖。
 - **设置**：写入上文的用户配置 `config.json`。
+- 界面有英文和简体中文，默认跟随系统语言，也可以在设置里切换。
 
 它只通过 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md) 的文件和命令行与渲染器打交道，不是渲染的必需品：不装它，agent 照样可以用命令行渲染。
 

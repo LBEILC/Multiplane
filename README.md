@@ -112,12 +112,14 @@ Common `render` options:
 | `--from` / `--to` | Render a range only (seconds, end time excluded) |
 | `--fps` | Override the shot's frame rate |
 | `--scale` | Output scale; for example, `2` outputs a 1920×1080 shot at 3840×2160 |
+| `--draft` | Fast preview preset: capture at a scale of at most 0.5 and upscale, no motion blur, no grain. Lower quality by design; explicit options override it. Also available for `stills` |
 | `--render-scale`, `--upscale` | Capture at a lower scale, then upscale (`lanczos` / `neighbor`); the capture scale must not exceed `--scale` |
 | `--motion-blur`, `--shutter`, `--adaptive-blur` | Time samples per frame, shutter fraction, adaptive sampling |
 | `--grain` | Film grain intensity |
 | `--no-post` | Disable all post-processing |
 | `--workers` | Number of parallel browser processes; estimated from CPU, memory, and resolution by default |
 | `--raster` | `gpu` (default) or `software` |
+| `--format`, `--alpha` | Output format `mp4` (default), `webm` (VP9) or `mov` (ProRes 4444); `--alpha` keeps transparency (WebM and MOV only, also for `stills` and `verify`). See "Transparent video" below |
 | `--encoder`, `--max-bitrate` | Encoder, bitrate limit (Mbps) |
 | `--audio`, `--audio-offset` | Mix in one audio track with an offset (seconds) |
 
@@ -160,6 +162,23 @@ const result = await renderShot('examples/animation.html', {
 
 The return value has the same structure as the `result` event, without `schema`, `type` and `ts`. Failures throw a `MultiplaneError` with a `code`.
 
+## Transparent video
+
+Render a shot with a transparent background to lay it over other footage:
+
+```sh
+npx multiplane render examples/alpha.html --format webm --alpha
+npx multiplane render examples/alpha.html --format mov --alpha
+npx multiplane stills examples/alpha.html --alpha --at 0,1
+```
+
+The page background becomes transparent; anything the shot paints itself, including a background colour on `#stage`, stays opaque, so leave `#stage` without a background for a fully transparent layer. A shot can make transparency its default with `post: { alpha: true }`.
+
+- `webm` uses VP9 with alpha. Many players ignore VP9 alpha; to check it with FFmpeg, decode with `-c:v libvpx-vp9`, since the default VP9 decoder drops alpha.
+- `mov` uses ProRes 4444, which most video editors read with alpha.
+- Motion blur and scaling are computed on premultiplied colour, so moving edges do not pick up dark or coloured fringes. Before publishing, the renderer decodes the first and middle frames and checks that alpha survived encoding (at most 2/255 off per pixel).
+- Your FFmpeg build needs `libvpx-vp9` for WebM and `prores_ks` for MOV; `doctor` reports both.
+
 ## 3D layer
 
 ```sh
@@ -175,6 +194,7 @@ npm install three@0.180.0
 - **Jobs**: list render, stills, and check jobs across projects, show progress and preview frames in real time, view finished videos, contact sheets, and diff images from failed checks, and stop running jobs.
 - **Environment**: check whether the browser, GPU rasterization, FFmpeg, and other requirements are ready. Install and update the Multiplane skill for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), without directly overwriting user modifications.
 - **Settings**: write the user config `config.json` described above.
+- The interface is in English and Simplified Chinese. It follows the system language and can be switched in Settings.
 
 It communicates with the renderer only through the files and commands in [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md). It is not required for rendering: agents can render from the command line without it.
 

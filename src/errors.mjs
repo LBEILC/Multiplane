@@ -24,6 +24,7 @@ export const errorCodes = Object.freeze(Object.fromEntries([
   [4, 'browser_crashed', 'Browser closed unexpectedly and recovery failed.'],
   [4, 'worker_crashed', 'A rendering worker exited unexpectedly.'],
   [4, 'encode_failed', 'Video encoding failed.'],
+  [4, 'output_invalid', 'Output does not match the rendered frames.'],
   [4, 'internal_error', 'An internal error occurred.'],
   [130, 'cancelled', 'Job was cancelled.'],
 ].map(([exitCode, code, message]) => [code, { exitCode, message }])));

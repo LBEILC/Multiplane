@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { userError } from '../shared/errors.mjs';
@@ -5,9 +6,17 @@ import { spawn } from 'node:child_process';
 
 export class BrowserInstaller {
   child = null;
-  state = { running: false, text: '' };
+  rawState = { running: false, text: '' };
+  statusKey = '';
+  statusValues = {};
+  get state() {
+    const values = this.statusKey === 'installError' ? { ...this.statusValues, error: userError(this.statusValues.error) } : this.statusValues;
+    const status = this.statusKey ? t(this.statusKey, values) : '';
+    return { running: this.rawState.running, text: [status, this.rawState.text].filter(Boolean).join('\n') };
+  }
   constructor(root, notify, worker, launch = spawn) { this.root = root; this.notify = notify; this.worker = worker; this.launch = launch; }
-  publish(patch) { this.state = { ...this.state, ...patch }; this.notify(this.state); }
+  refresh() { this.notify(this.state); }
+  publish(patch) { this.rawState = { ...this.rawState, ...patch }; this.refresh(); }
   start() {
     if (this.child) return false;
     // Deliberately use Playwright's default shared cache, never an app-private cache.
@@ -15,14 +24,15 @@ export class BrowserInstaller {
     delete env.PLAYWRIGHT_BROWSERS_PATH;
     delete env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD;
     this.cancelled = false;
-    this.publish({ running: true, text: '正在连接 Playwright 下载服务…' });
+    this.statusKey = 'browserConnecting'; this.statusValues = {};
+    this.publish({ running: true, text: '' });
     // Keep certificate checks enabled; scope the Electron/BoringSSL compatibility setting to downloads.
     const tls = process.platform === 'win32' ? ['--tls-max-v1.2'] : [];
     const child = this.child = this.launch(process.execPath, [...tls, this.worker, path.join(this.root, 'node_modules/playwright/cli.js'), 'install', 'chromium'], { cwd: os.tmpdir(), env, shell: false, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
-    const output = bytes => this.publish({ text: (this.state.text + '\n' + bytes.toString().replace(/\x1b\[[0-9;]*m/g, '')).slice(-6000) });
+    const output = bytes => this.publish({ text: (this.rawState.text + '\n' + bytes.toString().replace(/\x1b\[[0-9;]*m/g, '')).slice(-6000) });
     child.stdout.on('data', output); child.stderr.on('data', output);
-    child.once('error', error => { this.child = null; this.publish({ running: false, text: `安装失败：${userError(error)}` }); });
-    child.once('close', code => { this.child = null; this.publish({ running: false, text: this.cancelled ? '已取消安装' : code === 0 ? '浏览器安装完成' : `安装失败（${code}）\n${this.state.text}` }); });
+    child.once('error', error => { this.child = null; this.statusKey = 'installError'; this.statusValues = { error: userError(error) }; this.publish({ running: false }); });
+    child.once('close', code => { this.child = null; this.statusKey = this.cancelled ? 'installCancelled' : code === 0 ? 'browserInstalled' : 'installExitError'; this.statusValues = { code, output: this.cancelled || code === 0 ? '' : this.rawState.text }; this.publish({ running: false, text: '' }); });
     return true;
   }
   async cancel() {

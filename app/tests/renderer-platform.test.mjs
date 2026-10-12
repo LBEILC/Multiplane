@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import releasePackage from '../../package.json' with { type: 'json' };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +24,7 @@ test('renderer uses Darwin labels, home paths and brand spacing after delayed pl
       platform: () => new Promise(resolve => { window.resolvePlatform = () => resolve({ platform: 'darwin', home: '/Users/test' }); }),
       subscribe: fn => { fn(snapshot); return () => {}; },
       snapshot: async () => snapshot,
-      settings: async () => ({ file: '/Users/test/config.json', values: {}, overrides: {}, own: { wizardDone: true, theme: 'system', notifications: false }, version: version }),
+      settings: async () => ({ file: '/Users/test/config.json', values: {}, overrides: {}, own: { language: 'en', wizardDone: true, theme: 'system', notifications: false }, version: version }),
       browserInstallState: async () => ({ running: false, text: '' }),
       onBrowserInstallState: () => () => {}, onSkillConfirmation: () => () => {},
       doctor: async () => ({ data: { checks: [], config: { path: '/Users/test/config.json', exists: true } } }),
@@ -31,26 +32,26 @@ test('renderer uses Darwin labels, home paths and brand spacing after delayed pl
     };
   }, releasePackage.version);
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  await page.locator('[data-page="设置"]').click();
+  await page.locator('[data-page="settings"]').click();
   assert.equal(await page.locator('#placeholder').innerHTML(), '');
   assert.equal(await page.locator('.titlebar > .brand-lockup').evaluate(el => getComputedStyle(el).visibility), 'hidden');
   assert.equal(await page.locator('[data-job]').count(), 0);
   await page.evaluate(() => window.resolvePlatform());
   await page.waitForFunction(() => document.documentElement.dataset.platform === 'darwin');
   await page.locator('[data-pref="open-config"]').waitFor();
-  for (const name of ['设置', '环境']) {
+  for (const name of ['settings', 'environment']) {
     await page.locator(`[data-page="${name}"]`).click();
     await page.locator('[data-pref="open-config"]').waitFor();
-    assert.equal(await page.locator('[data-pref="open-config"]').innerText(), '在访达中显示');
+    assert.equal(await page.locator('[data-pref="open-config"]').innerText(), copy.revealFinder);
     assert.equal(await page.locator('.path-value > .mono').innerText(), '~/config.json');
-    assert.equal(await page.getByRole('button', { name: '在访达中显示', exact: true }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: copy.revealFinder, exact: true }).count(), 1);
   }
   assert.equal(await page.locator('.titlebar > .brand-lockup').evaluate(el => getComputedStyle(el).paddingLeft), '78px');
   assert.equal(await page.locator('.titlebar > .brand-lockup').evaluate(el => getComputedStyle(el).visibility), 'visible');
   assert.equal(await page.locator('.info-row .mono').last().innerText(), '~/bin/multiplane');
-  await page.locator('[data-page="作业"]').click();
-  await page.getByRole('tab', { name: '结果', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '在访达中显示', exact: true }).count(), 1);
+  await page.locator('[data-page="jobs"]').click();
+  await page.getByRole('tab', { name: copy.result, exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: copy.revealFinder, exact: true }).count(), 1);
   assert.equal(await page.locator('.artifact .mono').innerText(), '~/output.png');
   assert.deepEqual(errors, []);
 });

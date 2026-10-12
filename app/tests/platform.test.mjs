@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,10 +16,10 @@ test('platform display preserves path boundaries and uses the specified reveal l
   await initPlatform();
   assert.equal(displayPath('/Users/test/file'), '~/file');
   assert.equal(displayPath('/Users/test-other/file'), '/Users/test-other/file');
-  assert.equal(revealLabel(), '在访达中显示');
+  assert.equal(revealLabel(), copy.revealFinder);
   window.multiplane.platform = async () => ({ platform: 'win32', home: 'C:\\profile' });
   await initPlatform(); assert.equal(displayPath('C:/work/file'), 'C:\\work\\file');
-  assert.equal(revealLabel(), '在文件夹中显示');
+  assert.equal(revealLabel(), copy.showFolder);
   delete globalThis.document; delete globalThis.window;
 });
 test('ICNS container retains each PNG representation and a valid total length', async () => {

@@ -2,7 +2,7 @@ import path from 'node:path';
 
 export function privacyMasks(page) {
   // Mask the path text, never its sibling reveal button.
-  return ['.path-value > .mono', '.check-detail', '.info-row .mono', '[data-host-card] .mono', '.path-input', '.setting-row small .mono'].map(selector => page.locator(selector));
+  return ['.path-value > .mono', '.check-detail', ':lang(en) .check-row .check-status', '.info-row .mono', '[data-host-card] .mono', '.path-input', '.setting-row small .mono'].map(selector => page.locator(selector));
 }
 
 export async function captureFailure(page, out, error) {

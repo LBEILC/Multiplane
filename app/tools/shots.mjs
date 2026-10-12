@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import { ensureElectron } from './electron.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,7 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const require = createRequire(path.join(root, 'package.json'));
 const { _electron } = require('playwright');
 const fixture = await demo(), out = path.join(root, 'out', 'app-shots'); await mkdir(out, { recursive: true });
-await writeFile(path.join(fixture.appData, 'preferences.json'), JSON.stringify({ theme: 'system', notifications: true, hidden: [], wizardDone: true }));
+await writeFile(path.join(fixture.appData, 'preferences.json'), JSON.stringify({ theme: 'system', notifications: true, hidden: [], language: 'en', wizardDone: true }));
 const electron = await _electron.launch({ args: [path.join(root, 'app')], executablePath: await ensureElectron(), env: fixture.env });
 const errors = []; const evidence = { screenshots: [], notifications: [], real: {} };
 let child;
@@ -39,7 +40,7 @@ try {
     await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme);
     for (const id of ['success', 'running', 'failed', 'verify', 'cancelled', 'lost', 'stills']) {
       await page.locator(`[data-job="${demoIds[id]}"]`).click();
-      await page.getByRole('tab', { name: '预览', exact: true }).click();
+      await page.getByRole('tab', { name: copy.preview, exact: true }).click();
       if (id === 'success') {
         await page.waitForFunction(() => document.querySelector('video')?.readyState >= 1);
         await page.evaluate(async () => { const video = document.querySelector('video'); video.muted = true; await video.play(); });
@@ -47,11 +48,11 @@ try {
         await page.evaluate(() => document.querySelector('video').pause());
       }
       if (['running', 'verify', 'stills'].includes(id)) await page.waitForFunction(() => [...document.querySelectorAll('#tab-content img')].every(img => img.complete && img.naturalWidth > 0));
-      if (id === 'verify') { assert.equal(await page.locator('.bbox:not([hidden])').count(), 3); assert.match(await page.locator('.caption').innerText(), /变化区域 x 180，y 95，120 × 80 · 6400 像素/); }
+      if (id === 'verify') { assert.equal(await page.locator('.bbox:not([hidden])').count(), 3); assert.match(await page.locator('.caption').innerText(), /Changed region x 180, y 95, 120 × 80 · 6,400 pixels/); }
       assert.equal(await page.locator('.job-id').innerText(), demoIds[id]);
       assert.equal(await page.locator('.job-id').evaluate(el => getComputedStyle(el).userSelect), 'text');
       if (['failed', 'verify', 'cancelled'].includes(id)) assert.ok((await page.locator('#banner').innerText()).includes(errorCodes[id === 'failed' ? 'render_threw' : id === 'verify' ? 'nondeterministic_output' : 'cancelled'].message));
-      if (id === 'lost') assert.match(await page.locator('#banner').innerText(), /渲染进程意外退出/);
+      if (id === 'lost') assert.match(await page.locator('#banner').innerText(), /The render process exited unexpectedly/);
       await delay(120);
       const file = `${theme}-${size}-${id}.png`; await page.screenshot({ path: path.join(out, file) }); evidence.screenshots.push(file);
     }
@@ -67,7 +68,7 @@ try {
       const filterFile = `${theme}-filter-open.png`;
       await page.screenshot({ path: path.join(out, filterFile) }); evidence.screenshots.push(filterFile);
       await page.keyboard.press('Escape');
-      await page.locator('[data-page="关于"]').click();
+      await page.locator('[data-page="about"]').click();
       // Render at 2x in Chromium, then combine both actual UI crops without resizing.
       await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
       await page.evaluate(() => document.fonts.ready);
@@ -89,18 +90,18 @@ try {
       await sharp({ create: { width: Math.max(sa.width, aa.width), height: sa.height + aa.height, channels: 4, background: theme === 'light' ? '#fcfcfb' : '#151515' } }).composite([{ input: sidebar, left: 0, top: 0 }, { input: about, left: 0, top: sa.height }]).png().toFile(path.join(out, zoomFile));
       evidence.screenshots.push(zoomFile);
       await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
-      await page.locator('[data-page="作业"]').click();
+      await page.locator('[data-page="jobs"]').click();
     }
   }
   await page.locator(`[data-job="${demoIds.success}"]`).click();
-  for (const tab of ['事件', '结果', '参数']) { await page.getByRole('tab', { name: tab, exact: true }).click(); assert.ok((await page.locator('#tab-content').innerText()).length > 10); }
-  await page.getByRole('tab', { name: '预览', exact: true }).click();
+  for (const tab of [copy.events, copy.result, copy.options]) { await page.getByRole('tab', { name: tab, exact: true }).click(); assert.ok((await page.locator('#tab-content').innerText()).length > 10); }
+  await page.getByRole('tab', { name: copy.preview, exact: true }).click();
   await page.evaluate(() => { document.querySelector('video').dataset.preserved = 'yes'; }); await delay(2200);
   assert.equal(await page.locator('video').getAttribute('data-preserved'), 'yes');
-  await page.getByRole('button', { name: '打开文件夹', exact: true }).focus(); await delay(1200);
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent), '打开文件夹');
-  await page.getByRole('button', { name: '从列表隐藏', exact: true }).click(); await page.locator(`[data-job="${demoIds.success}"]`).waitFor({ state: 'detached' });
-  for (const name of ['环境', '设置', '关于', '作业']) await page.locator(`[data-page="${name}"]`).click();
+  await page.getByRole('button', { name: copy.openFolder, exact: true }).focus(); await delay(1200);
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), copy.openFolder);
+  await page.getByRole('button', { name: copy.hideJob, exact: true }).click(); await page.locator(`[data-job="${demoIds.success}"]`).waitFor({ state: 'detached' });
+  for (const name of ['environment', 'settings', 'about', 'jobs']) await page.locator(`[data-page="${name}"]`).click();
   assert.equal(await page.locator('select').count(), 0);
   await page.locator('#state-filter').focus(); await page.keyboard.press('Enter');
   await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
@@ -151,19 +152,19 @@ try {
   assert.ok(snapshotBefore.done > 0); assert.equal(snapshotBefore.state, 'running');
   // Native dialog response is automated; verify its exact text and default focus.
   await electron.evaluate(({ dialog }) => { globalThis.__dialog = null; globalThis.__answer = 0; dialog.showMessageBox = async (_win, options) => { globalThis.__dialog = options; return { response: globalThis.__answer, checkboxChecked: false }; }; });
-  await page.getByRole('button', { name: '停止', exact: true }).click();
+  await page.getByRole('button', { name: copy.stop, exact: true }).click();
   await delay(100);
   await assert.rejects(readFile(path.join(fixture.home, 'real-jobs', id, 'stop')), { code: 'ENOENT' });
   await electron.evaluate(() => { globalThis.__answer = 1; });
-  const stopAt = performance.now(); await page.getByRole('button', { name: '停止', exact: true }).click();
+  const stopAt = performance.now(); await page.getByRole('button', { name: copy.stop, exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#banner')?.textContent.includes('cancelled'), null, { timeout: 30000 });
   const cancelMs = performance.now() - stopAt; const exit = await done;
   assert.equal(exit, 130, stderr);
-  const dialog = await electron.evaluate(() => globalThis.__dialog); assert.equal(dialog.defaultId, 0); assert.deepEqual(dialog.buttons, ['取消', '停止']);
+  const dialog = await electron.evaluate(() => globalThis.__dialog); assert.equal(dialog.defaultId, 0); assert.deepEqual(dialog.buttons, [copy.cancel, copy.stop]);
   const status = JSON.parse(await readFile(path.join(fixture.home, 'real-jobs', id, 'status.json'), 'utf8')); assert.equal(status.state, 'cancelled');
   evidence.notifications = await electron.evaluate(() => globalThis.__notifications.map(n => n.title));
-  assert.deepEqual(evidence.notifications, ['已取消：animation.html']);
-  await page.getByRole('button', { name: '从列表隐藏', exact: true }).click();
+  assert.deepEqual(evidence.notifications, [copy.notification.replace('{status}', copy.cancelled).replace('{name}', 'animation.html')]);
+  await page.getByRole('button', { name: copy.hideJob, exact: true }).click();
   await page.locator(`[data-job="${id}"]`).waitFor({ state: 'detached' });
   await electron.evaluate(() => { globalThis.__notifications[0].emit('click'); });
   await page.waitForFunction(id => document.querySelector('.job-id')?.textContent === id, id);
@@ -177,10 +178,10 @@ try {
   const original = await page.evaluate(() => window.multiplane.snapshot());
   const publish = snapshot => electron.evaluate(({ BrowserWindow }, snapshot) => BrowserWindow.getAllWindows()[0].webContents.send('snapshot', snapshot), snapshot);
   await publish({ ...original, jobs: [], runningCount: 0 });
-  await page.waitForFunction(() => document.querySelector('#list')?.textContent.includes('还没有作业。'));
+  await page.locator('#list > .empty').waitFor();
   assert.equal(await page.locator('#list code').count(), 3);
-  assert.equal(await page.locator('#detail .empty').innerText(), '选择一个作业');
-  for (const [command, state, message] of [['render', 'running', '第一帧完成后显示预览'], ['render', 'failed', '这个作业没有预览'], ['stills', 'succeeded', '这个作业没有预览'], ['verify', 'succeeded', '这个作业没有预览']]) {
+  assert.equal(await page.locator('#detail .empty').innerText(), copy.selectJob);
+  for (const [command, state, message] of [['render', 'running', copy.firstFrame], ['render', 'failed', copy.noPreview], ['stills', 'succeeded', copy.noPreview], ['verify', 'succeeded', copy.noPreview]]) {
     await publish({ ...original, jobs: [{ ...original.jobs[0], jobId: `empty-${command}-${state}`, command, state, previewFrame: null, result: null, events: [] }] });
     await page.waitForFunction(message => document.querySelector('#tab-content .empty')?.textContent === message, message);
   }

@@ -7,6 +7,7 @@ import { runCommand } from './events.mjs';
 import { loaded, observeBrowser } from './environment.mjs';
 import { invalidOption } from './errors.mjs';
 import { requireNewOutput, writeArtifact } from './artifacts.mjs';
+import { checkStill } from './output-check.mjs';
 
 export async function stillsShot(shot, options = {}) {
   return runCommand('stills', shot, options, async events => {
@@ -24,6 +25,7 @@ export async function stillsShot(shot, options = {}) {
       events.progress('load');
       if (options.at !== undefined && options.every !== undefined) throw invalidOption('--at', '--at and --every are mutually exclusive.');
       capture = await openShot(shot, resolveScale(options).renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events) });
+      options.alpha = capture.alpha;
       await loaded(events, capture);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
       const processed = createPostCapture(capture, options, fps);
@@ -44,6 +46,7 @@ export async function stillsShot(shot, options = {}) {
         events.check();
         const buffer = await processed.frame(t);
         await writeArtifact(path.join(out, `t-${t.toFixed(2)}.png`), buffer);
+        await checkStill(path.join(out, `t-${t.toFixed(2)}.png`), { width: capture.width * scale, height: capture.height * scale });
         frames.push({ time: t.toFixed(2), image: buffer.toString('base64') });
         events.artifact(path.join(out, `t-${t.toFixed(2)}.png`), 'still');
         events.progress('capture', frames.length, times.length);
@@ -52,15 +55,16 @@ export async function stillsShot(shot, options = {}) {
       const rowHeight = thumbnailHeight + 40;
       const sheetPNG = await capture.retryFrame(undefined, async () => {
       const sheet = await capture.browser.newPage({ viewport: { width: 1920, height: Math.ceil(Math.ceil(frames.length / 4) * rowHeight) }, deviceScaleFactor: 1 });
-      await sheet.setContent(`<html><head><style>body{margin:0;background:#222;color:#fff;font:24px sans-serif}main{display:grid;grid-template-columns:repeat(4,480px)}figure{margin:0;width:480px;height:${rowHeight}px}img{display:block;width:480px;height:${thumbnailHeight}px}figcaption{height:40px;line-height:40px;text-align:center}</style></head><body><main>${frames.map(f => `<figure><img src="data:image/png;base64,${f.image}"><figcaption>t = ${f.time} s</figcaption></figure>`).join('')}</main></body></html>`);
+      await sheet.setContent(`<html><head><style>body{margin:0;background:#222;color:#fff;font:24px sans-serif}main{display:grid;grid-template-columns:repeat(4,480px)}figure{margin:0;width:480px;height:${rowHeight}px}img{${options.alpha ? 'background:conic-gradient(#bbb 25%,#eee 0 50%,#bbb 0 75%,#eee 0) 0 0/24px 24px;' : ''}display:block;width:480px;height:${thumbnailHeight}px}figcaption{height:40px;line-height:40px;text-align:center}</style></head><body><main>${frames.map(f => `<figure><img src="data:image/png;base64,${f.image}"><figcaption>t = ${f.time} s</figcaption></figure>`).join('')}</main></body></html>`);
       await sheet.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode())); });
       try { return await sheet.screenshot({ fullPage: true }); } finally { await sheet.close().catch(() => {}); }
       });
       await writeArtifact(path.join(out, '_sheet.png'), sheetPNG);
+      await checkStill(path.join(out, '_sheet.png'), { width: 1920, height: Math.ceil(Math.ceil(frames.length / 4) * rowHeight) });
       events.artifact(path.join(out, '_sheet.png'), 'contact-sheet');
-      result = { stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
+      result = { format: 'png', alpha: capture.alpha, stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
     } finally { await cleanup(); }
 
-    return result;
+    return options.draft ? { ...result, draft: true } : result;
   });
 }

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import copy from '../shared/copy/en.mjs';
 import os from 'node:os';
 import { watch } from 'node:fs';
 import { readFile, open, stat, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -44,14 +45,14 @@ export class EventTail {
   }
 }
 export class Preferences {
-  /** @type {{theme: string, notifications: boolean, hidden: string[], wizardDone: boolean}} */
-  value = { theme: 'system', notifications: true, hidden: [], wizardDone: false };
+  /** @type {{theme: string, language: string, notifications: boolean, hidden: string[], wizardDone: boolean}} */
+  value = { theme: 'system', language: 'system', notifications: true, hidden: [], wizardDone: false };
   queue = Promise.resolve();
   constructor(directory) { this.file = path.join(directory, 'preferences.json'); }
   async load() {
     try {
       const v = JSON.parse(await readFile(this.file, 'utf8'));
-      this.value = { theme: ['system', 'light', 'dark'].includes(v.theme) ? v.theme : 'system', notifications: v.notifications !== false, hidden: Array.isArray(v.hidden) ? v.hidden.filter(x => typeof x === 'string') : [], wizardDone: v.wizardDone === true };
+      this.value = { language: ['system', 'zh-CN', 'en'].includes(v.language) ? v.language : 'system', theme: ['system', 'light', 'dark'].includes(v.theme) ? v.theme : 'system', notifications: v.notifications !== false, hidden: Array.isArray(v.hidden) ? v.hidden.filter(x => typeof x === 'string') : [], wizardDone: v.wizardDone === true };
     } catch (e) { if (e.code !== 'ENOENT' && !(e instanceof SyntaxError)) throw e; }
     return this.value;
   }
@@ -101,7 +102,7 @@ export class JobStore extends EventEmitter {
         const job = { ...s, jobDir: record.jobDir, events, previewVersion };
         if (s.state === 'running' && !this.alive(s.pid)) {
           job.state = 'failed'; job.lost = true;
-          job.result = { schema: s.schema, type: 'result', command: s.command, ts: s.updatedAt, ok: false, code: 'internal_error', message: '渲染进程意外退出', artifacts: events.filter(e => e.type === 'artifact').map(({ path, kind, bytes }) => ({ path, kind, bytes })), data: {}, elapsedMs: Math.max(0, Date.parse(s.updatedAt) - Date.parse(s.startedAt)) };
+          job.result = { schema: s.schema, type: 'result', command: s.command, ts: s.updatedAt, ok: false, code: 'internal_error', message: copy.processLost, artifacts: events.filter(e => e.type === 'artifact').map(({ path, kind, bytes }) => ({ path, kind, bytes })), data: {}, elapsedMs: Math.max(0, Date.parse(s.updatedAt) - Date.parse(s.startedAt)) };
         }
         jobs.push(job);
       } catch (e) {

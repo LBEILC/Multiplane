@@ -148,7 +148,7 @@ Use `--json` with any command. Resolve shot paths relative to `--root` (the curr
 | `multiplane lint <shot>` | Static code checks without a browser | `--root` |
 | `multiplane stills <shot>` | Stills and contact sheet | `--at 0,1.5,3` (seconds) or `--every 0.5`; `--out` |
 | `multiplane verify <shot>` | Determinism check: pixel comparisons out of order, after reload, and with single/multiple processes | `--at` (must fall on frames), `--workers` (default 2) |
-| `multiplane render <shot>` | Render video | `--out`, `--from` / `--to` (seconds, end excluded), `--fps`, `--scale`, `--workers`, `--motion-blur`, `--shutter`, `--grain`, `--no-post`, `--encoder`, `--audio` |
+| `multiplane render <shot>` | Render video | `--out`, `--from` / `--to` (seconds, end excluded), `--fps`, `--scale`, `--workers`, `--motion-blur`, `--shutter`, `--grain`, `--no-post`, `--draft`, `--encoder`, `--audio` |
 | `multiplane doctor` | Check the environment | — |
 | `multiplane status <job>` | View job status | — |
 | `multiplane cancel <job>` | Stop a job | `--wait` (seconds) |
@@ -158,6 +158,12 @@ Use `--out`, `--overwrite`, and `--no-lint` (skip automatic lint) with `stills`,
 Each run has its own job directory, `out/jobs/<jobId>/`. Without `--out`, artifacts are written there; use `artifacts` in the result for the paths. If `--out` points to an existing file, the command fails with `output_exists`. Add `--overwrite` when you intend to replace it (replacement happens only after the new artifact is fully written; on failure, the old file stays untouched).
 
 FFmpeg is not bundled. It is found in this order: `--ffmpeg <path>`, the environment variable `MULTIPLANE_FFMPEG`, `ffmpeg` in the user config `config.json`, then the system PATH. It must support libx264. Find the user config file's location in the `doctor` result. Let the user manage the user config; do not rewrite it without authorization.
+
+Use `--draft` with `render` or `stills` while iterating: it captures at a scale of at most 0.5 and upscales, with no motion blur and no grain, so it is faster and visibly lower in quality. Options you pass explicitly override the preset. Render the final video without `--draft`; `result.data.draft` is `true` when a draft was produced, so do not hand a draft over as the final result.
+
+## Transparent output
+
+When the result must be laid over other footage, render with `--alpha` and `--format webm` (VP9) or `--format mov` (ProRes 4444); MP4 cannot carry alpha and `--alpha` with MP4 fails with `invalid_option`. The page background is transparent; do not give `#stage` (or a full-size element) a background colour if the layer should be transparent. Declare `post: { alpha: true }` in the shot when transparency is its normal output. Check transparent shots with `verify --alpha` and `stills --alpha`. Do not judge alpha by playing the WebM in a browser or a generic player; the renderer has already decoded and checked it.
 
 ## Read results
 
@@ -169,6 +175,8 @@ With `--json`, stdout contains one JSON event per line. **The last line is alway
 
 - When `ok: false`, use `code` to decide what to do next and `hint` for a suggested fix. Do not parse `message` to make decisions.
 - Interpret exit codes as follows: 0 success; 1 shot or check failure (fix the shot); 2 invalid arguments (fix the command); 3 environment problem (run `doctor`); 4 renderer internal error (retry once, then report if it still fails); 130 cancelled.
+- Before a video is published, the renderer reads the encoded file back and compares frame count, duration, size and frame rate with what it rendered (`result.data.outputCheck`). On a mismatch the command ends with `output_invalid` (exit code 4) and nothing is published; an existing file at the output path is left untouched. Retry once and report it if it repeats. A `warning` with `code: "output_unverified"` means the file was published without this check; inspect it before relying on it.
+- `result.data.resources.peakMemoryBytes` is the sampled peak memory of the whole process tree. If jobs fail with `browser_crashed` or `worker_crashed` and this value is close to the machine's memory, lower `--workers` or `--scale`.
 - If the browser process closes unexpectedly, the renderer relaunches it and renders the affected frame again. You will see a `warning` event with `code: "browser_restarted"`; pixels are unaffected, so no action is needed. If it keeps failing, the command ends with `browser_crashed` (exit code 4): this is not a problem in the shot. Retry once, then try `--raster software`, and report it if it still fails.
 - Read each `lint` issue as a `finding`: `code` is the rule code (corresponding to the constraints above, such as `wall_clock`, `css_animation`, `remote_resource`), `location` provides `file`, `line`, and `column`, `details.snippet` is the source line, and `hint` explains what to use instead. Fix every `severity: "error"`. A `"warning"` (such as `timer_driven` or `font_not_awaited`) does not block rendering but usually indicates a problem.
 - When `verify` fails, `code` is `nondeterministic_output`. Read the preceding `finding` events for the failed check (`reorder` for out-of-order calls / `reload` for page reloads / `workers:<n>` for parallel processes / `range` for consecutive frames), time `t`, changed pixel count, changed region `bbox`, and paths to the reference frame, actual frame, and diff image. Inspect the diff image and `bbox` to locate the element, then use the constraint table above to find the cause. Common patterns:

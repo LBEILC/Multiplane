@@ -23,12 +23,15 @@ export const doctor = (options = {}) => runCommand('doctor', null, options, asyn
   try {
     ffmpeg = await inspectFFmpeg(options.ffmpeg);
     checks.push({ name: 'ffmpeg', ok: true, detail: ffmpeg.version });
-    const x264 = /\blibx264\b/.test(await ffmpegOutput(ffmpeg.path, ['-encoders']));
+    const encoderList = await ffmpegOutput(ffmpeg.path, ['-encoders']);
+    const x264 = /\blibx264\b/.test(encoderList);
+    for (const name of ['libvpx-vp9', 'prores_ks']) checks.push({ name, ok: new RegExp('\\b' + name + '\\b').test(encoderList), detail: name + ' is optional; required only for its video format, including transparent output.' });
     checks.push({ name: 'libx264', ok: x264, detail: x264 ? 'libx264 is available.' : 'libx264 is unavailable.' });
     if (!x264) failure ??= new MultiplaneError('ffmpeg_unusable', undefined, { hint: 'Install an FFmpeg build with libx264.' });
   } catch (error) {
     failure ??= error;
     checks.push({ name: 'ffmpeg', ok: false, detail: error.message }, { name: 'libx264', ok: false, detail: 'Encoder list could not be inspected.' });
+    for (const name of ['libvpx-vp9', 'prores_ks']) checks.push({ name, ok: false, detail: `${name} is optional; encoder availability could not be inspected.` });
   }
   if (info) events.emit('environment', { ...info, ffmpeg: ffmpeg ?? null });
   try { await import('three'); checks.push({ name: 'three', ok: true, detail: 'Optional three.js is available.' }); }

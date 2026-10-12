@@ -5,10 +5,10 @@ import { createEvents, version } from '../src/events.mjs';
 import { asError, invalidOption } from '../src/errors.mjs';
 
 const args = process.argv.slice(2), json = args.includes('--json');
-const common = [...postArgs, ...scaleArgs, 'fps', 'raster', 'root', 'job-dir', 'no-lint', 'overwrite'];
+const common = [...postArgs, ...scaleArgs, 'alpha', 'fps', 'raster', 'root', 'job-dir', 'no-lint', 'overwrite'];
 const allowed = {
-  render: [...common, 'out', 'from', 'to', 'workers', 'encoder', 'max-bitrate', 'audio', 'audio-offset', 'ffmpeg'],
-  stills: [...common, 'out', 'at', 'every'], verify: [...common, 'out', 'at', 'workers'],
+  render: [...common, 'format', 'draft', 'out', 'from', 'to', 'workers', 'encoder', 'max-bitrate', 'audio', 'audio-offset', 'ffmpeg'],
+  stills: [...common, 'draft', 'out', 'at', 'every'], verify: [...common, 'out', 'at', 'workers'],
   lint: ['root'], doctor: ['ffmpeg', 'raster'], status: ['job-dir'], cancel: ['job-dir', 'wait'],
 };
 let reported = false;
@@ -31,7 +31,7 @@ try {
   } else {
     if (!allowed[command]) throw invalidOption('command', 'Unknown command: ' + command);
     if (args.includes('--help')) {
-      console.log('Usage: multiplane ' + command + (command === 'doctor' ? '' : ['status', 'cancel'].includes(command) ? ' <jobId|jobDir>' : ' <shot.html>') + ' [options]\nOptions: --json --help ' + allowed[command].map(f => '--' + f + (['overwrite', 'no-lint', 'no-post'].includes(f) ? '' : ' <value>')).join(' '));
+      console.log('Usage: multiplane ' + command + (command === 'doctor' ? '' : ['status', 'cancel'].includes(command) ? ' <jobId|jobDir>' : ' <shot.html>') + ' [options]\nOptions: --json --help ' + allowed[command].map(f => '--' + f + (['overwrite', 'no-lint', 'no-post', 'alpha', 'draft'].includes(f) ? '' : ' <value>')).join(' '));
     } else {
       const needsTarget = command !== 'doctor';
       const target = needsTarget ? args[1] : undefined;
@@ -40,7 +40,7 @@ try {
       for (let i = 0; i < flags.length;) {
         const flag = flags[i], key = flag.replace(/^--/, '');
         if (!flag.startsWith('--') || !(allowed[command].includes(key) || key === 'json') || key in options) throw invalidOption(flag, 'Invalid or duplicate option: ' + flag);
-        if (['json', 'no-post', 'overwrite', 'no-lint'].includes(key)) { options[key] = true; i++; }
+        if (['json', 'alpha', 'no-post', 'overwrite', 'no-lint', 'draft'].includes(key)) { options[key] = true; i++; }
         else {
           if (flags[i + 1] === undefined || flags[i + 1].startsWith('--')) throw invalidOption(flag, 'Missing option value: ' + flag);
           options[key] = flags[i + 1]; i += 2;

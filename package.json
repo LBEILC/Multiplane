@@ -29,7 +29,8 @@
     "postinstall": "node tools/install-browser.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "export:public": "node tools/export-public.mjs",
-    "release:check": "node tools/release-check.mjs"
+    "release:check": "node tools/release-check.mjs",
+    "bench": "node tools/bench/run.mjs"
   },
   "dependencies": {
     "acorn": "8.15.0",

@@ -28,6 +28,8 @@ export async function environment(browser, ffmpeg = null) {
   } finally { await session.detach(); }
 }
 export async function loaded(events, capture, ffmpeg = null) {
+  events.options.alpha = capture.alpha;
+  events.start(true);
   const { width, height, duration, fps, cuts, post } = capture;
   events.emit('shot', { width, height, duration, fps, cuts, post });
   events.check();

@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n.mjs';
 import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
 import os from 'node:os';
@@ -42,7 +43,7 @@ export async function pathVersion(file, env = process.env) {
     // npm's Windows shim can be launched through Electron without invoking a shell.
     const shim = await fs.readFile(file, 'utf8');
     const match = shim.match(/"%dp0%[\\/]([^"\r\n]+)"[ \t]+%\*/i);
-    if (!match || /[\r\n%]/.test(match[1])) throw Error('无法读取此命令包装器的版本');
+    if (!match || /[\r\n%]/.test(match[1])) throw Error(t('wrapperVersionError'));
     const script = path.resolve(path.dirname(file), match[1]);
     result = await execute(process.execPath, [script, '--version'], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 10000 });
   } else result = await execute(file, ['--version'], { env, timeout: 10000 });
@@ -104,7 +105,7 @@ async function realRoot(root) {
     return path.join(await realRoot(parent), path.basename(root));
   }
 }
-const linkedSkill = () => Object.assign(Error('skill 目录或其内部包含符号链接，请手动处理，不会自动替换或移除'), { code: 'SKILL_LINK' });
+const linkedSkill = () => Object.assign(Error(t('linkedSkill')), { code: 'SKILL_LINK' });
 export async function treeHashes(root) {
   const files = Object.create(null);
   async function walk(dir, prefix = '') {
@@ -114,7 +115,7 @@ export async function treeHashes(root) {
       if (entry.isSymbolicLink()) throw linkedSkill();
       if (entry.isDirectory()) { files[name + '/'] = null; await walk(path.join(dir, entry.name), name + '/'); }
       else if (entry.isFile()) { if (name !== marker) files[name] = hash(await fs.readFile(path.join(dir, entry.name))); }
-      else throw Error('不支持的文件类型');
+      else throw Error(t('unsupportedFile'));
     }
   }
   await walk(root); return files;
@@ -162,10 +163,10 @@ export class Skills {
       if (!/^multiplane\.bak-\d{8}-\d{6}(?:-[2-9]\d*|-1\d+)?$/.test(backupName)) throw Error('Invalid backup name');
       const before = await this.status(host);
       if (before.blocked) throw Error(before.error);
-      if (before.signature !== expected) throw Error('安装状态已变化，请重新检查');
+      if (before.signature !== expected) throw Error(t('skillChanged'));
       const parent = path.dirname(before.target);
       await fs.mkdir(parent, { recursive: true });
-      if (await fs.realpath(parent) !== parent) throw Error('安装路径已变化，请重新检查');
+      if (await fs.realpath(parent) !== parent) throw Error(t('skillPathChanged'));
       const token = randomUUID(), stage = path.join(parent, '.multiplane-new-' + token);
       const old = path.join(parent, backupName);
       if (await exists(old)) throw Error('Backup already exists');
@@ -186,7 +187,7 @@ export class Skills {
           if (JSON.stringify(await treeHashes(stage)) !== JSON.stringify(files)) throw Error('Skill source changed during copy');
         }
         const latest = await this.status(host);
-        if (latest.blocked || latest.target !== before.target || latest.signature !== before.signature || await fs.realpath(parent) !== parent) throw Error('安装状态已变化，请重新检查');
+        if (latest.blocked || latest.target !== before.target || latest.signature !== before.signature || await fs.realpath(parent) !== parent) throw Error(t('skillChanged'));
         if (before.state !== 'missing') { await fs.rename(before.target, old); moved = true; }
         if (action === 'install') { await fs.rename(stage, before.target); installed = true; }
       } catch (error) {

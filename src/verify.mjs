@@ -22,14 +22,16 @@ export async function verifyShot(shot, options = {}) {
     try {
       events.check();
       capture = await openShot(shot, resolveScale(options).renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events) });
+      options.alpha = capture.alpha;
       await loaded(events, capture);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
       const workers = number(options.workers ?? 2, '--workers', { positive: true });
       if (!Number.isSafeInteger(workers)) throw invalidOption('--workers', '--workers must be a positive integer.');
+      events.resources.setWorkers(workers);
       const times = options.at === undefined ? [...new Set([0, 0.25, 0.5, 0.75].map(k => Math.floor(k * capture.duration * fps) / fps))]
         : options.at.split(',').map(t => number(t, '--at'));
       if (times.some(t => t >= capture.duration || Math.abs(t * fps - Math.round(t * fps)) > 1e-7)) throw invalidOption('--at', 'Verification times must be inside the shot and aligned to frames.');
-      const data = { passed: true, times, workers, checks: [], findings: 0 };
+      const data = { format: 'png', alpha: capture.alpha, passed: true, times, workers, checks: [], findings: 0 };
       const processed = createPostCapture(capture, { ...options, transport: 'png' }, fps);
       const references = new Map(), hashes = [], rangeReferences = new Map();
       await mkdir(out, { recursive: true });

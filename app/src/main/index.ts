@@ -1,3 +1,4 @@
+import { t, setLanguage, resolveLanguage, language, languagePreferences } from '../shared/i18n.mjs';
 import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, dialog, protocol, net, clipboard, Menu } from 'electron';
 import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { JobStore, Preferences, homeDirectory } from './store.mjs';
 import type { Job, Snapshot } from '../shared/types';
 import { BrowserInstaller } from './browser.mjs';
+import { applicationMenu } from './menu';
 
 // Main-process verification uses the same functions as doctor, without adding IPC.
 export { bundledCommand, rendererRoot };
@@ -17,7 +19,10 @@ if (process.env.MULTIPLANE_APP_DATA) app.setPath('userData', path.resolve(proces
 let win: BrowserWindow;
 const store = new JobStore(homeDirectory());
 const prefs = new Preferences(app.getPath('userData'));
-const snapshot = (select?: string): Snapshot => ({ jobs: store.jobs.filter((j: Job) => !prefs.value.hidden.includes(j.jobId)), runningCount: store.jobs.filter((j: Job) => j.state === 'running').length, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', select });
+function updateMenu() {
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate(applicationMenu()) : null);
+}
+const snapshot = (select?: string): Snapshot => ({ language: language(), languagePreference: prefs.value.language, jobs: store.jobs.filter((j: Job) => !prefs.value.hidden.includes(j.jobId)), runningCount: store.jobs.filter((j: Job) => j.state === 'running').length, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', select });
 const publish = (select?: string) => { if (win && !win.isDestroyed()) win.webContents.send('snapshot', snapshot(select)); };
 function allowed(job: Job) {
   const files = new Set<string>([path.join(job.jobDir, 'preview.png')]);
@@ -26,10 +31,10 @@ function allowed(job: Job) {
   return files;
 }
 app.whenReady().then(async () => {
-  await prefs.load(); nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark';
-  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
+  await prefs.load(); setLanguage(resolveLanguage(prefs.value.language, app.getLocale())); nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark';
+  updateMenu();
   const colours = () => nativeTheme.shouldUseDarkColors ? { color: '#151515', symbolColor: '#a8a7a2', height: 44 } : { color: '#fcfcfb', symbolColor: '#64635e', height: 44 };
-  win = new BrowserWindow({ width: 1160, height: 720, minWidth: 960, minHeight: 600, show: false, icon: path.join(__dirname, 'brand', process.platform === 'win32' ? 'app.ico' : process.platform === 'darwin' ? 'app.icns' : 'app-512.png'), title: 'Multiplane', autoHideMenuBar: process.platform !== 'darwin', titleBarStyle: 'hidden', ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 12, y: 15 } } : { titleBarOverlay: colours() }), backgroundColor: colours().color, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  win = new BrowserWindow({ width: 1160, height: 720, minWidth: 960, minHeight: 600, show: false, icon: path.join(__dirname, 'brand', process.platform === 'win32' ? 'app.ico' : process.platform === 'darwin' ? 'app.icns' : 'app-512.png'), title: t('appName'), autoHideMenuBar: process.platform !== 'darwin', titleBarStyle: 'hidden', ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 12, y: 15 } } : { titleBarOverlay: colours() }), backgroundColor: colours().color, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
   nativeTheme.on('updated', () => { if (!win.isDestroyed()) { if (process.platform !== 'darwin') win.setTitleBarOverlay(colours()); win.setBackgroundColor(colours().color); publish(); } });
@@ -60,7 +65,7 @@ app.whenReady().then(async () => {
     if (installer.state.running || confirmingBrowser) return;
     confirmingBrowser = true;
     try {
-      const answer = await dialog.showMessageBox(win, { type: 'question', message: '安装 Chromium 浏览器？', detail: '将从 Playwright 的官方下载服务下载 Chromium，安装到 Playwright 的默认缓存目录（命令行渲染也用它），约占 300–500 MB 磁盘空间。', buttons: ['取消', '下载并安装'], defaultId: 0, cancelId: 0, noLink: true });
+      const answer = await dialog.showMessageBox(win, { type: 'question', message: t('browserConfirm'), detail: t('browserConfirmDetail'), buttons: [t('cancel'), t('downloadInstall')], defaultId: 0, cancelId: 0, noLink: true });
       if (answer.response === 1) installer.start();
     } finally { confirmingBrowser = false; }
   });
@@ -69,14 +74,14 @@ app.whenReady().then(async () => {
   handle('settings', settings);
   handle('save-setting', async (key, value, own) => {
     if (own) {
-      if (!(key === 'theme' ? ['system', 'light', 'dark'].includes(value) : ['notifications', 'wizardDone'].includes(key) && typeof value === 'boolean')) throw Error('Invalid preference');
-      await prefs.save({ [key]: value }); nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark'; publish();
+      if (!(key === 'language' ? languagePreferences.includes(value) : key === 'theme' ? ['system', 'light', 'dark'].includes(value) : ['notifications', 'wizardDone'].includes(key) && typeof value === 'boolean')) throw Error('Invalid preference');
+      await prefs.save({ [key]: value }); if (key === 'language') { setLanguage(resolveLanguage(value, app.getLocale())); updateMenu(); win.setTitle(t('appName')); installer.refresh(); } nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark'; publish();
     } else await config.save(key, value);
     return settings();
   });
   handle('choose-setting', async key => {
     if (!['ffmpeg', 'jobsDir'].includes(key)) throw Error('Invalid setting');
-    const result = await dialog.showOpenDialog(win, { properties: key === 'jobsDir' ? ['openDirectory'] : ['openFile'] });
+    const result = await dialog.showOpenDialog(win, { title: t(key === 'jobsDir' ? 'jobDirectory' : 'chooseFfmpeg'), buttonLabel: t('open'), properties: key === 'jobsDir' ? ['openDirectory'] : ['openFile'] });
     if (!result.canceled && result.filePaths[0]) await config.save(key, result.filePaths[0]);
     return settings();
   });
@@ -113,10 +118,10 @@ app.whenReady().then(async () => {
     const backupName = await skills.backupName(host);
     if (status.state === 'modified' || action === 'remove') {
       if (pendingConfirmation) return { cancelled: true };
-      const agent = host === 'claude' ? 'Claude Code' : 'Codex', remove = action === 'remove';
+      const agent = t(host === 'claude' ? 'agentClaude' : 'agentCodex'), remove = action === 'remove';
       const accepted = await new Promise<boolean>(resolve => {
         const id = ++confirmationId; pendingConfirmation = { id, resolve };
-        win.webContents.send('skill-confirmation', { id, title: remove ? `移除 ${agent} 的 Multiplane skill？` : `替换 ${agent} 里改过的 Multiplane skill？`, detail: remove ? status.state === 'modified' ? `你改过这个 skill，原来的目录会先备份为 ${backupName}。` : `${agent} 之后将不再加载这个 skill。` : `原来的目录会先备份为 ${backupName}，再装入软件自带的版本 ${version}。`, action: remove ? '移除' : '替换', danger: remove });
+        win.webContents.send('skill-confirmation', { id, titleKey: remove ? 'removeSkillTitle' : 'replaceSkillTitle', detailKey: remove ? status.state === 'modified' ? 'modifiedBackup' : 'removeSkillDetail' : 'replaceSkillDetail', actionKey: remove ? 'remove' : 'replace', values: { agent, backup: backupName, version }, title: remove ? t('removeSkillTitle', { agent }) : t('replaceSkillTitle', { agent }), detail: remove ? status.state === 'modified' ? t('modifiedBackup', { backup: backupName }) : t('removeSkillDetail', { agent }) : t('replaceSkillDetail', { backup: backupName, version }), action: remove ? t('remove') : t('replace'), danger: remove });
       });
       if (!accepted) return { cancelled: true };
     }
@@ -126,7 +131,7 @@ app.whenReady().then(async () => {
   handle('snapshot', () => snapshot());
   handle('stop', async id => {
     const job = jobFor(id); if (job.state !== 'running') return;
-    const result = await dialog.showMessageBox(win, { type: 'warning', message: `停止「${path.basename(job.shot)}」？`, detail: '渲染会立刻结束，已完成的产物会保留，未完成的不会写出。', buttons: ['取消', '停止'], defaultId: 0, cancelId: 0, noLink: true });
+    const result = await dialog.showMessageBox(win, { type: 'warning', message: t('stopTitle', { name: path.basename(job.shot) }), detail: t('stopDetail'), buttons: [t('cancel'), t('stop')], defaultId: 0, cancelId: 0, noLink: true });
     if (result.response === 1) await store.stop(job.jobId);
   });
   handle('hide', async id => { jobFor(id); await prefs.save({ hidden: [...new Set([...prefs.value.hidden, id])] }); publish(); });
@@ -140,8 +145,8 @@ app.whenReady().then(async () => {
   store.on('fault', error => console.error(error.message));
   store.on('finished', (job: Job) => {
     if (!prefs.value.notifications || !Notification.isSupported()) return;
-    const label = job.state === 'succeeded' ? '已完成' : job.state === 'cancelled' ? '已取消' : '失败';
-    const notification = new Notification({ title: `${label}：${path.basename(job.shot)}`, body: path.basename(path.dirname(job.shot)) });
+    const label = job.state === 'succeeded' ? t('completed') : job.state === 'cancelled' ? t('cancelled') : t('failed');
+    const notification = new Notification({ title: t('notification', { status: label, name: path.basename(job.shot) }), body: path.basename(path.dirname(job.shot)) });
     notification.on('click', async () => {
       if (prefs.value.hidden.includes(job.jobId)) await prefs.save({ hidden: prefs.value.hidden.filter((id: string) => id !== job.jobId) });
       if (win.isMinimized()) win.restore(); win.show(); win.focus(); publish(job.jobId);

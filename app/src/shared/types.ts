@@ -10,7 +10,7 @@ export interface Job {
   etaMs: number | null; startedAt: string; updatedAt: string; result: Event | null;
   previewFrame: number | null; previewVersion: string; events: Event[]; lost?: boolean;
 }
-export interface Snapshot { jobs: Job[]; runningCount: number; theme: 'dark' | 'light'; select?: string }
+export interface Snapshot { language?: string; languagePreference?: string; jobs: Job[]; runningCount: number; theme: 'dark' | 'light'; select?: string }
 export interface Bridge {
   platform(): Promise<{ platform: string; home: string }>;
   browserInstallState(): Promise<BrowserInstallState>;
@@ -34,9 +34,9 @@ export interface Bridge {
   open(id: string, file?: string, reveal?: boolean): Promise<void>;
   media(id: string, file: string, version?: string): string;
 }
-export interface SkillConfirmation { id: number; title: string; detail: string; action: string; danger: boolean }
+export interface SkillConfirmation { id: number; title: string; detail: string; action: string; danger: boolean; titleKey?: string; detailKey?: string; actionKey?: string; values?: Record<string, string> }
 export interface BrowserInstallState { running: boolean; text: string }
-export interface Settings { values: Record<string, any>; file: string; overrides: Record<string, string | null>; own: { theme: string; notifications: boolean; wizardDone: boolean }; version: string; packaged: boolean }
+export interface Settings { values: Record<string, any>; file: string; overrides: Record<string, string | null>; own: { language?: string; theme: string; notifications: boolean; wizardDone: boolean }; version: string; packaged: boolean }
 export interface Skill { blocked?: boolean; error?: string | null; host: string; target: string; detected: boolean; availableVersion: string; version: string | null; state: string }
 export interface Environment { skills: Skill[]; command: { path: string | null; version: string | null; error: string | null } }
 declare global { interface Window { multiplane: Bridge } }

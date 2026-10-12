@@ -76,11 +76,20 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     const check = () => { if (errors.length) throw errors[0]; };
     check();
     const cdp = (options.capture ?? 'cdp') === 'cdp' ? await page.context().newCDPSession(page) : null;
+    const alpha = options.alpha ?? metadata.post.alpha ?? false;
+    if (typeof alpha !== 'boolean') throw invalidOption('--alpha', 'alpha must be a boolean.');
+    if (alpha && scale < 1) {
+      // Defer downsampling to the linear-light premultiplied post path.
+      const metrics = cdp ?? await page.context().newCDPSession(page);
+      await metrics.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    }
+    if (alpha && cdp) await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
     const timings = { renderCallMs: 0, screenshotMs: 0 };
     let closing;
     const beginFrame = async (t, { motionBlur = 1 } = {}) => {
         const renderStart = performance.now();
-        await page.evaluate(({ t, motionBlur }) => {
+        await page.evaluate(({ t, motionBlur, alpha }) => {
+          if (alpha) document.documentElement.style.setProperty('--multiplane-page-background', 'transparent');
           const stage = document.querySelector('#stage');
           const display = stage.style.getPropertyValue('display');
           const priority = stage.style.getPropertyPriority('display');
@@ -97,22 +106,22 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           }
           stage.getBoundingClientRect();
           return failure;
-        }, { t, motionBlur }).then(reason => { if (reason !== undefined) throw new MultiplaneError('render_threw', undefined, { details: { t, reason } }); });
+        }, { t, motionBlur, alpha }).then(reason => { if (reason !== undefined) throw new MultiplaneError('render_threw', undefined, { details: { t, reason } }); });
         timings.renderCallMs += performance.now() - renderStart;
         check();
         const screenshotStart = performance.now();
         const png = cdp ? cdp.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, captureBeyondViewport: false,
-            clip: { x: 0, y: 0, width, height, scale } }).then(({ data }) => {
+            clip: { x: 0, y: 0, width, height, scale: alpha ? Math.max(1, scale) : scale } }).then(({ data }) => {
           const png = Buffer.from(data, 'base64');
-          if (png.readUInt32BE(16) !== width * scale || png.readUInt32BE(20) !== height * scale) throw new MultiplaneError('internal_error', 'CDP screenshot dimensions do not match output.');
+          if (png.readUInt32BE(16) !== width * (alpha ? Math.max(1, scale) : scale) || png.readUInt32BE(20) !== height * (alpha ? Math.max(1, scale) : scale)) throw new MultiplaneError('internal_error', 'CDP screenshot dimensions do not match output.');
           return png;
-        }) : page.screenshot({ type: 'png', animations: 'allow' });
+        }) : page.screenshot({ type: 'png', animations: 'allow', ...(alpha ? { omitBackground: true } : {}) });
         const measured = png.then(buffer => { timings.screenshotMs += performance.now() - screenshotStart; return buffer; });
         measured.catch(() => {});
         return { png: measured };
     };
     return {
-      page, browser, server, ...metadata, beginFrame, timings,
+      page, browser, server, ...metadata, alpha, beginFrame, timings,
       isCrash: error => browserClosed(error, browser, page, crashed),
       ...(metadata.hasBlurAt ? { blurAt: async t => {
         const result = await page.evaluate(t => { try { return { value: SHOT.blurAt(t) }; } catch (error) { return { reason: String(error?.message ?? error) }; } }, t);

@@ -15,15 +15,15 @@ export function ffmpegOutput(executable, args, env = process.env) {
     child.once('close', code => code === 0 ? resolve(output) : reject(new Error(`FFmpeg exited with code ${code}.`)));
   });
 }
-export async function inspectFFmpeg(explicit, env = process.env, encoder) {
+export async function inspectFFmpeg(explicit, env = process.env, encoder, output = ffmpegOutput) {
   const executable = explicit ?? env.MULTIPLANE_FFMPEG ?? ffmpegName();
   try {
-    const version = (await ffmpegOutput(executable, ['-version'], env)).split(/\r?\n/)[0];
-    if (encoder && !new RegExp(`\\b${encoder}\\b`).test(await ffmpegOutput(executable, ['-encoders'], env))) throw new Error(`Missing encoder: ${encoder}`);
+    const version = (await output(executable, ['-version'], env)).split(/\r?\n/)[0];
+    if (encoder && !new RegExp(`\\b${encoder}\\b`).test(await output(executable, ['-encoders'], env))) throw new Error(`Missing encoder: ${encoder}`);
     return { path: executable, version };
   } catch (cause) {
     throw new MultiplaneError(cause.code === 'ENOENT' ? 'ffmpeg_not_found' : 'ffmpeg_unusable', undefined,
-      { cause, hint: ffmpegHint(), details: { reason: cause.message } });
+      { cause, hint: cause.message.startsWith('Missing encoder:') ? `${cause.message}. Use an FFmpeg build that includes it.` : ffmpegHint(), details: { reason: cause.message } });
   }
 }
 

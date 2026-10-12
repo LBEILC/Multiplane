@@ -31,6 +31,7 @@ button,select {
 }
 button {
   cursor: default;
+  white-space: nowrap;
 }
 button,select {
   height: var(--ctl);
@@ -197,6 +198,7 @@ main {
   padding: 12px 10px 6px;
 }
 .job {
+  white-space: normal;
   width: 100%;
   height: auto;
   border: 0;
@@ -543,3 +545,8 @@ button.primary:disabled { background: var(--surface-2); border-color: transparen
 .browser-progress { max-height: 140px; max-width: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; font-weight: 400; }
 .skill-confirmation .actions { justify-content: flex-end; margin: 24px 0 0; }
 .skill-confirmation .actions button { height: var(--ctl); font-size: inherit; }
+
+/* English filter labels need unequal shares of the existing list column. */
+:lang(en) .filters .sel { max-width: none; }
+:lang(en) #state-filter { flex: 1.5; }
+:lang(en) .check-row { grid-template-columns: 128px minmax(0,1fr) auto; }

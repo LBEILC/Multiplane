@@ -1,3 +1,4 @@
+import copy from '../src/shared/copy/en.mjs';
 import { nativeRealpath } from '../../tools/native-realpath.mjs';
 import { _electron } from 'playwright';
 import { ensureElectron } from './electron.mjs';
@@ -20,7 +21,7 @@ const home = path.join(work, 'renderer'), data = path.join(work, 'desktop'), use
 const realUser = path.join(work, 'real-user');
 for (const dir of [home, data, realUser]) await mkdir(dir);
 await symlink(realUser, user, process.platform === 'win32' ? 'junction' : 'dir');
-await writeFile(path.join(data, 'preferences.json'), JSON.stringify({ wizardDone: true, theme: 'dark', notifications: false, hidden: [] }));
+await writeFile(path.join(data, 'preferences.json'), JSON.stringify({ language: 'en', wizardDone: true, theme: 'dark', notifications: false, hidden: [] }));
 const env = { ...process.env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data, MULTIPLANE_TEST_USER_HOME: user, MULTIPLANE_NO_INDEX: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 const args = [appRoot, ...(process.platform === 'linux' && process.env.MULTIPLANE_NO_SANDBOX === '1' ? ['--no-sandbox'] : [])];
@@ -32,16 +33,16 @@ try {
   page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => document.documentElement.dataset.platform);
   assert.equal(await page.locator('html').getAttribute('data-platform'), process.platform);
-  for (const name of ['作业', '环境', '设置', '关于']) {
+  for (const name of ['jobs', 'environment', 'settings', 'about']) {
     await page.locator(`[data-page="${name}"]`).click();
-    if (name === '环境') await page.locator('[data-check=node]').waitFor();
+    if (name === 'environment') await page.locator('[data-check=node]').waitFor();
     await page.evaluate(() => document.fonts.ready);
     const file = `page-${evidence.screenshots.length + 1}.png`;
     await page.screenshot({ path: path.join(out, file), mask: privacyMasks(page) });
     evidence.screenshots.push(file);
   }
   // Native captures cannot use Playwright masks. This isolated, empty jobs page has no local paths.
-  await page.locator('[data-page="作业"]').click();
+  await page.locator('[data-page="jobs"]').click();
   await page.evaluate(() => document.fonts.ready);
   await captureWindow(app, out, evidence);
   const doctor = await page.evaluate(() => window.multiplane.doctor());
@@ -50,8 +51,8 @@ try {
   evidence.menu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.map(item => item.role) ?? []);
   assert.equal(evidence.menu.length > 0, process.platform === 'darwin');
   if (process.platform === 'darwin') {
-    await page.locator('[data-page="设置"]').click();
-    await page.getByRole('button', { name: '在访达中显示' }).waitFor();
+    await page.locator('[data-page="settings"]').click();
+    await page.getByRole('button', { name: copy.revealFinder }).waitFor();
     assert.equal(await page.locator('.titlebar > .brand-lockup').evaluate(el => getComputedStyle(el).paddingLeft), '78px');
   }
   await checkEnvironmentIsolation(app, page, user, work, out, evidence, doctor);

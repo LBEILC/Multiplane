@@ -1,4 +1,4 @@
-html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--multiplane-page-background, #000); }
 #stage {
   position: absolute; left: 0; top: 0;
   width: 1920px; height: 1080px;

@@ -1,5 +1,6 @@
+import { resolveFormat } from './format.mjs';
 import path from 'node:path';
-import { checkLint } from './lint.mjs';
+import { checkLint, scanShot } from './lint.mjs';
 import { requireNewOutput, directoryOutput } from './artifacts.mjs';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, mkdirSync, renameSync, writeFileSync, existsSync, statSync, readFileSync, unlinkSync } from 'node:fs';
@@ -8,11 +9,13 @@ import { asError, MultiplaneError, invalidOption } from './errors.mjs';
 import { defaultWorkers } from './render-pool.mjs';
 import { loadUserConfig, appendJobIndex, retryFileOperation } from './user-home.mjs';
 import { userHome } from './platform.mjs';
+import { applyDraft } from './draft.mjs';
+import { createResourceSampler } from './resources.mjs';
 
 export const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
 export const jobDirectory = (options = {}, env = process.env) => path.resolve(options['job-dir'] ?? env.MULTIPLANE_JOBS_DIR ?? 'out/jobs');
 
-export function createEvents(command, shot, options = {}, job = false) {
+export function createEvents(command, shot, options = {}, job = false, deferStart = false) {
   const started = performance.now(), startedAt = new Date().toISOString();
   let directory, jobId, ended = false, lastProgress = -Infinity, stopped = false;
   const artifacts = [];
@@ -35,10 +38,10 @@ export function createEvents(command, shot, options = {}, job = false) {
         hint: 'Use --job-dir or MULTIPLANE_JOBS_DIR to select a writable job directory.',
       });
     }
-    options.out = path.resolve(options.out ?? (command === 'render' ? path.join(directory, `${path.parse(shot).name}.mp4`) : path.join(directory, command)));
+    options.out = path.resolve(options.out ?? (command === 'render' ? path.join(directory, `${path.parse(shot).name}.${options.format ?? 'mp4'}`) : path.join(directory, command)));
   }
   let state = { schema: 'multiplane/1', jobId, command, shot, pid: process.pid, state: 'running',
-    phase: 'launch', done: 0, total: null, fps: null, etaMs: null, startedAt, updatedAt: startedAt, result: null, previewFrame: null };
+    phase: 'launch', done: 0, total: null, fps: null, etaMs: null, startedAt, updatedAt: startedAt, result: null, previewFrame: null, memoryBytes: null };
   const save = () => {
     if (!directory) return;
     const file = path.join(directory, 'status.json');
@@ -46,7 +49,10 @@ export function createEvents(command, shot, options = {}, job = false) {
     retryFileOperation(() => writeFileSync(file + '.tmp', JSON.stringify(state) + '\n'), deadline);
     retryFileOperation(() => renameSync(file + '.tmp', file), deadline);
   };
+  let startedEvent = false;
+  const pendingEvents = [];
   const emit = (type, fields = {}) => {
+    if (deferStart && !startedEvent && type !== 'start') { pendingEvents.push([type, fields]); return; }
     if (ended) return;
     if (type === 'progress') {
       for (const key of ['phase', 'done', 'total', 'fps', 'etaMs']) state[key] = fields[key];
@@ -86,8 +92,18 @@ export function createEvents(command, shot, options = {}, job = false) {
   timer?.unref();
   return {
     directory, jobId, emit, warning, artifacts, options,
+    // TODO(design): Document memoryBytes in status.json (latest sample, null on failure).
+    memory(bytes) { state.memoryBytes = bytes; state.updatedAt = new Date().toISOString(); save(); },
     preview(frame) { state.previewFrame = frame; state.updatedAt = new Date().toISOString(); save(); },
-    start() { const { onEvent, _preview, ...effective } = options; emit('start', { version, shot, ...(jobId ? { jobId } : {}), options: effective }); index('start', { command, shot, pid: process.pid }); },
+    start(resolved = false) {
+      if (startedEvent) return;
+      if (deferStart && !resolved) { save(); return; }
+      startedEvent = true;
+      const { onEvent, _preview, _resources, _probeVideo, _inspectFFmpeg, ...effective } = options;
+      emit('start', { version, shot, ...(jobId ? { jobId } : {}), options: effective });
+      index('start', { command, shot, pid: process.pid });
+      for (const [type, fields] of pendingEvents.splice(0)) emit(type, fields);
+    },
     check() { if (directory && existsSync(path.join(directory, 'stop'))) requestStop(); if (stopped) throw new MultiplaneError('cancelled'); },
     onCancel(handler) { cancelHandlers.add(handler); if (stopped) Promise.resolve().then(handler).catch(() => {}); return () => cancelHandlers.delete(handler); },
     progress(phase, done = 0, total = null) {
@@ -97,6 +113,7 @@ export function createEvents(command, shot, options = {}, job = false) {
     finalize() { emit('progress', { phase: 'finalize', done: state.done, total: state.total, unit: 'frame', fps: state.fps, etaMs: 0 }); },
     artifact(file, kind) { const artifact = { path: path.resolve(file), kind, bytes: statSync(file).size }; artifacts.push(artifact); emit('artifact', artifact); },
     finish(data = {}, error) {
+      if (deferStart) this.start(true);
       const result = { command, ok: !error, code: error?.code ?? null, message: error?.message ?? null,
         ...(error?.hint ? { hint: error.hint } : {}), ...(error?.details ? { details: error.details } : {}),
         artifacts, elapsedMs: Math.round(performance.now() - started), ...(jobId ? { jobId } : {}), data };
@@ -109,8 +126,9 @@ export function createEvents(command, shot, options = {}, job = false) {
 }
 
 export async function runCommand(command, shot, options, action, job = true) {
-  let events;
+  let events, resources;
   try {
+    const explicit = options;
     const user = loadUserConfig(command, options);
     options = user.options;
     if (job || command === 'lint') {
@@ -126,16 +144,52 @@ export async function runCommand(command, shot, options, action, job = true) {
         || (['workers', 'motion-blur'].includes(key) && !Number.isSafeInteger(value))) throw invalidOption(`--${key}`, `Invalid value for --${key}.`);
       options[key] = value;
     }
+    if (command === 'render') {
+      // A saved MP4 preference must not override a requested fixed-codec container.
+      const inferred = resolveFormat({ ...options, encoder: explicit.encoder });
+      if (inferred !== 'mp4' && explicit.encoder === undefined) {
+        delete options.encoder;
+        user.config.applied = user.config.applied.filter(field => field !== 'encoder');
+      }
+      options.format = inferred;
+    } else if (job && ['stills', 'verify'].includes(command)) {
+      // TODO(design): Document PNG as the frame format reported by stills and verify.
+      options.format = 'png';
+    }
     const defaults = job ? { root: process.cwd(), raster: 'gpu', scale: 1, 'render-scale': Number(options.scale ?? 1), upscale: 'lanczos',
       'adaptive-blur': 0.5, 'no-post': false, 'no-lint': false, overwrite: false, 'job-dir': jobDirectory(options),
-      ...(command === 'render' ? { from: 0, encoder: 'x264', workers: defaultWorkers(Number(options.scale ?? 1)), ffmpeg: process.env.MULTIPLANE_FFMPEG ?? ffmpegName() } : {}),
+      ...(command === 'render' ? { from: 0, ...(options.format === 'mp4' ? { encoder: 'x264' } : {}), workers: defaultWorkers(Number(options.scale ?? 1)), ffmpeg: process.env.MULTIPLANE_FFMPEG ?? ffmpegName() } : {}),
       ...(command === 'verify' ? { workers: 2 } : {}),
       ...(command === 'stills' && options.at === undefined ? { every: 1 } : {}) }
       : command === 'lint' ? { root: process.cwd() } : command === 'doctor' ? { raster: 'gpu', ffmpeg: process.env.MULTIPLANE_FFMPEG ?? ffmpegName() }
         : { 'job-dir': jobDirectory(options), ...(command === 'cancel' ? { wait: 30 } : {}) };
-    // Start options include only values known before loading the shot; shot/result provide shot-dependent values.
-    events = createEvents(command, shot, { ...defaults, ...options }, job);
+    // TODO(design): Document that start waits for effective shot alpha defaults.
+    events = createEvents(command, shot, { ...defaults, ...options }, job, job && ['render', 'stills', 'verify'].includes(command));
+    if (job) {
+      resources = createResourceSampler({ enabled: options._resources !== false, onSample: events.memory });
+      events.resources = resources;
+    }
     events.config = user.config;
+    if (options.draft) {
+      // Keep lint and cancellation active before the dimension-only draft probe.
+      if (!options['no-lint']) {
+        const { findings, data } = await scanShot(shot, events.options);
+        if (data.errors) {
+          events.start();
+          for (const finding of findings) events.emit('finding', finding);
+          throw new MultiplaneError('lint_failed', undefined, { result: { data } });
+        }
+      }
+      const normalized = Object.fromEntries(Object.keys(explicit).map(key => [key, options[key]]));
+      Object.assign(events.options, await applyDraft(command, shot, normalized, options, {
+        check: events.check,
+        onBrowser: browser => {
+          const unsubscribe = events.onCancel(() => browser.close());
+          browser.once('disconnected', unsubscribe);
+          events.check();
+        },
+      }));
+    }
     events.start();
     for (const warning of user.warnings) events.warning(warning);
     if (job && !options['no-lint']) await checkLint(shot, events.options, events);
@@ -144,12 +198,14 @@ export async function runCommand(command, shot, options, action, job = true) {
       ? await directoryOutput(events, action) : await action(events);
     events.check();
     if (job) events.finalize();
+    if (resources) { await resources.stop(); data.resources = resources.snapshot(); }
     return events.finish(data);
   } catch (failure) {
     let error = asError(failure);
     try { events?.check(); } catch (cancelled) { error = cancelled; }
     events ??= createEvents(command, shot, options);
-    error.result = events.finish(error.result?.data ?? {}, error);
+    await resources?.stop();
+    error.result = events.finish({ ...error.result?.data, ...(resources ? { resources: resources.snapshot() } : {}) }, error);
     throw error;
-  } finally { events?.dispose(); }
+  } finally { await resources?.stop(); events?.dispose(); }
 }

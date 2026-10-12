@@ -1,0 +1,18 @@
+﻿<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Alpha example</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>
+@font-face{font-family:Example;src:url('./assets/Roboto-Variable.ttf')}
+#stage{width:320px;height:180px;background:transparent}
+#block{position:absolute;top:65px;width:60px;height:60px;background:rgba(40,120,220,.5)}
+#label{position:absolute;left:24px;top:20px;color:rgba(230,70,30,.8);font:28px Example,sans-serif}
+</style>
+<div id="stage"><div id="block"></div><div id="label">Alpha</div></div>
+<script src="/multiplane/runtime/shot.js"></script>
+<script>
+// TODO(design): Review the neutral alpha example before publication.
+const block = document.querySelector('#block');
+Shot.define({duration:2,fps:12,fonts:[['28px Example','Alpha']],post:{alpha:true,motionBlur:5,shutter:0.8},
+  render(t){block.style.transform=`translateX(${24+90*t}px)`;}
+});
+</script></html>
