@@ -31,6 +31,20 @@ test('video check rejects every measured mismatch and permits at most one frame 
   await assert.rejects(checkVideo('', '', expected, events, async () => ({ ...actual, durationSeconds: 1 + 1/12 + 1e-8 })), { code: 'output_invalid' });
 });
 
+test('relative rate tolerance accepts timestamp rounding but rejects wrong rates and missing frames in every format', async () => {
+  for (const format of ['mp4', 'webm', 'mov']) {
+    const expected = { frames: 60, durationSeconds: 60 / 59.94, fps: 59.94, width: 64, height: 48, format };
+    const actual = { ...expected, fps: 59.940063, codec: 'test', pixelFormat: 'yuv420p' };
+    assert.equal((await checkVideo('', '', expected, events, async () => actual)).verified, true);
+    await assert.rejects(checkVideo('', '', expected, events, async () => ({ ...actual, fps: 60 })), { code: 'output_invalid' });
+    await assert.rejects(checkVideo('', '', expected, events, async () => ({ ...actual, frames: 59 })), { code: 'output_invalid' });
+    for (const sign of [-1, 1]) {
+      assert.equal((await checkVideo('', '', expected, events, async () => ({ ...actual, fps: expected.fps * (1 + sign * 0.000099) }))).verified, true);
+      await assert.rejects(checkVideo('', '', expected, events, async () => ({ ...actual, fps: expected.fps * (1 + sign * 0.000101) })), { code: 'output_invalid' });
+    }
+  }
+});
+
 test('real render verifies, failed probe publishes, truncated video preserves overwrite target', { timeout: 120000 }, async () => {
   const ffmpeg = await resolveFFmpeg();
   const recorded = {};
@@ -98,8 +112,8 @@ test('fractional-rate video records decoded audio duration', { timeout: 60000 },
   assert.equal(generated.code, 0, generated.stderr);
   const result = await renderShot(shot, { ...options, fps: 29.97, audio });
   const check = result.data.outputCheck;
-  assert.equal(check.verified, true); assert.equal(check.frames, 30); assert.equal(check.fps, 29.97);
-  assert.ok(Math.abs(check.durationSeconds - 30 / 29.97) < 1e-6);
+  assert.equal(check.verified, true); assert.equal(check.frames, 30); assert.equal(check.fps, 30000 / 1001);
+  assert.ok(Math.abs(check.durationSeconds - 30 * 1001 / 30000) < 1e-6);
   assert.ok(check.audioDurationSeconds >= 1 && check.audioDurationSeconds < 1.05);
 });
 

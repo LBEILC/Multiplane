@@ -17,6 +17,7 @@ import { MultiplaneError, invalidOption } from './errors.mjs';
 import { requireNewOutput, publishVideo } from './artifacts.mjs';
 import { createPreview } from './preview.mjs';
 import { checkVideo } from './output-check.mjs';
+import { frameRate } from './frame-rate.mjs';
 
 export async function renderShot(shot, options = {}) {
   return runCommand('render', shot, options, async events => {
@@ -63,6 +64,7 @@ export async function renderShot(shot, options = {}) {
       videoArgs = encoding.args;
       await loaded(events, capture, ffmpegInfo);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
+      const rate = frameRate(fps);
       const processed = createPostCapture(capture, options, fps);
       const from = number(options.from ?? 0, '--from');
       const to = number(options.to ?? capture.duration, '--to');
@@ -85,9 +87,11 @@ export async function renderShot(shot, options = {}) {
       events.check();
       temporary = `${out}.${events.jobId}.partial.${options.format}`;
       const audioArgs = options.audio
-        ? ['-i', path.resolve(options.audio), '-map', '0:v:0', '-map', '1:a:0', '-af', `atrim=start=${audioOffset + first / fps},asetpts=PTS-STARTPTS,apad,atrim=duration=${total / fps}`, ...encoding.audio]
+        ? ['-i', path.resolve(options.audio), '-map', '0:v:0', '-map', '1:a:0', '-af', `atrim=start=${audioOffset + rate.seconds(first)},asetpts=PTS-STARTPTS,apad,atrim=duration=${rate.seconds(total)}`, ...encoding.audio]
         : ['-an'];
-      encoder = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pixel_format', 'rgba', '-video_size', `${width * scale}x${height * scale}`, '-framerate', String(fps), '-i', 'pipe:0', ...audioArgs, ...videoArgs, '-pix_fmt', encoding.pixelFormat, ...encoding.mux, temporary], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
+      // Supported since FFmpeg 5.1; older FFmpeg uses the global -vsync 0.
+      // Do not add output -r: passthrough must neither drop nor duplicate frames.
+      encoder = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pixel_format', 'rgba', '-video_size', `${width * scale}x${height * scale}`, '-framerate', rate.argument, '-i', 'pipe:0', ...audioArgs, ...videoArgs, '-fps_mode', 'passthrough', '-pix_fmt', encoding.pixelFormat, ...encoding.mux, temporary], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
       encoder.once('close', () => { encoderClosed = true; });
       events.onCancel(() => stopChild(encoder));
       let stderr = '', failure;
@@ -122,7 +126,7 @@ export async function renderShot(shot, options = {}) {
       events.check();
       const encoderDrainMs = performance.now() - drainStarted;
       const probeStarted = performance.now();
-      const outputCheck = await checkVideo(ffmpeg, temporary, { frames: framesSent, durationSeconds: framesSent / fps, width: width * scale, height: height * scale, fps, ...(options.alpha ? { alpha: true, format: options.format } : {}) }, events, probe);
+      const outputCheck = await checkVideo(ffmpeg, temporary, { frames: framesSent, durationSeconds: rate.seconds(framesSent), width: width * scale, height: height * scale, fps: rate.fps, ...(options.alpha ? { alpha: true, format: options.format } : {}) }, events, probe);
       if (options.alpha) await checkAlphaVideo(ffmpeg, temporary, options.format, alphaReferences, width * scale, height * scale, events);
       const outputCheckMs = performance.now() - probeStarted;
       await publishVideo(temporary, out, options.overwrite);

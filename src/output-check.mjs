@@ -4,6 +4,10 @@ import { decodeNativePNG } from './png-native.mjs';
 import { MultiplaneError } from './errors.mjs';
 import { stopChild } from './process.mjs';
 
+// Container timestamp precision (notably WebM/Matroska) makes decoded rates
+// approximate; apply the same relative tolerance to every output format.
+const FRAME_RATE_RELATIVE_TOLERANCE = 1e-4;
+
 export function probeVideo(ffmpeg, file, events, spawnProcess = spawn, options = {}) {
   return new Promise((resolve, reject) => {
     // Decode into the null sink; no media file is written or encoded.
@@ -64,7 +68,7 @@ export async function checkVideo(ffmpeg, file, expected, events, probe = probeVi
   events.check();
   const durationPrecision = 8 * Number.EPSILON * Math.max(1, expected.durationSeconds, actual.durationSeconds);
   const mismatch = ['frames', 'width', 'height'].some(key => actual[key] !== expected[key])
-    || Math.abs(actual.fps - expected.fps) > 1e-6
+    || Math.abs(actual.fps - expected.fps) / expected.fps > FRAME_RATE_RELATIVE_TOLERANCE
     || Math.abs(actual.durationSeconds - expected.durationSeconds) - 1 / expected.fps > durationPrecision;
   if (expected.alpha && !/^(yuva|gbrap|rgba|bgra|argb|abgr)/.test(actual.pixelFormat)) throw new MultiplaneError('output_invalid', 'Decoded output has no alpha channel.', { details: { actual } });
   if (mismatch) throw new MultiplaneError('output_invalid', undefined, { details: { expected, actual } });
