@@ -4,7 +4,30 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile, readdir, rm, symlink, rename } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { exportPublic, resolveExportPaths } from '../tools/export-public.mjs';
+import { exportPublic, resolveExportPaths, validatePublicExport } from '../tools/export-public.mjs';
+
+test('export validation gives each npm step 30 minutes with tree cleanup and timeout diagnostics', async () => {
+  const output = path.resolve('public-test-output'), calls = [];
+  await validatePublicExport(output, async (args, options) => {
+    calls.push(args);
+    assert.equal(options.cwd, output);
+    assert.equal(options.timeout, 1800000);
+    assert.equal(options.killTree, true);
+    assert.equal(options.timeoutMessage(1801500), `Public export npm ${args[0]} timed out after 30.025 min (limit 30 min)`);
+  });
+  assert.deepEqual(calls, [['ci'], ['test']]);
+});
+
+test('export validation stops on npm failure and preserves the error', async () => {
+  for (const failedStep of ['ci', 'test']) {
+    const failure = Error('npm failed'), calls = [];
+    await assert.rejects(validatePublicExport(path.resolve('public-test-output'), async ([command]) => {
+      calls.push(command);
+      if (command === failedStep) throw failure;
+    }), error => error === failure);
+    assert.deepEqual(calls, failedStep === 'ci' ? ['ci'] : ['ci', 'test']);
+  }
+});
 
 async function fixture(t) {
   const base = createTempDirectory('multiplane-export-');

@@ -30,7 +30,6 @@ jobs:
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
       MULTIPLANE_FONT_CACHE_ONLY: '1'
-      MULTIPLANE_CI_FRAME_DIAGNOSTICS: '1'
       MULTIPLANE_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -81,6 +80,5 @@ jobs:
             out/ci/**/*.log
             out/ci/**/*.json
             out/ci/**/*.png
-            out/ci/frame-rate/**
           if-no-files-found: warn
           retention-days: 14

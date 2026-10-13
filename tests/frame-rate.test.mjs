@@ -2,7 +2,7 @@ import './test-home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { frameRate } from '../src/frame-rate.mjs';
 import { renderShot } from '../src/render.mjs';
 import { resolveFFmpeg } from '../src/ffmpeg.mjs';
@@ -38,13 +38,11 @@ test('all output formats preserve every supplied frame with integer, NTSC and de
       for (const withAudio of [false, true]) {
         await t.test(`${format} / ${fps} / audio=${withAudio}`, async () => {
           let expected;
-          const diagnostic = process.env.CI === 'true' && process.env.MULTIPLANE_CI_FRAME_DIAGNOSTICS === '1';
           const result = await renderShot(shot, { root, 'job-dir': path.join(root, 'jobs'),
             format, fps, ...(withAudio ? { audio } : {}), workers: 1, raster: 'software',
             'no-lint': true, 'no-post': true,
             _probeVideo: async (exe, file, events, spawn, expectation) => {
               expected = expectation;
-              if (diagnostic) await saveDiagnostics(exe, file, { format, fps, withAudio, expected: expectation });
               return probeVideo(exe, file, events, spawn, expectation);
             },
           });
@@ -65,26 +63,3 @@ test('all output formats preserve every supplied frame with integer, NTSC and de
     }
   }
 });
-
-// Retain successful cases too: a passing isolated probe plus a failing mixed
-// probe is the evidence for a probe-only failure, even when CI becomes green.
-async function saveDiagnostics(ffmpeg, file, { format, fps, withAudio, expected }) {
-  const directory = path.resolve('out/ci/frame-rate', format + '-' + fps + '-audio-' + withAudio);
-  await mkdir(directory, { recursive: true });
-  await copyFile(file, path.join(directory, 'output.' + format));
-  const passes = {
-    packets: ['-map', '0:v:0', '-an', '-c', 'copy', '-debug_ts', '-loglevel', 'verbose'],
-    frames: ['-map', '0:v:0', '-an', '-vf', 'showinfo=checksum=0', '-fps_mode', 'passthrough'],
-    mixed: ['-map', '0:v:0', '-map', '0:a:0?', '-vf', 'showinfo=checksum=0', '-af', 'ashowinfo', '-fps_mode', 'passthrough'],
-  };
-  const summary = { expected };
-  for (const [name, args] of Object.entries(passes)) {
-    const result = await run(ffmpeg, ['-hide_banner', '-nostdin', '-nostats', '-i', file, ...args, '-f', 'null', '-']);
-    await writeFile(path.join(directory, name + '.log'), result.stderr);
-    summary[name] = { exitCode: result.code, count: name === 'packets'
-      ? Number([...result.stderr.matchAll(/Output stream #0:0 \(video\):\s*(\d+) packets muxed/g)].at(-1)?.[1] ?? NaN)
-      : result.stderr.split('\n').filter(line => line.includes('Parsed_showinfo')
-        && /\bn:\s*\d+\s+pts:\s*(-?\d+)\s+pts_time:.*?fmt:(\S+).*?\bs:(\d+)x(\d+)/.test(line)).length };
-  }
-  await writeFile(path.join(directory, 'summary.json'), JSON.stringify(summary, null, 2));
-}

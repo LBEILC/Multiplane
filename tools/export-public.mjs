@@ -161,12 +161,19 @@ export async function exportPublic(root, output, log = console.log, { message } 
   const summary = { count: files.length, distribution, rules: rules.length, scan: 'passed', links: 'passed', commit: git(output, ['rev-parse', 'HEAD']).trim() };
   log(JSON.stringify(summary, null, 2)); return summary;
 }
+export async function validatePublicExport(output, npmCommand = npm) {
+  const timeout = 30 * 60000;
+  for (const command of ['ci', 'test']) {
+    await npmCommand([command], { cwd: output, timeout, killTree: true,
+      timeoutMessage: elapsed => `Public export npm ${command} timed out after ${Number((elapsed / 60000).toFixed(4))} min (limit ${timeout / 60000} min)` });
+  }
+}
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (![3, 5].includes(process.argv.length) || (process.argv.length === 5 && (process.argv[3] !== '--message' || !process.argv[4].trim()))) throw Error('Usage: npm run export:public -- <output-directory> [--message <commit-message>]');
     const output = path.resolve(process.argv[2]);
     await exportPublic(process.cwd(), output, console.log, { message: process.argv[4] });
-    await npm(['ci'], { cwd: output }); await npm(['test'], { cwd: output });
+    await validatePublicExport(output);
     console.log('Public export: npm ci and npm test passed.');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

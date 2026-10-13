@@ -9,7 +9,7 @@ English · [简体中文](README.zh-CN.md)
 
 A local, headless HTML video renderer for AI agents. **A shot is an ordinary web page**: the page implements `render(t)`, and the image depends only on time `t`. Multiplane captures frames with headless Chromium, applies post-processing such as supersampling, motion blur, and film grain, encodes video with FFmpeg, and checks whether a shot is deterministic.
 
-> Version `0.1.0`. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
+> Version `0.2.0`. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
 
 The name comes from Disney's multiplane camera: flat artwork placed at different depths, photographed frame by frame with real depth of field. Here, this corresponds to layered web content, a 3D card layer, and accumulated depth of field.
 
@@ -28,7 +28,7 @@ The name comes from Disney's multiplane camera: flat artwork placed at different
 Requires Node.js 24 or later and FFmpeg with libx264 support.
 
 ```sh
-npm install github:LBEILC/Multiplane#v0.1.0
+npm install github:LBEILC/Multiplane#v0.2.0
 npx playwright install chromium
 npx multiplane doctor
 npx multiplane render node_modules/multiplane/examples/animation.html

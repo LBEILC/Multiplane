@@ -9,7 +9,7 @@
 
 给 AI agent 用的本地无头 HTML 视频渲染器。**镜头就是普通网页**：页面实现 `render(t)`，画面只由时间 `t` 决定；Multiplane 用无头 Chromium 逐帧截图，做超采样、运动模糊、胶片颗粒等后期，用 FFmpeg 合成视频，并能检查镜头是否确定。
 
-> 当前版本 `0.1.0`。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
+> 当前版本 `0.2.0`。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
 
 名字来自迪士尼的多层摄影台（multiplane camera）：一层层平面画稿放在不同深度、逐帧拍摄、带真实景深。对应这里的多层网页画面、三维卡片层和累积景深。
 
@@ -28,7 +28,7 @@
 需要 Node.js 24 或更新版本，以及支持 libx264 的 FFmpeg。
 
 ```sh
-npm install github:LBEILC/Multiplane#v0.1.0
+npm install github:LBEILC/Multiplane#v0.2.0
 npx playwright install chromium
 npx multiplane doctor
 npx multiplane render node_modules/multiplane/examples/animation.html

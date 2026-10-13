@@ -67,6 +67,30 @@ test('skills install, update across known releases, detect modifications, back u
   await v2.change('codex', 'remove', (await v2.status('codex')).signature);
   assert.equal((await readdir(path.dirname(v2.target('codex')))).length, 0);
 });
+test('bundled release version supports existing and updated skill content in isolated homes', async t => {
+  const version = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')).version;
+  const desktop = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+  assert.equal(desktop, version);
+  for (const host of ['claude', 'codex']) {
+    const f = await fixture(t);
+    // This is the previous release, intentionally distinct from the bundled version.
+    await new Skills(f.source, '0.1.0', f).change(host, 'install', null);
+    const current = new Skills(f.source, version, f);
+    const unchanged = await current.status(host);
+    assert.equal(unchanged.state, 'latest');
+    assert.equal(unchanged.version, version);
+    assert.equal(unchanged.availableVersion, version);
+    await writeFile(path.join(f.source, 'SKILL.md'), 'updated release content');
+    const before = await current.status(host);
+    assert.equal(before.state, 'update'); assert.equal(before.version, '0.1.0');
+    await current.change(host, 'install', before.signature);
+    const after = await current.status(host);
+    assert.equal(after.state, 'latest'); assert.equal(after.version, version);
+    const record = JSON.parse(await readFile(path.join(current.target(host), '.multiplane.json'), 'utf8'));
+    assert.equal(record.version, version);
+  }
+});
+
 test('corrupt installation records are treated conservatively without losing user files', async t => {
   const f = await fixture(t), skills = new Skills(f.source, '1.0.0', f);
   await skills.change('claude', 'install', null);
