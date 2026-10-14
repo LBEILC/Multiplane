@@ -4,7 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { npm, run } from './process.mjs';
 
 const publicDocs = new Set(['docs/protocol.md', 'docs/protocol.zh-CN.md']);
-export const forbiddenPackageFiles = files => files.filter(file => /^(?:app|tests|out|\.github)\//.test(file) || (file.startsWith('docs/') && !publicDocs.has(file)));
+export const forbiddenPackageFiles = files => files.filter(file => file === 'AGENTS.md' || /^(?:app|tests|out|\.github|tools\/reports)\//.test(file) || (file.startsWith('docs/') && !publicDocs.has(file)));
+
+export function validatePublishConfig(pkg) {
+  if (pkg.publishConfig?.registry !== 'https://registry.npmjs.org/') throw Error('publishConfig.registry must be https://registry.npmjs.org/');
+  if (pkg.publishConfig?.access !== 'public') throw Error('publishConfig.access must be public');
+}
 
 export function missingReadmeLinks(name, source, files) {
   const text = source.replace(/^\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\1\s*$/gm, '').replace(/`[^`\n]+`/g, '');
@@ -32,6 +37,7 @@ export async function releaseCheck(root, log = console.log) {
   const json = async file => JSON.parse(await readFile(path.join(root, file), 'utf8'));
   const git = async args => (await run('git', args, { cwd: root, capture: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout;
   const pkg = await json('package.json');
+  await check('npm publish configuration', async () => validatePublishConfig(pkg));
   await check('Versions and lockfiles', async () => {
     const app = await json('app/package.json');
     for (const [file, manifest] of [['package-lock.json', pkg], ['app/package-lock.json', app]]) {
@@ -52,9 +58,10 @@ export async function releaseCheck(root, log = console.log) {
     return `${pack.filename}; ${pack.files.length} files; ${pack.size} bytes packed; ${pack.unpackedSize} bytes unpacked`;
   });
   const files = pack?.files.map(file => file.path) ?? [];
-  await check('Package file boundaries and Chinese README', async () => {
+  await check('Package file boundaries and READMEs', async () => {
     if (!pack) throw Error('Package inventory unavailable');
     const forbidden = forbiddenPackageFiles(files);
+    if (!files.includes('README.md')) forbidden.push('Missing README.md');
     if (!files.includes('README.zh-CN.md')) forbidden.push('Missing README.zh-CN.md');
     if (forbidden.length) throw Error('\n' + forbidden.join('\n'));
   });

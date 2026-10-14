@@ -91,7 +91,7 @@
 | 0 | 成功 | — |
 | 1 | 镜头或检查不通过 | `shot_not_found`、`shot_outside_root`、`shot_load_failed`（HTTP 或脚本错误）、`shot_contract_invalid`（缺 `SHOT`、`render` 不是函数、`duration`/`fps`/`cuts` 不合法等）、`stage_size_invalid`（缺 `#stage`、尺寸不是正整数或随视口变化）、`ready_timeout`、`render_threw`（`render(t)` 抛错，`details` 带 `t`）、`resource_failed`（字体或素材加载失败）、`nondeterministic_output`、`lint_failed`、`cancel_timeout`（`cancel --wait` 到时作业仍未结束） |
 | 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` 找不到作业或快照损坏） |
-| 3 | 环境问题 | `ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
+| 3 | 环境问题 | `skill_modified`、`skill_blocked`、`skill_changed`（见 9.2）、`config_invalid`（作为 `config` 命令的失败，见 9.1；在其他地方只是警告）、`ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
 | 4 | 渲染器内部 | `output_invalid`（编码后的文件与渲染内容不符：帧数、时长、尺寸或帧率；`details.expected` 与 `details.actual`；文件不会发布）、`worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败；已知时带 `details.t`）、`encode_failed`、`internal_error` |
 | 130 | 被取消 | `cancelled` |
 
@@ -127,9 +127,11 @@ lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_ani
 
 | 平台 | 默认位置 |
 |---|---|
-| Windows | `%APPDATA%\multiplane` |
+| Windows | `%USERPROFILE%\.multiplane`（0.2.0 及以前是 `%APPDATA%\multiplane`，见下） |
 | macOS | `~/Library/Application Support/multiplane` |
 | Linux | `$XDG_CONFIG_HOME/multiplane`，未设时 `~/.config/multiplane` |
+
+Windows 上放在 `%APPDATA%` 之外，是因为 MSIX 打包的应用（其中包括一些 agent 宿主）对 `%APPDATA%` 的写入会被重定向到一份私有副本，其他程序看不到。渲染器第一次用到新目录时，新目录里缺 `config.json`、`jobs.jsonl`、`jobs.1.jsonl` 的，从旧位置复制过来，旧文件保留。设置了 `MULTIPLANE_HOME` 时不复制。
 
 **这个目录里的读写失败一律不影响渲染**：写不进去只发一条 `warning`（`home_unavailable`），作业照常进行。
 
@@ -157,7 +159,7 @@ lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_ani
 - 所有字段可选，`null` 或缺省表示用内置默认值。未知字段忽略，取值非法时发 `warning`（`config_invalid`，`details.field`）并忽略该字段。
 - 优先级：命令行参数 > 环境变量（`MULTIPLANE_FFMPEG`、`MULTIPLANE_JOBS_DIR`）> `config.json` > 内置默认值。
 - `start` 事件的 `options` 反映合并后的值；`doctor` 的结果里报告配置文件路径、是否存在、哪些字段生效。
-- 渲染器只读这个文件，从不写；由用户或配套软件写（写时先写临时文件再改名）。
+- 渲染作业只读这个文件，从不写。写它的是 `config` 命令（9.1，配套软件也用它），或者用户手动编辑。
 
 ### 8.3 预览帧 `preview.png`
 
@@ -165,4 +167,36 @@ lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_ani
 
 ### 8.4 随包的 skill
 
-npm 包带上 `skills/multiplane/`。安装方（配套软件 `app/` 或用户自己）把这个目录复制到各 agent 的 skill 目录。skill 版本跟随包版本。
+npm 包带上 `skills/multiplane/`。用 `multiplane skill install`（9.2）把它装进 agent 的 skill 目录，配套软件用的是同一个命令。skill 版本跟随包版本。
+
+## 9. 配置命令
+
+`config` 和 `skill` 让 agent 不靠配套软件也能把一台机器配好。它们不是作业：不建作业目录，不进作业索引。带 `--json` 时输出 `start` 和 `result` 两个事件，和 `doctor` 一样。
+
+### 9.1 `multiplane config`
+
+| 命令 | 作用 |
+|---|---|
+| `multiplane config get [<key>]` | 读用户配置。`data`：`{ file, exists, values: { ffmpeg, raster, encoder, workers, jobsDir }, overrides: { ffmpeg, jobsDir } }`。`values` 是文件里的值（没有的为 `null`）；`overrides` 是当前会盖过它的环境变量（没设为 `null`）。给了 `<key>` 时 `values` 只含那一项。 |
+| `multiplane config set <key> <value>` | 校验后写入（先写临时文件再改名）。`data` 同 `get`，另加 `changed: <key>`。 |
+| `multiplane config unset <key>` | 把该项置为 `null`。 |
+
+- 键和取值：`ffmpeg`（路径）、`jobsDir`（路径）、`raster`（`gpu` 或 `software`）、`encoder`（`x264`、`nvenc-h264` 或 `nvenc-hevc`）、`workers`（正整数；`auto` 等同于 `unset`）。未知的键或非法的值以 `invalid_option` 失败，不改文件。相对路径先按当前目录解析成绝对路径再写。
+- 文件里已有的未知字段原样保留。文件不是 JSON 对象时，`get` 和 `set` 以 `config_invalid` 失败（退出码 3），不覆盖它。`unset` 返回的 `data` 和 `set` 一样，也带 `changed`。
+- `config set ffmpeg <path>` 写入路径后立刻探测。`data.check` 为 `{ usable, version, encoders: { libx264, "libvpx-vp9", prores_ks }, reason }`。`usable` 要求文件报出 FFmpeg 版本并带 `libx264`，另外两个编码器是可选的。可用时 `reason` 为 `null`，否则为 `not-found`、`cannot-run`、`not-ffmpeg` 或 `missing-libx264`。路径不可用时照样写入、命令照样成功，另发一条 `warning`（码 `ffmpeg_unusable`）。
+
+### 9.2 `multiplane skill`
+
+| 命令 | 作用 |
+|---|---|
+| `multiplane skill status [--host <h>]` | `data.hosts`：每个宿主一项，`{ host, target, detected, state, version, availableVersion, signature, blocked, error }`。`state` 为 `missing`、`latest`、`update`、`modified` 或 `error`。`--host` 缺省为 `all`。 |
+| `multiplane skill install --host <h> [--force] [--expect <signature>]` | 安装随包的 skill，或更新到随包版本。 |
+| `multiplane skill remove --host <h> [--force] [--expect <signature>]` | 移除。 |
+
+- `<h>` 为 `claude`、`codex` 或 `all`。`install` 和 `remove` 必须给 `--host`。
+- 目标目录：Claude Code 是 `<主目录>/.claude/skills/multiplane`，Codex 是 `<主目录>/.agents/skills/multiplane`。环境变量 `MULTIPLANE_AGENT_HOME` 可以替换 `<主目录>`，给测试和非标准安装用。
+- 每份装好的 skill 带一个记录文件 `.multiplane.json`，里面是版本和内容哈希。内容和任何发行版本都对不上的，状态是 `modified`。
+- 改过的 skill 不会被默默替换。不带 `--force` 时 `install` 和 `remove` 以 `skill_modified` 失败；带 `--force` 时先把原目录改名为同级的 `multiplane.bak-<yyyyMMdd-HHmmss>`，结果里的 `backup` 给出它的路径。
+- 目标是符号链接、或含不支持的文件类型时为 `blocked`，命令以 `skill_blocked` 失败，带不带 `--force` 都一样。
+- `--expect <signature>`：装好的那份已经不是先前 `status` 返回的签名时，以 `skill_changed` 失败。还没装的那份签名是 `null`，传 `--expect null` 表示要求它仍然没装。不给 `--expect` 就不检查。
+- `--host all` 逐个宿主处理，互不影响。`data.hosts` 每个宿主一项，`{ host, action, ok, code, message, target, version, backup }`。有任何一个失败，整体 `ok: false`，`code` 取第一个失败的码。

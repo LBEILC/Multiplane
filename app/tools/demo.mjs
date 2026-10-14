@@ -31,7 +31,7 @@ export async function demo() {
     const events = [event('start', { jobId, shot, version: releasePackage.version, options: { root, workers: 1, raster: 'gpu', encoder: 'x264', scale: 1, from: 0, to: 2 } }), event('environment', { node: 'v24', platform: process.platform, chromium: 'demo', gpu: { renderer: 'demo', hardware: true }, ffmpeg: { version: 'demo', path: 'ffmpeg' } }), event('shot', { width: 480, height: 270, duration: 2, fps: 30, cuts: [], post: {} }), event('progress', { phase: 'capture', done: 24, total: 60, fps: 12, etaMs: 3000 })];
     const artifacts = []; let data = {};
     if (id === 'success') {
-      const out = await run(process.execPath, ['bin/multiplane', 'render', 'examples/animation.html', '--workers', '1', '--job-dir', path.join(home, 'seed'), '--json'], { cwd: root, env: { ...process.env, MULTIPLANE_NO_INDEX: '1' } });
+      const out = await run(process.execPath, ['bin/multiplane', 'render', 'examples/animation.html', '--workers', '1', '--job-dir', path.join(home, 'seed'), '--json'], { cwd: root, env: { ...process.env, MULTIPLANE_HOME: path.join(home, 'seed-home'), MULTIPLANE_NO_INDEX: '1' } });
       const result = out.trim().split('\n').map(JSON.parse).at(-1);
       const video = path.join(jobDir, 'animation.mp4'); await copyFile(result.data.output, video);
       artifacts.push({ path: video, kind: 'video', bytes: (await stat(video)).size });

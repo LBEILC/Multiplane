@@ -1,4 +1,5 @@
 // Task 030 reproducible local measurements. All generated media stays in out/.
+import { isolateDevelopmentHome } from './development-home.mjs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -9,6 +10,7 @@ import { createProcessTreeReader } from '../src/platform.mjs';
 import { renderShot } from '../src/render.mjs';
 
 const directory = path.resolve('out/030/measure');
+isolateDevelopmentHome('030/measure');
 await mkdir(directory, { recursive: true });
 const ffmpeg = await resolveFFmpeg();
 const run = args => new Promise((resolve, reject) => {

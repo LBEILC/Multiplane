@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import { isolateDevelopmentHome } from '../development-home.mjs';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { cpus, totalmem } from 'node:os';
@@ -8,6 +9,7 @@ import { resolveFFmpeg } from '../../src/ffmpeg.mjs';
 import { encoderArgs } from '../../src/encoder.mjs';
 import { stopChild } from '../../src/process.mjs';
 import { createResourceSampler } from '../../src/resources.mjs';
+isolateDevelopmentHome('bench');
 
 export const shotNames=['dom-light','dom-heavy','canvas-2d','webgl','mixed'];
 export const shotPath=name=>`tools/bench/shots/${name}.html`;

@@ -1,4 +1,6 @@
 import { openShot } from '../../src/capture.mjs';
+import { isolateDevelopmentHome } from '../development-home.mjs';
+isolateDevelopmentHome('bench');
 import { createPostCapture } from '../../src/post.mjs';
 import { environment } from '../../src/environment.mjs';
 

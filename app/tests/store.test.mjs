@@ -43,7 +43,7 @@ test('preferences stay separate and platform paths follow protocol', async t => 
   await assert.rejects(next.save({ theme: 'light' })); assert.equal(next.value.theme, 'dark');
   assert.equal(homeDirectory({}, 'linux', '/test'), '/test/.config/multiplane');
   assert.equal(homeDirectory({}, 'darwin', '/test'), '/test/Library/Application Support/multiplane');
-  assert.equal(homeDirectory({ APPDATA: 'C:\\data' }, 'win32', 'C:\\profile'), 'C:\\data\\multiplane');
+  assert.equal(homeDirectory({ APPDATA: 'C:\\data' }, 'win32', 'C:\\profile'), 'C:\\profile\\.multiplane');
 });
 
 test('polling discovers a newly created home and completion is notified once', async t => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { renderShot, stillsShot, verifyShot, lintShot, doctor, statusJob, cancelJob } from '../src/index.mjs';
+import { setup } from '../src/setup.mjs';
 import { postArgs, scaleArgs } from '../src/post.mjs';
 import { createEvents, version } from '../src/events.mjs';
 import { asError, invalidOption } from '../src/errors.mjs';
@@ -9,6 +10,7 @@ const common = [...postArgs, ...scaleArgs, 'alpha', 'fps', 'raster', 'root', 'jo
 const allowed = {
   render: [...common, 'format', 'draft', 'out', 'from', 'to', 'workers', 'encoder', 'max-bitrate', 'audio', 'audio-offset', 'ffmpeg'],
   stills: [...common, 'draft', 'out', 'at', 'every'], verify: [...common, 'out', 'at', 'workers'],
+  config: [], skill: ['host', 'force', 'expect'],
   lint: ['root'], doctor: ['ffmpeg', 'raster'], status: ['job-dir'], cancel: ['job-dir', 'wait'],
 };
 let reported = false;
@@ -27,7 +29,14 @@ try {
     console.log('Usage: multiplane <render|stills|verify|lint> <shot.html> [--json] [--option value]\n'
       + '       multiplane <status|cancel> <jobId|jobDir> [--json] [--wait seconds]\n'
       + '       multiplane doctor [--json] [--ffmpeg path]\n'
+      + '       multiplane config <get [key]|set key value|unset key> [--json]\n'
+      + '       multiplane skill <status|install|remove> [--host claude|codex|all] [--force] [--expect signature] [--json]\n'
       + Object.entries(allowed).map(([name, flags]) => name + ': ' + flags.map(f => '--' + f).join(' ')).join('\n'));
+  } else if (['config', 'skill'].includes(command)) {
+    if (args.includes('--help')) console.log(command === 'config'
+      ? 'Usage: multiplane config <get [key]|set key value|unset key> [--json]\nKeys: ffmpeg jobsDir raster encoder workers'
+      : 'Usage: multiplane skill <status|install|remove> [--host claude|codex|all] [--force] [--expect signature] [--json]\nInstall and remove require --host.');
+    else await setup(command, args.slice(1), onEvent);
   } else {
     if (!allowed[command]) throw invalidOption('command', 'Unknown command: ' + command);
     if (args.includes('--help')) {

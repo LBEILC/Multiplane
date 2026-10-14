@@ -5,7 +5,7 @@ export function packagedLaunch(platform, installation, installer, noSandbox = fa
   const paths = platform === 'win32' ? path.win32 : path.posix;
   const node = platform === 'win32' ? paths.join(installation, 'Multiplane.exe')
     : platform === 'darwin' ? paths.join(installation, 'Multiplane.app/Contents/MacOS/Multiplane')
-      : paths.join(installation, 'multiplane-desktop');
+      : paths.join(installation, 'multiplane-runtime');
   return { gui: platform === 'linux' ? installer : node, node, guiArgs: platform === 'linux' && noSandbox ? ['--no-sandbox'] : [] };
 }
 

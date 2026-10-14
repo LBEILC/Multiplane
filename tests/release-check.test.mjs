@@ -1,9 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { forbiddenPackageFiles, missingReadmeLinks } from '../tools/release-check.mjs';
+import { forbiddenPackageFiles, missingReadmeLinks, validatePublishConfig } from '../tools/release-check.mjs';
+
+test('publish configuration accepts the official public registry', () => {
+  assert.doesNotThrow(() => validatePublishConfig({ publishConfig: { registry: 'https://registry.npmjs.org/', access: 'public' } }));
+});
+
+test('publish configuration rejects missing configuration and non-official registries', () => {
+  for (const publishConfig of [undefined, null, {}, ...[
+    'https://registry.npmmirror.com/', 'http://registry.npmjs.org/',
+    'https://registry.npmjs.org.example.com/', 'https://registry.npmjs.org'
+  ].map(registry => ({ registry, access: 'public' }))]) {
+    assert.throws(() => validatePublishConfig({ publishConfig }), /publishConfig\.registry/);
+  }
+});
+
+test('publish configuration requires explicit public access', () => {
+  for (const access of [undefined, null, '', 'restricted', 'Public']) {
+    assert.throws(() => validatePublishConfig({ publishConfig: { registry: 'https://registry.npmjs.org/', access } }), /publishConfig\.access/);
+  }
+});
 
 test('release package rejects private trees but permits public protocol documents', () => {
-  const forbidden = ['app/main.js', 'tests/test.mjs', 'out/movie.mp4', '.github/workflows/ci.yml', 'docs/internal.md', 'docs/specs/task.md'];
+  const forbidden = ['app/main.js', 'tests/test.mjs', 'out/movie.mp4', '.github/workflows/ci.yml', 'AGENTS.md', 'docs/requirements.md', 'docs/internal.md', 'docs/specs/task.md', 'docs/roles/engineering.md', 'docs/design.md', 'tools/reports/task.md'];
   assert.deepEqual(forbiddenPackageFiles(['src/index.mjs', 'docs/protocol.md', 'docs/protocol.zh-CN.md', ...forbidden]), forbidden);
 });
 

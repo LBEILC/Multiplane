@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { migrateUserHome } from './home-migration.mjs';
 import { readFileSync, mkdirSync, statSync, renameSync, openSync, writeSync, closeSync, unlinkSync } from 'node:fs';
 import { userHome } from './platform.mjs';
 import { encoders } from './encoder.mjs';
@@ -28,7 +29,8 @@ export function retryFileOperation(operation, deadline, { platform = process.pla
 }
 
 export function loadUserConfig(command, explicit = {}, env = process.env) {
-  const directory = userHome(env), file = path.join(directory, 'config.json'), warnings = [];
+  const migration = migrateUserHome(env);
+  const directory = userHome(env), file = path.join(directory, 'config.json'), warnings = [...migration.warnings];
   const config = { path: file, exists: false, applied: [] }, values = {};
   const invalid = field => warnings.push({ code: 'config_invalid', message: `Invalid user configuration field: ${field}.`, details: { field } });
   let data;
@@ -56,7 +58,7 @@ export function loadUserConfig(command, explicit = {}, env = process.env) {
   }
   if (supported(command).includes('ffmpeg') && env.MULTIPLANE_FFMPEG !== undefined) values.ffmpeg = env.MULTIPLANE_FFMPEG;
   if (supported(command).includes('jobsDir') && env.MULTIPLANE_JOBS_DIR !== undefined) values['job-dir'] = env.MULTIPLANE_JOBS_DIR;
-  return { directory, config, warnings, options: { ...values, ...explicit } };
+  return { directory, config, migration, warnings, options: { ...values, ...explicit } };
 }
 
 // Serialize rotation and append together, recovering abandoned locks.

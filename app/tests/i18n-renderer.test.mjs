@@ -58,8 +58,8 @@ test('live language changes preserve jobs, tabs, scroll and inputs and update al
       assert.equal(await page.locator(`[data-page=${id}]`).innerText(), copy[id]);
       if (id === 'environment') {
         await page.locator('[data-check=ffmpeg]').waitFor();
-        assert.equal(await page.locator('[data-check=ffmpeg] .check-status').innerText(), locale === 'en' ? 'FFmpeg was not found.' : copy.notFound);
-        assert.equal(await page.locator('[data-check=ffmpeg] .check-detail').count(), locale === 'en' ? 0 : 1);
+        assert.equal(await page.locator('[data-check=ffmpeg] .check-status').innerText(), copy.notFound);
+        assert.equal(await page.locator('[data-check=ffmpeg] .check-detail').innerText(), copy.doctorFfmpegMissing);
       }
     }
   }

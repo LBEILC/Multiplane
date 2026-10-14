@@ -107,8 +107,8 @@ export const stopSignals = (platform = process.platform) => platform === 'win32'
 export function userHome(env = process.env, platform = process.platform, home = os.homedir()) {
   const paths = platform === 'win32' ? path.win32 : path.posix;
   if (env.MULTIPLANE_HOME) return paths.resolve(env.MULTIPLANE_HOME);
-  const base = platform === 'win32' ? (env.APPDATA || paths.join(home, 'AppData', 'Roaming'))
-    : platform === 'darwin' ? paths.join(home, 'Library', 'Application Support')
+  if (platform === 'win32') return paths.join(env.USERPROFILE || home, '.multiplane');
+  const base = platform === 'darwin' ? paths.join(home, 'Library', 'Application Support')
       : (env.XDG_CONFIG_HOME || paths.join(home, '.config'));
   return paths.join(base, 'multiplane');
 }

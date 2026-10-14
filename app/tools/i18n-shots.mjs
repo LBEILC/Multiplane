@@ -1,6 +1,6 @@
 import { _electron } from 'playwright';
 import assert from 'node:assert/strict';
-import { appendFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { demo } from './demo.mjs';
@@ -172,4 +172,6 @@ try {
 } finally {
   await writeFile(path.join(out, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n');
   await application.close();
+  // The fixture user only holds a generated skill copy; screenshots and evidence.json are the output.
+  await rm(user, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(error => console.warn(`Could not remove ${user}: ${error.code || error.message}`));
 }

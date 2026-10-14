@@ -4,11 +4,13 @@ import os from 'node:os';
 import { watch } from 'node:fs';
 import { readFile, open, stat, writeFile, mkdir, rename } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
+import { jobData } from '../shared/job-data.mjs';
 
 export function homeDirectory(env = process.env, platform = process.platform, home = os.homedir()) {
   const p = platform === 'win32' ? path.win32 : path.posix;
   if (env.MULTIPLANE_HOME) return p.resolve(env.MULTIPLANE_HOME);
-  return p.join(platform === 'win32' ? env.APPDATA || p.join(home, 'AppData', 'Roaming') : platform === 'darwin' ? p.join(home, 'Library', 'Application Support') : env.XDG_CONFIG_HOME || p.join(home, '.config'), 'multiplane');
+  if (platform === 'win32') return p.join(env.USERPROFILE || home, '.multiplane');
+  return p.join(platform === 'darwin' ? p.join(home, 'Library', 'Application Support') : env.XDG_CONFIG_HOME || p.join(home, '.config'), 'multiplane');
 }
 export function processAlive(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
@@ -17,6 +19,7 @@ export function processAlive(pid) {
 const parse = line => { try { return JSON.parse(line); } catch { return null; } };
 export class EventTail {
   offset = 0; pending = Buffer.alloc(0); rows = []; identity = null; bytesRead = 0;
+  constructor(report = (_error) => {}) { this.report = report; }
   async read(file) {
     let fd;
     try {
@@ -35,6 +38,7 @@ export class EventTail {
           for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
             const row = parse(line);
             if (row?.schema === 'multiplane/1' && typeof row.type === 'string') this.rows.push(row);
+            else if (line.trim()) this.report(Error('Invalid event row'));
           }
         }
         this.pending = Buffer.from(bytes.subarray(end + 1));
@@ -83,9 +87,10 @@ export class JobStore extends EventEmitter {
     for (const name of ['jobs.1.jsonl', 'jobs.jsonl']) {
       try {
         const text = await readFile(path.join(this.home, name), 'utf8');
-        for (const line of text.slice(0, text.lastIndexOf('\n') + 1).split('\n')) {
+        for (const [index, line] of text.slice(0, text.lastIndexOf('\n') + 1).split('\n').entries()) {
           const r = parse(line);
           if (r?.schema === 'multiplane/1' && typeof r.jobId === 'string' && typeof r.jobDir === 'string' && path.isAbsolute(r.jobDir)) records.set(r.jobId, r);
+          else if (line.trim()) this.emit('fault', Error(`Invalid index row: ${name}:${index + 1}`));
         }
       } catch (e) { if (e.code !== 'ENOENT') this.emit('fault', e); }
     }
@@ -94,18 +99,20 @@ export class JobStore extends EventEmitter {
     for (const [id, record] of records) {
       try {
         const s = JSON.parse(await readFile(path.join(record.jobDir, 'status.json'), 'utf8'));
-        if (s.schema !== 'multiplane/1' || s.jobId !== id || !['running', 'succeeded', 'failed', 'cancelled'].includes(s.state) || typeof s.shot !== 'string') continue;
-        const tail = this.tails.get(id) ?? new EventTail(); this.tails.set(id, tail);
+        if (s?.schema !== 'multiplane/1' || s.jobId !== id) { this.emit('fault', Error(`Invalid status for job ${id}`)); continue; }
+        const tail = this.tails.get(id) ?? new EventTail(error => this.emit('fault', Error(`Job ${id}: ${error.message}`))); this.tails.set(id, tail);
         const events = [...await tail.read(path.join(record.jobDir, 'events.jsonl'))];
         let previewVersion = '';
         try { const p = await stat(path.join(record.jobDir, 'preview.png')); previewVersion = `${p.mtimeMs}:${p.size}`; } catch {}
-        const job = { ...s, jobDir: record.jobDir, events, previewVersion };
+        const job = jobData({ ...s, jobDir: record.jobDir, events, previewVersion }, error => this.emit('fault', error));
+        if (!job) continue;
         if (s.state === 'running' && !this.alive(s.pid)) {
           job.state = 'failed'; job.lost = true;
           job.result = { schema: s.schema, type: 'result', command: s.command, ts: s.updatedAt, ok: false, code: 'internal_error', message: copy.processLost, artifacts: events.filter(e => e.type === 'artifact').map(({ path, kind, bytes }) => ({ path, kind, bytes })), data: {}, elapsedMs: Math.max(0, Date.parse(s.updatedAt) - Date.parse(s.startedAt)) };
         }
         jobs.push(job);
       } catch (e) {
+        this.emit('fault', Error(`Job ${id}: ${e.message}`));
         // Keep the last valid snapshot across partial writes and transient access failures.
         if (previous.has(id) && (e.code !== 'ENOENT' || await stat(record.jobDir).then(s => s.isDirectory()).catch(() => false))) jobs.push(previous.get(id));
       }
@@ -130,8 +137,8 @@ export class JobStore extends EventEmitter {
     for (const dir of dirs) if (!this.watchers.has(dir)) {
       try {
         const watcher = watch(dir, (_event, file) => { if (!file || ['jobs.jsonl', 'jobs.1.jsonl', 'status.json', 'events.jsonl', 'preview.png'].includes(String(file))) this.schedule(); });
-        watcher.on('error', () => { watcher.close(); this.watchers.delete(dir); }); this.watchers.set(dir, watcher);
-      } catch { /* Polling also discovers a home created after startup. */ }
+        watcher.on('error', error => { this.emit('fault', error); watcher.close(); this.watchers.delete(dir); }); this.watchers.set(dir, watcher);
+      } catch (error) { if (error.code !== 'ENOENT') this.emit('fault', error); /* Polling discovers a home created later. */ }
     }
   }
   job(id) { const job = this.jobs.find(j => j.jobId === id); if (!job) throw Error('Job is no longer available.'); return job; }

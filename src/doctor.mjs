@@ -5,7 +5,8 @@ import { MultiplaneError } from './errors.mjs';
 
 export const doctor = (options = {}) => runCommand('doctor', null, options, async events => {
   options = events.options;
-  const checks = [];
+  const moved = events.migration.migrated.filter(item => ['config.json', 'jobs.jsonl'].includes(item.name));
+  const checks = [{ name: 'home', ok: true, detail: `User directory: ${events.config.path.slice(0, -'config.json'.length)}.` + (moved.length ? ` Copied from the previous location: ${moved.map(item => item.source).join(', ')}; original files were retained.` : '') }];
   let failure, browser, info, ffmpeg;
   const nodeOk = Number(process.versions.node.split('.')[0]) >= 24;
   checks.push({ name: 'node', ok: nodeOk, detail: `Node ${process.version}; version 24 or newer is required.` });
@@ -36,6 +37,7 @@ export const doctor = (options = {}) => runCommand('doctor', null, options, asyn
   if (info) events.emit('environment', { ...info, ffmpeg: ffmpeg ?? null });
   try { await import('three'); checks.push({ name: 'three', ok: true, detail: 'Optional three.js is available.' }); }
   catch { checks.push({ name: 'three', ok: false, detail: 'Optional three.js is not installed.' }); }
+  if (failure && checks.some(c => ['ffmpeg', 'libx264'].includes(c.name) && !c.ok)) failure.hint = (failure.hint ? failure.hint + ' ' : '') + 'Run multiplane config set ffmpeg <path> to save an FFmpeg executable.';
   if (failure) { failure.result = { data: { checks, config: events.config } }; throw failure; }
   return { checks, config: events.config };
 }, false);

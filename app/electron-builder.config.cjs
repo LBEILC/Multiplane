@@ -16,11 +16,14 @@ module.exports = {
     const resources = context.electronPlatformName === 'darwin' ? path.join(context.appOutDir, 'Multiplane.app/Contents/Resources') : path.join(context.appOutDir, 'resources');
     await verifyRendererBundle(path.join(__dirname, 'build/renderer'), path.join(resources, 'renderer'));
     await verifyNotices(path.join(resources, 'app'));
+    const { writeLauncher } = await import('./tools/cli-launcher.mjs');
+    await writeLauncher(context.electronPlatformName, context.appOutDir, resources);
   },
   win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: 'build/icons/app.ico', signtoolOptions: { sign: async () => {} } },
   mac: { target: [{ target: 'dmg', arch: ['arm64', 'x64'] }], icon: 'build/icons/app.icns', identity: null, notarize: false, artifactName: 'Multiplane-${version}-${arch}.${ext}' },
   dmg: { sign: false },
   linux: { target: ['AppImage'], icon: 'build/icons/app-512.png', category: 'AudioVideo', artifactName: 'Multiplane-${version}-${arch}.${ext}', maintainer: 'Multiplane contributors' },
+  appImage: { executableArgs: [] },
   nsis: {
     installerLanguages: ['en_US', 'zh_CN'], displayLanguageSelector: false,
     include: 'tools/installer.nsh',

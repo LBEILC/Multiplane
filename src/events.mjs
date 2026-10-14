@@ -170,6 +170,7 @@ export async function runCommand(command, shot, options, action, job = true) {
       events.resources = resources;
     }
     events.config = user.config;
+    events.migration = user.migration;
     if (options.draft) {
       // Keep lint and cancellation active before the dimension-only draft probe.
       if (!options['no-lint']) {

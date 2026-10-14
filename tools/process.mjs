@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 // CI opts in; other tooling retains its existing timeout and process behavior.
-export function run(file, args, { cwd, env = process.env, capture = false, timeout = 600000, onOutput, killTree = false, timeoutMessage } = {}) {
+export function run(file, args, { cwd, env = process.env, capture = false, timeout = 600000, onOutput, killTree = false, windowsVerbatimArguments = false, timeoutMessage } = {}) {
   return new Promise((resolve, reject) => {
     const started = performance.now();
-    const child = spawn(file, args, { cwd, env, shell: false, detached: killTree && process.platform !== 'win32', windowsHide: true, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit' });
+    const child = spawn(file, args, { cwd, env, shell: false, windowsVerbatimArguments, detached: killTree && process.platform !== 'win32', windowsHide: true, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit' });
     let stdout = '', stderr = '';
     let timedOut = false, cleanup = Promise.resolve();
     if (capture) { child.stdout.on('data', bytes => { stdout += bytes; onOutput?.(bytes, 'stdout'); }); child.stderr.on('data', bytes => { stderr += bytes; onOutput?.(bytes, 'stderr'); }); }

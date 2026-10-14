@@ -9,7 +9,7 @@
 
 给 AI agent 用的本地无头 HTML 视频渲染器。**镜头就是普通网页**：页面实现 `render(t)`，画面只由时间 `t` 决定；Multiplane 用无头 Chromium 逐帧截图，做超采样、运动模糊、胶片颗粒等后期，用 FFmpeg 合成视频，并能检查镜头是否确定。
 
-> 当前版本 `0.2.0`。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
+> 当前版本 `0.2.1`。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
 
 名字来自迪士尼的多层摄影台（multiplane camera）：一层层平面画稿放在不同深度、逐帧拍摄、带真实景深。对应这里的多层网页画面、三维卡片层和累积景深。
 
@@ -28,15 +28,15 @@
 需要 Node.js 24 或更新版本，以及支持 libx264 的 FFmpeg。
 
 ```sh
-npm install github:LBEILC/Multiplane#v0.2.0
+npm install multiplane
 npx playwright install chromium
 npx multiplane doctor
 npx multiplane render node_modules/multiplane/examples/animation.html
 ```
 
-这个包还没有发布到 npm 仓库，第一条命令是从 GitHub 安装带标签的发布版本。新版 npm 默认不运行依赖包的安装脚本，所以第二条命令用来下载 Playwright 使用的 Chromium。如果是克隆了本仓库，在仓库里运行 `npm install`，直接渲染 `examples/animation.html` 即可。
+新版 npm 默认不运行依赖包的安装脚本，所以第二条命令用来下载 Playwright 使用的 Chromium。如果是克隆了本仓库，在仓库里运行 `npm install`，直接渲染 `examples/animation.html` 即可。
 
-把使用说明 skill 交给你的 agent：把 `node_modules/multiplane/skills/multiplane` 复制到 agent 的 skill 目录（Claude Code 为 `~/.claude/skills/`，Codex 为 `~/.agents/skills/`），或者让桌面软件来安装。
+把使用说明 skill 交给你的 agent：运行 `npx multiplane skill install --host all`（Claude Code 装到 `~/.claude/skills/multiplane`，Codex 装到 `~/.agents/skills/multiplane`），或者让桌面软件来安装。装好后新开一个 agent 会话。
 
 在克隆的仓库里，`npm install` 会自己下载这个 Chromium（已安装则复用）。离线环境可设 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 跳过，之后再运行 `npx playwright install chromium`。Linux 上 Chromium 还需要系统库：运行一次 `npx playwright install-deps chromium`（缺的时候 `doctor` 会提示）。
 
@@ -56,6 +56,8 @@ FFmpeg 的许可取决于你安装的构建。然后用以下任一方式告诉 
 2. 环境变量 `MULTIPLANE_FFMPEG`；
 3. 用户配置文件里的 `ffmpeg`（见下文“用户配置”）；
 4. 放进系统 PATH。
+
+想一次设好、所有项目都生效，运行 `npx multiplane config set ffmpeg <path>`，它会顺便检查这个文件能不能用。
 
 默认用软件编码 `x264`；有 NVIDIA 显卡时可用 `--encoder nvenc-h264` 或 `--encoder nvenc-hevc`。`doctor` 会检查 FFmpeg 能否运行、是否支持所需编码器。
 
@@ -102,6 +104,8 @@ Shot.define({
 | `multiplane doctor` | 检查 Node、浏览器、GPU 光栅、FFmpeg、可选的 three.js |
 | `multiplane status <job>` | 查看作业状态 |
 | `multiplane cancel <job>` | 停止作业 |
+| `multiplane config get\|set\|unset` | 读取或修改用户配置 |
+| `multiplane skill status\|install\|remove` | 给 Claude Code 和 Codex 安装、更新、移除 agent skill |
 
 镜头路径相对资源根 `--root`（默认当前目录）。每次运行都有自己的作业目录 `out/jobs/<jobId>/`，不给 `--out` 时产物就写在里面（视频、`stills/`、`verify/`），多次运行互不覆盖；最终路径见结果里的 `artifacts`。`--out` 指定输出位置，目标已存在时会拒绝覆盖，加 `--overwrite` 才替换。`render`、`stills`、`verify` 启动前自动跑 `lint`，有 error 就停下，`--no-lint` 跳过。`npx multiplane <command> --help` 列出该命令的全部参数。
 
@@ -141,9 +145,9 @@ Shot.define({
 
 ## 用户配置与作业索引
 
-渲染器在用户级目录里读配置、登记作业：Windows 为 `%APPDATA%\multiplane`，macOS 为 `~/Library/Application Support/multiplane`，Linux 为 `~/.config/multiplane`；环境变量 `MULTIPLANE_HOME` 可改。
+渲染器在用户级目录里读配置、登记作业：Windows 为 `%USERPROFILE%\.multiplane`（0.2.0 及以前是 `%APPDATA%\multiplane`，首次使用时会把那里的文件复制过来），macOS 为 `~/Library/Application Support/multiplane`，Linux 为 `~/.config/multiplane`；环境变量 `MULTIPLANE_HOME` 可改。
 
-- `config.json`：用户默认值，字段 `ffmpeg`、`raster`、`encoder`、`workers`、`jobsDir`，都可省略。优先级为命令行参数 > 环境变量 > `config.json` > 内置默认值。渲染器只读不写；`doctor` 会报告它的位置和哪些字段生效。
+- `config.json`：用户默认值，字段 `ffmpeg`、`raster`、`encoder`、`workers`、`jobsDir`，都可省略。优先级为命令行参数 > 环境变量 > `config.json` > 内置默认值。渲染时从不写它，由 `multiplane config` 命令或桌面软件写；`doctor` 和 `config get` 会报告它的位置和哪些字段生效。
 - `jobs.jsonl`：每个作业开始、结束各追加一行，供其他程序发现各项目里的作业；作业状态以作业目录里的 `status.json` 为准。`MULTIPLANE_NO_INDEX=1` 关闭登记。
 
 这个目录读写失败不影响渲染，只会给出一条警告。格式见 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md) 第 8 节。
@@ -198,7 +202,7 @@ npm install three@0.180.0
 
 它只通过 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md) 的文件和命令行与渲染器打交道，不是渲染的必需品：不装它，agent 照样可以用命令行渲染。
 
-从 [Releases 页面](https://github.com/LBEILC/Multiplane/releases) 下载安装包。安装包里带一份同版本的渲染器，不需要另装 Node.js。FFmpeg 不随包提供（见上文），Chromium 在环境页首次使用时下载。
+从 [Releases 页面](https://github.com/LBEILC/Multiplane/releases) 下载安装包。安装包里带一份同版本的渲染器，不需要另装 Node.js。这份渲染器也可以当命令用：Windows 为安装目录下的 `multiplane.cmd`，macOS 为 `Multiplane.app/Contents/Resources/bin/multiplane`，Linux 为 `Multiplane-<版本>-x86_64.AppImage --multiplane-cli`。PATH 里找不到 `multiplane` 时，环境页会显示完整路径。FFmpeg 不随包提供（见上文），Chromium 在环境页首次使用时下载。
 
 | 系统 | 安装包 | 首次打开（安装包没有代码签名） |
 |---|---|---|
@@ -214,7 +218,7 @@ npm --prefix app run dist
 npm --prefix app start
 ```
 
-`dist` 把安装包写到 `app/release/`。
+`dist` 把安装包写到 `app/release/`。`npm --prefix app start` 用的是单独的开发目录（渲染器配置、作业索引、软件数据都不碰真实的），加 `-- --use-user-home` 才使用真实目录。
 
 ## 示例
 

@@ -6,6 +6,7 @@ const invoke = (channel: string, ...args: unknown[]) => ipcRenderer.invoke(chann
   throw Error(message);
 });
 const bridge: Bridge = {
+  reportFault: message => ipcRenderer.send('renderer-fault', String(message).slice(0, 12000)),
   platform: () => invoke('platform'),
   browserInstallState: () => invoke('browser-install-state'),
   installBrowser: () => invoke('install-browser'),
@@ -18,8 +19,10 @@ const bridge: Bridge = {
   chooseSetting: key => invoke('choose-setting', key),
   openConfig: () => invoke('open-config'),
   doctor: () => invoke('doctor'),
+  checkFfmpeg: () => invoke('check-ffmpeg'),
   environment: () => invoke('environment'),
   skill: (host, action) => invoke('skill', host, action),
+  copyBundledCommand: () => invoke('copy-bundled-command'),
   copyBrowserCommand: () => invoke('copy-browser-command'),
   snapshot: () => invoke('snapshot'),
   subscribe: fn => { const listener = (_event: unknown, value: Snapshot) => fn(value); ipcRenderer.on('snapshot', listener); return () => ipcRenderer.removeListener('snapshot', listener); },

@@ -21,6 +21,15 @@ Your job has two parts: **write a page that follows the contract**, then **check
 
 For environment problems (missing browser or FFmpeg), run `multiplane doctor --json` first. Each entry in `data.checks` has `ok` and a `detail`; when the command fails, the `result` also carries `code` and `hint`. Fix the failing checks before rendering.
 
+## Set up a machine
+
+Use these commands when the user asks you to set up Multiplane, or approves a fix that `doctor` suggests. They change the user's machine-wide settings, so do not run `set`, `unset`, `install` or `remove` on your own initiative.
+
+- `multiplane config get --json` reads the user config; `data.overrides` shows environment variables that currently take priority.
+- `multiplane config set ffmpeg <path> --json` saves the FFmpeg path and checks it at once: read `data.check.usable` and `data.check.reason`. An unusable path is still saved and produces a `warning`. Other keys: `raster` (`gpu` / `software`), `encoder` (`x264` / `nvenc-h264` / `nvenc-hevc`), `workers` (a positive integer, or `auto`), `jobsDir`. `multiplane config unset <key>` restores the default.
+- `multiplane skill status --json` reports this skill for Claude Code and Codex; `multiplane skill install --host claude|codex|all --json` installs or updates it. A copy the user has edited is reported as `modified` and is not replaced unless you pass `--force`, which backs it up first; ask the user before using `--force`.
+- When only the desktop app is installed, `multiplane` may not be on PATH. The app ships its own command: on Windows `<install directory>\multiplane.cmd`, on macOS `/Applications/Multiplane.app/Contents/Resources/bin/multiplane`, and on Linux `<path to the AppImage> --multiplane-cli`. The app's Environment page shows the exact path.
+
 ## Shot contract
 
 Minimal shot:
@@ -150,6 +159,8 @@ Use `--json` with any command. Resolve shot paths relative to `--root` (the curr
 | `multiplane verify <shot>` | Determinism check: pixel comparisons out of order, after reload, and with single/multiple processes | `--at` (must fall on frames), `--workers` (default 2) |
 | `multiplane render <shot>` | Render video | `--out`, `--from` / `--to` (seconds, end excluded), `--fps`, `--scale`, `--workers`, `--motion-blur`, `--shutter`, `--grain`, `--no-post`, `--draft`, `--encoder`, `--audio` |
 | `multiplane doctor` | Check the environment | — |
+| `multiplane config get\|set\|unset` | Read or change the user config | see "Set up a machine" |
+| `multiplane skill status\|install\|remove` | Manage this skill for Claude Code and Codex | `--host`, `--force` |
 | `multiplane status <job>` | View job status | — |
 | `multiplane cancel <job>` | Stop a job | `--wait` (seconds) |
 
@@ -157,7 +168,7 @@ Use `--out`, `--overwrite`, and `--no-lint` (skip automatic lint) with `stills`,
 
 Each run has its own job directory, `out/jobs/<jobId>/`. Without `--out`, artifacts are written there; use `artifacts` in the result for the paths. If `--out` points to an existing file, the command fails with `output_exists`. Add `--overwrite` when you intend to replace it (replacement happens only after the new artifact is fully written; on failure, the old file stays untouched).
 
-FFmpeg is not bundled. It is found in this order: `--ffmpeg <path>`, the environment variable `MULTIPLANE_FFMPEG`, `ffmpeg` in the user config `config.json`, then the system PATH. It must support libx264. Find the user config file's location in the `doctor` result. Let the user manage the user config; do not rewrite it without authorization.
+FFmpeg is not bundled. It is found in this order: `--ffmpeg <path>`, the environment variable `MULTIPLANE_FFMPEG`, `ffmpeg` in the user config `config.json`, then the system PATH. It must support libx264. To save a path for every project, use `multiplane config set ffmpeg <path>` with the user's approval (see "Set up a machine").
 
 Use `--draft` with `render` or `stills` while iterating: it captures at a scale of at most 0.5 and upscales, with no motion blur and no grain, so it is faster and visibly lower in quality. Options you pass explicitly override the preset. Render the final video without `--draft`; `result.data.draft` is `true` when a draft was produced, so do not hand a draft over as the final result.
 

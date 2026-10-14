@@ -1,4 +1,6 @@
 // Prepare out/bench/baseline from a pre-change git archive (src, bin, examples, package.json).
+import { isolateDevelopmentHome } from '../development-home.mjs';
+isolateDevelopmentHome('bench');
 ﻿import {spawn} from 'node:child_process';import {readFile,writeFile} from 'node:fs/promises';import {decodeNativePNG} from '../../src/png-native.mjs';
 const run=(args,extra={})=>new Promise((resolve,reject)=>{const child=spawn(process.execPath,args,{windowsHide:true,...extra});let stdout='',stderr='';child.stdout.on('data',d=>stdout+=d);child.stderr.on('data',d=>stderr+=d);child.once('error',reject);child.once('close',code=>code===0?resolve(stdout):reject(Error(stdout+stderr)));});
 const results=[];

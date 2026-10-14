@@ -93,7 +93,7 @@ Error codes are stable lowercase strings with underscores. **Only add codes; nev
 | 0 | Success | — |
 | 1 | Shot or check failure | `shot_not_found`, `shot_outside_root`, `shot_load_failed` (HTTP or script error), `shot_contract_invalid` (missing `SHOT`, `render` is not a function, invalid `duration`/`fps`/`cuts`, etc.), `stage_size_invalid` (missing `#stage`, dimensions are not positive integers or vary with the viewport), `ready_timeout`, `render_threw` (`render(t)` throws; `details` includes `t`), `resource_failed` (font or asset failed to load), `nondeterministic_output`, `lint_failed`, `cancel_timeout` (the job has not finished when `cancel --wait` expires) |
 | 2 | Usage error | `invalid_option` (unknown, repeated, missing value, invalid value; `details.option`), `invalid_scale` (scale produces odd or noninteger dimensions; `hint` lists usable scales), `output_exists` (the explicit output path already has a file and `--overwrite` was not given), `job_not_found` (`status` / `cancel` cannot find the job or the snapshot is corrupt) |
-| 3 | Environment problem | `ffmpeg_not_found`, `ffmpeg_unusable` (found but cannot run or lacks an encoder), `browser_not_installed`, `browser_launch_failed`, `three_not_installed`, `unsupported_node`, `job_dir_unwritable` (the job directory cannot be created or written, for example when running in a read-only directory; `details.path`; the hint points to `--job-dir` and `MULTIPLANE_JOBS_DIR`) |
+| 3 | Environment problem | `skill_modified`, `skill_blocked`, `skill_changed` (see section 9.2), `config_invalid` (as a command failure of `config`, see section 9.1; elsewhere it is only a warning), `ffmpeg_not_found`, `ffmpeg_unusable` (found but cannot run or lacks an encoder), `browser_not_installed`, `browser_launch_failed`, `three_not_installed`, `unsupported_node`, `job_dir_unwritable` (the job directory cannot be created or written, for example when running in a read-only directory; `details.path`; the hint points to `--job-dir` and `MULTIPLANE_JOBS_DIR`) |
 | 4 | Renderer internal error | `output_invalid` (the encoded file does not match what was rendered: frame count, duration, size or frame rate; `details.expected` and `details.actual`; the file is not published), `worker_crashed`, `browser_crashed` (the browser process or page closed unexpectedly and restarting it did not help; `details.t` when known), `encode_failed`, `internal_error` |
 | 130 | Cancelled | `cancelled` |
 
@@ -129,9 +129,11 @@ The renderer registers jobs and reads user defaults in a user directory. The pla
 
 | Platform | Default location |
 |---|---|
-| Windows | `%APPDATA%\multiplane` |
+| Windows | `%USERPROFILE%\.multiplane` (until 0.2.0: `%APPDATA%\multiplane`; see below) |
 | macOS | `~/Library/Application Support/multiplane` |
 | Linux | `$XDG_CONFIG_HOME/multiplane`, or `~/.config/multiplane` when unset |
+
+On Windows the directory is outside `%APPDATA%` because apps packaged with MSIX (some agent hosts among them) have their writes to `%APPDATA%` redirected to a private copy that other programs cannot see. The first time the renderer uses the new directory, it copies `config.json`, `jobs.jsonl` and `jobs.1.jsonl` from the old location when they are missing from the new one; the old files are left in place. Nothing is copied when `MULTIPLANE_HOME` is set.
 
 **Read and write failures in this directory never affect rendering**: a write failure emits only a `warning` (`home_unavailable`), and the job continues normally.
 
@@ -159,7 +161,7 @@ Append-only, one JSON object per line. Each job (`render` / `stills` / `verify`)
 - All fields are optional. `null` or omission means use built-in defaults. Ignore unknown fields. Invalid values emit a `warning` (`config_invalid`, `details.field`), and the field is ignored.
 - Priority: command-line options > environment variables (`MULTIPLANE_FFMPEG`, `MULTIPLANE_JOBS_DIR`) > `config.json` > built-in defaults.
 - The `start` event's `options` reflects the merged values. The `doctor` result reports the config file path, whether it exists, and which fields take effect.
-- The renderer only reads this file and never writes it. The user or desktop app writes it (write a temporary file, then rename).
+- Rendering jobs only read this file and never write it. It is written by the `config` command (section 9.1), which the desktop app also uses, or by hand.
 
 ### 8.3 Preview frame `preview.png`
 
@@ -167,4 +169,36 @@ While `render` runs, it maintains `preview.png` in the job directory, a thumbnai
 
 ### 8.4 Bundled skill
 
-The npm package includes `skills/multiplane/`. The installer (the desktop app `app/` or the user) copies this directory into each agent's skill directory. The skill version follows the package version.
+The npm package includes `skills/multiplane/`. Install it into an agent's skill directory with `multiplane skill install` (section 9.2); the desktop app uses the same command. The skill version follows the package version.
+
+## 9. Setup commands
+
+`config` and `skill` let an agent set up a machine without the desktop app. They are not jobs: they create no job directory and no job index entry. With `--json` they emit a `start` and a `result` event, like `doctor`.
+
+### 9.1 `multiplane config`
+
+| Command | Effect |
+|---|---|
+| `multiplane config get [<key>]` | Read the user config. `data`: `{ file, exists, values: { ffmpeg, raster, encoder, workers, jobsDir }, overrides: { ffmpeg, jobsDir } }`. `values` holds what the file says (`null` when absent); `overrides` holds environment variables that currently take priority (`null` when unset). With `<key>`, `values` contains that key only. |
+| `multiplane config set <key> <value>` | Validate, then write (temporary file, then rename). `data` as for `get`, plus `changed: <key>`. |
+| `multiplane config unset <key>` | Set the key to `null`. |
+
+- Keys and values: `ffmpeg` (path), `jobsDir` (path), `raster` (`gpu` or `software`), `encoder` (`x264`, `nvenc-h264` or `nvenc-hevc`), `workers` (positive integer; `auto` is the same as `unset`). An unknown key or invalid value fails with `invalid_option` and leaves the file unchanged. Relative paths are resolved against the current directory before writing.
+- Unknown fields already in the file are kept. If the file is not a JSON object, `get` and `set` fail with `config_invalid` (exit code 3) and do not overwrite it. `unset` returns the same `data` as `set`, including `changed`.
+- `config set ffmpeg <path>` writes the path and then probes it. `data.check` is `{ usable, version, encoders: { libx264, "libvpx-vp9", prores_ks }, reason }`. `usable` requires that the file reports an FFmpeg version and has `libx264`; the other two encoders are optional. `reason` is `null` when usable, otherwise `not-found`, `cannot-run`, `not-ffmpeg` or `missing-libx264`. An unusable path is still written and the command still succeeds; it adds a `warning` with code `ffmpeg_unusable`.
+
+### 9.2 `multiplane skill`
+
+| Command | Effect |
+|---|---|
+| `multiplane skill status [--host <h>]` | `data.hosts`: one entry per host, `{ host, target, detected, state, version, availableVersion, signature, blocked, error }`. `state` is `missing`, `latest`, `update`, `modified` or `error`. `--host` defaults to `all`. |
+| `multiplane skill install --host <h> [--force] [--expect <signature>]` | Install the bundled skill, or update to it. |
+| `multiplane skill remove --host <h> [--force] [--expect <signature>]` | Remove it. |
+
+- `<h>` is `claude`, `codex` or `all`. `install` and `remove` require `--host`.
+- Target directories: `<home>/.claude/skills/multiplane` for Claude Code and `<home>/.agents/skills/multiplane` for Codex. The environment variable `MULTIPLANE_AGENT_HOME` replaces `<home>`, for tests and non-standard setups.
+- Each installed copy carries a record file, `.multiplane.json`, with the version and content hashes. A copy whose content matches no released version is `modified`.
+- A modified skill is never replaced silently. Without `--force`, `install` and `remove` fail with `skill_modified`. With `--force`, the existing directory is first renamed to a sibling `multiplane.bak-<yyyyMMdd-HHmmss>` and the result reports its path in `backup`.
+- A target that is a symbolic link or contains unsupported file types is `blocked`; the command fails with `skill_blocked`, with or without `--force`.
+- `--expect <signature>` makes the command fail with `skill_changed` if the installed copy no longer has the signature returned by an earlier `status`. A missing copy has the signature `null`; pass `--expect null` to require that it is still missing. Without `--expect`, nothing is checked.
+- `--host all` handles each host independently. `data.hosts` has one entry per host, `{ host, action, ok, code, message, target, version, backup }`. If any host fails, the overall result has `ok: false` and the code of the first failure.

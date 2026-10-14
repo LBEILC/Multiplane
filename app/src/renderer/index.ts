@@ -6,7 +6,11 @@ import { installScrollMaterial } from './floatingThumb';
 import { SettingsView } from './settings';
 import './skillConfirmation';
 import { initPlatform, displayPath, revealLabel } from './platform';
+import { jobData } from '../shared/job-data.mjs';
 const api = window.multiplane;
+const report = (error: unknown) => api.reportFault?.(String((error as Error)?.stack ?? error));
+window.addEventListener('error', event => report(event.error ?? event.message));
+window.addEventListener('unhandledrejection', event => report(event.reason));
 let platformReady = false;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const escape = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -17,10 +21,10 @@ const project = (j: Job) => {
 };
 const labels = (): Record<string, string> => ({ running: t('running'), succeeded: t('completed'), failed: t('failed'), cancelled: t('cancelled'), render: t('render'), stills: t('stills'), verify: t('verify'), launch: t('launch'), load: t('load'), capture: t('capture'), encode: t('encode'), compare: t('compare'), finalize: t('done') });
 const duration = (ms: number | null) => ms == null ? '—' : formatDuration(ms);
-const elapsed = (j: Job) => j.result?.elapsedMs ?? Math.max(0, Date.now() - Date.parse(j.startedAt));
+const elapsed = (j: Job) => Number.isFinite(j.result?.elapsedMs) ? j.result!.elapsedMs : Number.isFinite(Date.parse(j.startedAt)) ? Math.max(0, Date.now() - Date.parse(j.startedAt)) : null;
 let stateFilter = 'all', projectFilter = '';
 let state: Snapshot = { jobs: [], runningCount: 0, theme: 'light' }, selected = '', tab = 'preview', page = 'jobs', contentKey = '', headerKey = '';
-const fail = (e: unknown) => { $('#error').textContent = userError(e); $('#error').hidden = false; };
+const fail = (e: unknown) => { report(e); $('#error').textContent = userError(e); $('#error').hidden = false; };
 const media = (j: Job, file: string, version = '') => escape(api.media(j.jobId, file, version));
 function navigate(next: string) {
   if (!platformReady) { page = next; return; }
@@ -37,7 +41,7 @@ function renderList() {
     .sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running') || b.startedAt.localeCompare(a.startedAt));
   let group = '';
   const html = jobs.map(j => {
-    const next = j.state === 'running' ? t('running') : new Date(j.startedAt).toLocaleDateString(language());
+    const next = j.state === 'running' ? t('running') : Number.isFinite(Date.parse(j.startedAt)) ? new Date(j.startedAt).toLocaleDateString(language()) : '—';
     const heading = next === group ? '' : `<div class="group">${escape(next)}</div>`; group = next;
     return `${heading}<button class="job" role="listitem" data-job="${escape(j.jobId)}" aria-selected="${j.jobId === selected}"><div class="row-top"><span class="name">${escape(base(j.shot))}</span><span class="tag ${j.state}">${labels()[j.state]}</span></div><div class="row-sub"><span>${labels()[j.command] ?? escape(j.command)} · ${escape(base(project(j)))}</span><span>${duration(elapsed(j))}</span></div>${j.state === 'running' ? `<progress max="${escape(j.total || 1)}" value="${escape(j.done)}"></progress><small>${t('progress', { done: number(j.done), total: number(j.total), fps: number(j.fps, 1), remaining: duration(j.etaMs) })}</small>` : ''}</button>`;
   }).join('') || `<div class="empty">${t('noJobs')}</div>`;
@@ -115,9 +119,9 @@ function render() {
   if (projectFilter && !state.jobs.some(j => project(j) === projectFilter)) projectFilter = '';
   $('#state-filter span').textContent = ({ all: t('all'), running: t('running'), failed: t('failedOrCancelled') } as Record<string, string>)[stateFilter];
   $('#project-filter span').textContent = projectFilter ? base(projectFilter) : t('allProjects');
-  if (page === 'jobs') { renderList(); renderDetail(); }
+  if (page === 'jobs') { renderList(); try { renderDetail(); } catch (error) { report(error); $('#detail').textContent = userError(error); contentKey = ''; headerKey = ''; } }
 }
-function accept(s: Snapshot) { state = s; if (preferences.settings && s.languagePreference) preferences.settings.own.language = s.languagePreference; if (s.language) setLanguage(s.language); if (s.select) selected = s.select; if (!state.jobs.some(j => j.jobId === selected)) { selected = state.jobs.find(j => j.state === 'running')?.jobId ?? state.jobs[0]?.jobId ?? ''; contentKey = ''; } render(); }
+function accept(s: Snapshot) { state = { ...s, jobs: s.jobs.map(j => jobData(j, report)).filter(Boolean) as Job[] }; if (preferences.settings && s.languagePreference) preferences.settings.own.language = s.languagePreference; if (s.language) setLanguage(s.language); if (s.select) selected = s.select; if (!state.jobs.some(j => j.jobId === selected)) { selected = state.jobs.find(j => j.state === 'running')?.jobId ?? state.jobs[0]?.jobId ?? ''; contentKey = ''; } render(); }
 document.addEventListener('click', async e => {
   const button = (e.target as HTMLElement).closest<HTMLElement>('button'); if (!button) return;
   try {
@@ -171,4 +175,4 @@ void initPlatform().then(async () => {
   localizeShell();
   navigate(page);
 }).catch(fail);
-setInterval(() => { if (state.jobs.some(j => j.state === 'running') && page === 'jobs') { renderList(); renderDetail(); } }, 1000);
+setInterval(() => { if (state.jobs.some(j => j.state === 'running') && page === 'jobs') { render(); } }, 1000);

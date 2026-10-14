@@ -12,6 +12,7 @@ export interface Job {
 }
 export interface Snapshot { language?: string; languagePreference?: string; jobs: Job[]; runningCount: number; theme: 'dark' | 'light'; select?: string }
 export interface Bridge {
+  reportFault(message: string): void;
   platform(): Promise<{ platform: string; home: string }>;
   browserInstallState(): Promise<BrowserInstallState>;
   installBrowser(): Promise<void>;
@@ -24,8 +25,10 @@ export interface Bridge {
   chooseSetting(key: string): Promise<Settings>;
   openConfig(): Promise<void>;
   doctor(): Promise<Event>;
+  checkFfmpeg(): Promise<{ name: string; ok: boolean; detail: string; reason?: string; diagnostic?: string }>;
   environment(): Promise<Environment>;
   skill(host: string, action: string): Promise<{cancelled?: boolean; backup?: string | null}>;
+  copyBundledCommand(): Promise<void>;
   copyBrowserCommand(): Promise<void>;
   snapshot(): Promise<Snapshot>;
   subscribe(fn: (snapshot: Snapshot) => void): () => void;
@@ -36,7 +39,7 @@ export interface Bridge {
 }
 export interface SkillConfirmation { id: number; title: string; detail: string; action: string; danger: boolean; titleKey?: string; detailKey?: string; actionKey?: string; values?: Record<string, string> }
 export interface BrowserInstallState { running: boolean; text: string }
-export interface Settings { values: Record<string, any>; file: string; overrides: Record<string, string | null>; own: { language?: string; theme: string; notifications: boolean; wizardDone: boolean }; version: string; packaged: boolean }
+export interface Settings { check?: { usable: boolean; version: string | null; reason: string | null; encoders: Record<string, boolean> }; values: Record<string, any>; file: string; overrides: Record<string, string | null>; own: { language?: string; theme: string; notifications: boolean; wizardDone: boolean }; version: string; packaged: boolean }
 export interface Skill { blocked?: boolean; error?: string | null; host: string; target: string; detected: boolean; availableVersion: string; version: string | null; state: string }
-export interface Environment { skills: Skill[]; command: { path: string | null; version: string | null; error: string | null } }
+export interface Environment { skills: Skill[]; command: { bundled?: string | null; path: string | null; version: string | null; error: string | null } }
 declare global { interface Window { multiplane: Bridge } }

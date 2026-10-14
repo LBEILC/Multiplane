@@ -11,7 +11,7 @@ test('Linux probes bypass AppImage and AppRun while GUI retains its sandbox flag
   for (const noSandbox of [true, false]) {
     const launch = packagedLaunch('linux', '/tmp/install space/squashfs-root', '/tmp/Multiplane.AppImage', noSandbox);
     assert.equal(launch.gui, '/tmp/Multiplane.AppImage');
-    assert.equal(launch.node, '/tmp/install space/squashfs-root/multiplane-desktop');
+    assert.equal(launch.node, '/tmp/install space/squashfs-root/multiplane-runtime');
     assert.deepEqual(launch.guiArgs, noSandbox ? ['--no-sandbox'] : []);
     const args = ['-e', 'console.log(process.execPath)', '/tmp/renderer space'];
     const env = { APPIMAGE_EXTRACT_AND_RUN: '1', MULTIPLANE_NO_SANDBOX: '1' };

@@ -16,7 +16,7 @@ const out = path.resolve(appRoot, '../out/ci/smoke'); await mkdir(out, { recursi
 // Do not let a previous successful capture masquerade as evidence for a failed run.
 await rm(path.join(out, 'window.png'), { force: true });
 await rm(path.join(out, 'failure.png'), { force: true });
-const work = await nativeRealpath(await mkdtemp(path.join(os.tmpdir(), 'multiplane-smoke-')));
+const work = await nativeRealpath(await mkdtemp(path.join(out, 'work-')));
 const home = path.join(work, 'renderer'), data = path.join(work, 'desktop'), user = path.join(work, 'user');
 const realUser = path.join(work, 'real-user');
 for (const dir of [home, data, realUser]) await mkdir(dir);
@@ -66,6 +66,8 @@ try {
 finally {
   try { await app?.close(); } catch (error) { evidence.cleanup = error.message; }
   windowManager?.kill();
+  // A passing run leaves nothing to inspect in its simulated profile; a failing one keeps it.
+  if (!evidence.failure) await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(error => console.warn(`Could not remove ${work}: ${error.code || error.message}`));
   await writeFile(path.join(out, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n');
 }
 console.log(JSON.stringify(evidence));

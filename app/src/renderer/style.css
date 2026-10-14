@@ -519,6 +519,7 @@ button.primary:disabled { background: var(--surface-2); border-color: transparen
 .setting-control button { flex-shrink: 0; }
 .setting-control input[type=number] { width: 100px; }
 .setting-control .sel { min-width: 130px; }
+.ffmpeg-feedback { margin-top: 8px; overflow-wrap: anywhere; }
 .info-row { display: grid; grid-template-columns: minmax(160px,1fr) minmax(0,2fr); align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--divider); }
 .info-row:last-child { border-bottom: 0; }
 .info-row p { margin: 4px 0 0; }

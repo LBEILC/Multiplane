@@ -9,7 +9,7 @@ English · [简体中文](README.zh-CN.md)
 
 A local, headless HTML video renderer for AI agents. **A shot is an ordinary web page**: the page implements `render(t)`, and the image depends only on time `t`. Multiplane captures frames with headless Chromium, applies post-processing such as supersampling, motion blur, and film grain, encodes video with FFmpeg, and checks whether a shot is deterministic.
 
-> Version `0.2.0`. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
+> Version `0.2.1`. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
 
 The name comes from Disney's multiplane camera: flat artwork placed at different depths, photographed frame by frame with real depth of field. Here, this corresponds to layered web content, a 3D card layer, and accumulated depth of field.
 
@@ -28,15 +28,15 @@ The name comes from Disney's multiplane camera: flat artwork placed at different
 Requires Node.js 24 or later and FFmpeg with libx264 support.
 
 ```sh
-npm install github:LBEILC/Multiplane#v0.2.0
+npm install multiplane
 npx playwright install chromium
 npx multiplane doctor
 npx multiplane render node_modules/multiplane/examples/animation.html
 ```
 
-The package is not on the npm registry yet; the first command installs the tagged release from GitHub. Recent npm versions do not run install scripts of dependencies, so the second command downloads the Chromium build that Playwright uses. To work from a clone of this repository instead, run `npm install` in it and render `examples/animation.html` directly.
+Recent npm versions do not run install scripts of dependencies, so the second command downloads the Chromium build that Playwright uses. To work from a clone of this repository instead, run `npm install` in it and render `examples/animation.html` directly.
 
-Give your agent the usage skill: copy `node_modules/multiplane/skills/multiplane` into the agent's skill directory (`~/.claude/skills/` for Claude Code, `~/.agents/skills/` for Codex), or let the desktop app install it.
+Give your agent the usage skill with `npx multiplane skill install --host all` (Claude Code: `~/.claude/skills/multiplane`, Codex: `~/.agents/skills/multiplane`), or let the desktop app install it. Start a new agent session afterwards.
 
 In a clone of this repository, `npm install` downloads that Chromium build itself, reusing it if already installed; in an offline environment, set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to skip the download, then run `npx playwright install chromium` later. On Linux, Chromium also needs system libraries: run `npx playwright install-deps chromium` once (`doctor` tells you when they are missing).
 
@@ -56,6 +56,8 @@ The licence of FFmpeg depends on the build you install. Then tell Multiplane whe
 2. The environment variable `MULTIPLANE_FFMPEG`;
 3. `ffmpeg` in the user config file (see "User config and job index" below);
 4. The system PATH.
+
+To save the path once for every project, run `npx multiplane config set ffmpeg <path>`; it also checks the file and reports whether it is usable.
 
 The default is software encoding with `x264`. With an NVIDIA GPU, use `--encoder nvenc-h264` or `--encoder nvenc-hevc`. `doctor` checks whether FFmpeg can run and supports the required encoders.
 
@@ -102,6 +104,8 @@ For the full contract, patterns that break determinism, and 3D layer usage, see 
 | `multiplane doctor` | Check Node, the browser, GPU rasterization, FFmpeg, and optional three.js |
 | `multiplane status <job>` | View job status |
 | `multiplane cancel <job>` | Stop a job |
+| `multiplane config get\|set\|unset` | Read or change the user config |
+| `multiplane skill status\|install\|remove` | Install, update or remove the agent skill for Claude Code and Codex |
 
 Shot paths are relative to the resource root `--root` (the current directory by default). Each run has its own job directory, `out/jobs/<jobId>/`. Without `--out`, artifacts are written there (video, `stills/`, `verify/`), so runs do not overwrite each other. See `artifacts` in the result for the final paths. `--out` sets the output location. An existing target is rejected unless `--overwrite` is given. `render`, `stills`, and `verify` automatically run `lint` before starting and stop on errors. Use `--no-lint` to skip it. `npx multiplane <command> --help` lists all options for that command.
 
@@ -141,9 +145,9 @@ See [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/pro
 
 ## User config and job index
 
-The renderer reads config and registers jobs in a user directory: `%APPDATA%\multiplane` on Windows, `~/Library/Application Support/multiplane` on macOS, and `~/.config/multiplane` on Linux. Override it with the environment variable `MULTIPLANE_HOME`.
+The renderer reads config and registers jobs in a user directory: `%USERPROFILE%\.multiplane` on Windows (`%APPDATA%\multiplane` up to 0.2.0; files there are copied over on first use), `~/Library/Application Support/multiplane` on macOS, and `~/.config/multiplane` on Linux. Override it with the environment variable `MULTIPLANE_HOME`.
 
-- `config.json`: user defaults, with optional fields `ffmpeg`, `raster`, `encoder`, `workers`, and `jobsDir`. Priority: command-line options > environment variables > `config.json` > built-in defaults. The renderer reads this file but never writes it. `doctor` reports its location and which fields take effect.
+- `config.json`: user defaults, with optional fields `ffmpeg`, `raster`, `encoder`, `workers`, and `jobsDir`. Priority: command-line options > environment variables > `config.json` > built-in defaults. Rendering never writes this file; `multiplane config` and the desktop app do. `doctor` and `config get` report its location and which fields take effect.
 - `jobs.jsonl`: one line appended at the start and end of each job, allowing other programs to discover jobs across projects. The job directory's `status.json` is the authority for job status. Set `MULTIPLANE_NO_INDEX=1` to disable registration.
 
 Read or write failures in this directory do not affect rendering; they only produce a warning. See section 8 of [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md) for the format.
@@ -198,7 +202,7 @@ npm install three@0.180.0
 
 It communicates with the renderer only through the files and commands in [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md). It is not required for rendering: agents can render from the command line without it.
 
-Download an installer from the [Releases page](https://github.com/LBEILC/Multiplane/releases). The installers bundle a renderer of the same version, so the app works without a separate Node.js install. FFmpeg is not bundled (see above), and Chromium is downloaded on first use from the Environment page.
+Download an installer from the [Releases page](https://github.com/LBEILC/Multiplane/releases). The installers bundle a renderer of the same version, so the app works without a separate Node.js install. That renderer is also available as a command: `multiplane.cmd` in the install directory on Windows, `Multiplane.app/Contents/Resources/bin/multiplane` on macOS, and `Multiplane-<version>-x86_64.AppImage --multiplane-cli` on Linux. The Environment page shows the exact path when `multiplane` is not on PATH. FFmpeg is not bundled (see above), and Chromium is downloaded on first use from the Environment page.
 
 | System | Package | First launch (the packages are not code-signed) |
 |---|---|---|
@@ -214,7 +218,7 @@ npm --prefix app run dist
 npm --prefix app start
 ```
 
-`dist` writes the package to `app/release/`.
+`dist` writes the package to `app/release/`. `npm --prefix app start` uses separate development directories for the renderer config, job index and app data; add `-- --use-user-home` to use your real ones.
 
 ## Examples
 

@@ -21,8 +21,8 @@ const cli = async (args, env = {}) => {
 };
 
 test('platform paths and explicit home override', () => {
-  assert.equal(userHome({ APPDATA: 'C:\\profile\\Roaming' }, 'win32', 'C:\\profile'), 'C:\\profile\\Roaming\\multiplane');
-  assert.equal(userHome({}, 'win32', 'C:\\profile'), 'C:\\profile\\AppData\\Roaming\\multiplane');
+  assert.equal(userHome({ APPDATA: 'C:\\profile\\Roaming' }, 'win32', 'C:\\profile'), 'C:\\profile\\.multiplane');
+  assert.equal(userHome({}, 'win32', 'C:\\profile'), 'C:\\profile\\.multiplane');
   assert.equal(userHome({}, 'darwin', '/users/test'), '/users/test/Library/Application Support/multiplane');
   assert.equal(userHome({}, 'linux', '/users/test'), '/users/test/.config/multiplane');
   assert.equal(userHome({ XDG_CONFIG_HOME: '/config' }, 'linux', '/users/test'), '/config/multiplane');
