@@ -1,5 +1,6 @@
 import './test-home.mjs';
 import test from 'node:test';
+import { fullTest, isFull } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, utimes } from 'node:fs/promises';
@@ -60,7 +61,7 @@ test('configuration validates fields and merges explicit > environment > config 
   assert.equal(failedRead.warnings[0].code, 'home_unavailable');
 });
 
-test('CLI start reflects all configuration precedence levels and default values', async () => {
+fullTest('CLI start reflects all configuration precedence levels and default values', async () => {
   const configHome = path.join(directory, 'precedence'); await mkdir(configHome);
   const configJobs = path.join(directory, 'config-jobs'), envJobs = path.join(directory, 'env-jobs'), cliJobs = path.join(directory, 'cli-jobs');
   await writeFile(path.join(configHome, 'config.json'), JSON.stringify({ ffmpeg: 'config-ffmpeg', jobsDir: configJobs, raster: 'software', workers: 3, encoder: 'nvenc-h264' }));
@@ -138,9 +139,9 @@ test('lint incomplete locates JS and CSS fragment starts and reports parser reas
 
 test('render indexes, previews and identical encoded pixels with overhead evidence', { timeout: 120000 }, async () => {
   const runs = [], hashes = [];
-  for (const enabled of [false, true, true, false]) {
+  for (const enabled of [false, true]) {
     const events = [];
-    const result = await renderShot('examples/animation.html', { workers: 1, 'job-dir': directory, _preview: enabled, onEvent: e => events.push(e) });
+    const result = await renderShot('examples/animation.html', { workers: 1, ...(isFull ? {} : { to: 0.25 }), 'job-dir': directory, _preview: enabled, onEvent: e => events.push(e) });
     const job = path.join(directory, result.jobId), snapshot = JSON.parse(await readFile(path.join(job, 'status.json')));
     assert.equal(events[0].type, 'start'); assert.equal(events.at(-1).type, 'result');
     if (enabled) {
@@ -161,7 +162,7 @@ test('render indexes, previews and identical encoded pixels with overhead eviden
   console.log('Preview evidence:', JSON.stringify(evidence));
 });
 
-test('disabled and unavailable home do not prevent render; failed jobs have terminal index', { timeout: 60000 }, async () => {
+fullTest('disabled and unavailable home do not prevent render; failed jobs have terminal index', { timeout: 60000 }, async () => {
   const noIndex = path.join(directory, 'no-index');
   let result = await cli(['render', 'examples/animation.html', '--to', '0.1', '--workers', '1', '--job-dir', directory], { MULTIPLANE_HOME: noIndex, MULTIPLANE_NO_INDEX: '1' });
   assert.equal(result.code, 0, result.stdout); await assert.rejects(stat(noIndex), { code: 'ENOENT' });

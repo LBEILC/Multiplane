@@ -2,11 +2,12 @@ export { renderShot } from './render.mjs';
 export { stillsShot } from './stills.mjs';
 export { verifyShot } from './verify.mjs';
 export { openShot } from './capture.mjs';
+export { inspectShot } from './inspect.mjs';
 export { createPostCapture } from './post.mjs';
 export { createRenderPool } from './render-pool.mjs';
 export { MultiplaneError, errorCodes } from './errors.mjs';
 export { doctor } from './doctor.mjs';
-export { statusJob, cancelJob } from './jobs.mjs';
+export { statusJob, cancelJob, waitJob } from './jobs.mjs';
 
 import { runCommand } from './events.mjs';
 import { checkLint } from './lint.mjs';

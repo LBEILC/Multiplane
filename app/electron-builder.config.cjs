@@ -1,6 +1,7 @@
 module.exports = {
   appId: 'io.github.lbeilc.multiplane',
   productName: 'Multiplane',
+  publish: [{ provider: 'github', owner: 'LBEILC', repo: 'Multiplane', releaseType: 'release' }],
   directories: { app: 'dist', output: 'release', buildResources: 'build' },
   asar: false,
   npmRebuild: false,

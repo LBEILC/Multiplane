@@ -2,8 +2,10 @@ import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 import { jobDirectory, runCommand } from './events.mjs';
-import { MultiplaneError } from './errors.mjs';
+import { MultiplaneError, invalidOption } from './errors.mjs';
 import { number } from './capture.mjs';
+import { followJob } from './hosted.mjs';
+import { loadUserConfig } from './user-home.mjs';
 
 const resolveJob = (target, options) => path.isAbsolute(target) || /[\\/]/.test(target) ? path.resolve(target) : path.join(jobDirectory(options), target);
 export async function readStatus(target, options = {}) {
@@ -11,7 +13,7 @@ export async function readStatus(target, options = {}) {
   try { status = JSON.parse(await readFile(path.join(resolveJob(target, options), 'status.json'), 'utf8')); }
   catch (cause) { throw new MultiplaneError('job_not_found'); }
   if (!status || status.schema !== 'multiplane/1' || !Number.isSafeInteger(status.pid) || status.pid <= 0
-    || !['running', 'succeeded', 'failed', 'cancelled'].includes(status.state)) throw new MultiplaneError('job_not_found');
+    || typeof status.state !== 'string') throw new MultiplaneError('job_not_found');
   if (status.state === 'running') {
     try { process.kill(status.pid, 0); }
     catch (error) {
@@ -26,17 +28,24 @@ export async function readStatus(target, options = {}) {
   return status;
 }
 export const statusJob = (target, options = {}) => runCommand('status', null, options, events => readStatus(target, events.options), false);
+const active = status => !['succeeded', 'failed', 'cancelled'].includes(status.state);
+export async function waitJob(target, options = {}) {
+  const timeout = options.timeout === undefined ? Infinity : Number(options.timeout);
+  if (options.timeout !== undefined && (!String(options.timeout).trim() || !Number.isFinite(timeout) || timeout < 0)) throw invalidOption('--timeout', 'Invalid value for --timeout.');
+  const configured = loadUserConfig('wait', options).options;
+  return followJob(resolveJob(target, configured), { timeout, onBytes: options.onBytes, onEvent: options.onEvent });
+}
 export const cancelJob = (target, options = {}) => runCommand('cancel', null, { wait: 30, ...options }, async events => {
   options = events.options;
   const wait = number(options.wait ?? 30, '--wait');
   let status = await readStatus(target, options);
-  if (status.state !== 'running') return status;
+  if (!active(status)) return status;
   await writeFile(path.join(resolveJob(target, options), 'stop'), '');
   const deadline = performance.now() + wait * 1000;
-  while (status.state === 'running' && performance.now() < deadline) {
+  while (active(status) && performance.now() < deadline) {
     await setTimeout(100);
     status = await readStatus(target, options);
   }
-  if (status.state === 'running') throw new MultiplaneError('cancel_timeout', 'Timed out waiting for job cancellation.', { result: { data: status } });
+  if (active(status)) throw new MultiplaneError('cancel_timeout', 'Timed out waiting for job cancellation.', { result: { data: status } });
   return status;
 }, false);

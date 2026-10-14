@@ -22,7 +22,6 @@ test('browser download uses bundled Playwright, shared cache, output events and 
   child.send = message => { assert.equal(message.action, 'cancel'); child.emit('close', 130); };
   const launch = (file, args, options) => {
     calls.push({ file, args, options });
-    if (file === 'taskkill.exe') { const killer = new EventEmitter(); queueMicrotask(() => { child.emit('close', 1); killer.emit('close', 0); }); return killer; }
     return child;
   };
   const installer = new BrowserInstaller('/bundle', state => states.push(state), '/worker.cjs', launch);

@@ -1,0 +1,75 @@
+name: Cached renderer dependencies
+description: Cache downloads by platform, tool version and both lockfiles; retain normal installers
+runs:
+  using: composite
+  steps:
+    - name: Dependency cache identity
+      id: identity
+      shell: bash
+      run: |
+        echo "npm=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+        node --input-type=module -e "import { appendFileSync, readFileSync } from 'node:fs'; const lock = JSON.parse(readFileSync('package-lock.json')); appendFileSync(process.env.GITHUB_OUTPUT, 'node=' + process.version + '\nplaywright=' + lock.packages['node_modules/playwright'].version + '\n');"
+    - name: npm download cache (renderer and desktop)
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ${{ steps.identity.outputs.npm }}
+        key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.node }}-${{ hashFiles('package-lock.json', 'app/package-lock.json') }}
+    - name: Chromium cache
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          ~/.cache/ms-playwright
+          ~/Library/Caches/ms-playwright
+          ~/AppData/Local/ms-playwright
+        key: chromium-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.playwright }}-${{ hashFiles('package-lock.json', 'app/package-lock.json') }}
+    - name: FFmpeg package identity (Windows)
+      if: runner.os == 'Windows'
+      id: choco
+      shell: pwsh
+      run: |
+        $package = choco search ffmpeg --exact --limit-output
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve FFmpeg package version' }
+        $match = $package | Select-String '^ffmpeg\|([^|]+)$'
+        if (-not $match) { throw 'Missing FFmpeg package version' }
+        "version=$($match.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+    - name: FFmpeg download cache (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ${{ runner.temp }}/ffmpeg-downloads
+        key: ffmpeg-choco-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.choco.outputs.version }}-${{ hashFiles('package-lock.json', 'app/package-lock.json') }}
+    - name: FFmpeg (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        FFMPEG_VERSION: ${{ steps.choco.outputs.version }}
+      run: choco install ffmpeg --version=$env:FFMPEG_VERSION --yes --no-progress --cache-location="$env:RUNNER_TEMP/ffmpeg-downloads"
+    - name: FFmpeg package identity (macOS)
+      if: runner.os == 'macOS'
+      id: brew
+      shell: bash
+      run: |
+        echo "path=$(brew --cache)" >> "$GITHUB_OUTPUT"
+        brew info --json=v2 ffmpeg > "$RUNNER_TEMP/ffmpeg-formula.json"
+        node --input-type=module -e "import { readFileSync, appendFileSync } from 'node:fs'; const f = JSON.parse(readFileSync(process.env.RUNNER_TEMP + '/ffmpeg-formula.json')).formulae[0]; appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + f.versions.stable + '-' + f.revision + '\n');"
+    - name: FFmpeg and dependency bottle cache (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ${{ steps.brew.outputs.path }}/downloads
+        key: ffmpeg-brew-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.brew.outputs.version }}-${{ hashFiles('package-lock.json', 'app/package-lock.json') }}
+    - name: FFmpeg (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install ffmpeg
+    - name: Renderer dependencies
+      shell: bash
+      run: node tools/ci-run.mjs renderer-install . npm ci
+    - name: Chromium (Windows and macOS)
+      if: runner.os != 'Linux'
+      shell: bash
+      run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install chromium
+    - name: Chromium and system libraries (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install --with-deps chromium

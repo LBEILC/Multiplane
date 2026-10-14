@@ -37,12 +37,16 @@
       .then(() => document.fonts.ready)
       .then(() => (spec.setup ? spec.setup() : null))
       .then(() => spec.render(0));
+    // The host awaits ready after navigation; preserve its rejection without
+    // reporting an early unhandled rejection as a generic script load failure.
+    ready.catch(() => {});
 
     window.SHOT = {
       get duration() { return spec.duration; },
       fps: spec.fps || 30,
       get cuts() { return spec.cuts || []; },
       post: spec.post || {},
+      meta: spec.meta === undefined ? null : spec.meta,
       ready,
       ...(spec.blurAt ? { blurAt: t => spec.blurAt(t) } : {}),
       render: t => spec.render(Math.min(Math.max(t, 0), spec.duration)),

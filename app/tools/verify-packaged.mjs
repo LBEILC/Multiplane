@@ -2,6 +2,8 @@ import copy from '../src/shared/copy/en.mjs';
 import { nativeRealpath } from '../../tools/native-realpath.mjs';
 import { _electron } from 'playwright';
 import { launchOwned } from './owned-electron.mjs';
+import { ensureWindowManager } from './window-smoke.mjs';
+import { stopOwned } from '../src/main/owned-process.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, stat, lstat, cp, chmod, rm } from 'node:fs/promises';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -67,7 +69,7 @@ if (unpacked && process.platform === 'linux') launch.gui = launch.node;
 const executable = launch.gui, launchArgs = launch.guiArgs;
 const evidence = { mode: unpacked ? 'unpacked' : 'installer', platform: process.platform, arch: process.arch, launchArgs, appImageExtractAndRun: env.APPIMAGE_EXTRACT_AND_RUN === '1', version: pkg.version, screenshots: [], checks: [], work, install: false, uninstall: false };
 evidence.browserDownload = { cache: browserCache, isolation: windows ? 'LOCALAPPDATA' : mac ? 'HOME' : 'XDG_CACHE_HOME', before: null, after: null };
-let application, installed = false, externalDirectory;
+let application, windowManager, installed = false, externalDirectory;
 const snapshots = new Map();
 async function bytesIn(dir) {
   let size = 0;
@@ -79,6 +81,7 @@ async function waitFor(predicate, message, timeout = 30000) {
   while (!await predicate()) { if (Date.now() >= end) throw Error(message); await new Promise(resolve => setTimeout(resolve, 200)); }
 }
 try {
+  windowManager = await ensureWindowManager(evidence);
   evidence.browserDownload.cacheExistedBefore = await exists(browserCache);
   assert.equal(evidence.browserDownload.cacheExistedBefore, false, 'Verification requires a fresh isolated browser cache; existing caches must never be removed');
   if (unpacked) { await cp(unpacked, installation, { recursive: true }); assert.ok(await exists(executable), 'Unpacked executable is missing'); }
@@ -279,11 +282,15 @@ try {
   }
   await application.close(); application = undefined;
   if (windows) {
-    await run(process.execPath, [path.join(appRoot, 'tools/diagnose-first-install.mjs'), executable, doctor.environment.ffmpeg.path, 'lock'], {
-      env: { ...env, MULTIPLANE_DIAGNOSTIC_BROWSER_CACHE: browserCache }, capture: true, killTree: true,
-      onOutput: bytes => process.stdout.write(bytes)
-    });
-    evidence.checks.push('No preferences: three-step first-install wizard, both isolated skills, nine old jobs, CLI render, ten rows, one notification and single-instance lock');
+    evidence.firstInstall = [];
+    for (const ffmpegState of ['missing', 'available']) {
+      await run(process.execPath, [path.join(appRoot, 'tools/diagnose-first-install.mjs'), executable, doctor.environment.ffmpeg.path, 'lock', ffmpegState], {
+        env: { ...env, MULTIPLANE_DIAGNOSTIC_BROWSER_CACHE: browserCache }, capture: true, killTree: true,
+        onOutput: bytes => process.stdout.write(bytes)
+      });
+      evidence.firstInstall.push({ ffmpegState, passed: true });
+    }
+    evidence.checks.push('No preferences: FFmpeg missing (steps 1/2/3, saved manual path) and available on PATH (steps 1/3); both isolated skills, nine old jobs, CLI render, ten rows, one notification and single-instance lock in each scenario');
   }
   if (process.platform === 'linux') {
     // Also observe AppRun's default policy, independently of the CI GUI override.
@@ -305,8 +312,12 @@ try {
   }
   throw error;
 } finally {
-  if (application) await application.close();
-  for (const owned of ownedProcesses) await owned.close();
+  try {
+    if (application) await application.close();
+    for (const owned of ownedProcesses) await owned.close();
+  } finally {
+    if (windowManager) await stopOwned(windowManager);
+  }
   let snapshotError;
   if (snapshots.has(installation)) {
     try {

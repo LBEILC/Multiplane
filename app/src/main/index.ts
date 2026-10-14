@@ -1,6 +1,9 @@
 import { cliEntry, copyableCommand } from './cli-entry.mjs';
 import { t, setLanguage, resolveLanguage, language, languagePreferences } from '../shared/i18n.mjs';
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, dialog, protocol, net, clipboard, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, dialog, protocol, net, clipboard, Menu, Tray, nativeImage } from 'electron';
+import { Hosted } from './hosted.mjs';
+import { JobStopper } from './stop.mjs';
+import { trayTemplate, hideOnClose } from './tray.mjs';
 import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
 import os from 'node:os';
@@ -13,6 +16,8 @@ import { BrowserInstaller } from './browser.mjs';
 import { applicationMenu } from './menu';
 import { configureDesktopPaths, migratePreferences, singleInstance } from './lifecycle.mjs';
 import { createLogger } from './log.mjs';
+import { Updates } from './updates.mjs';
+import { autoUpdater } from 'electron-updater';
 
 // Main-process verification uses the same functions as doctor, without adding IPC.
 export { bundledCommand, rendererRoot };
@@ -24,10 +29,18 @@ let win: BrowserWindow;
 const primary = singleInstance(app, () => win);
 const store = new JobStore(homeDirectory());
 const prefs = new Preferences(app.getPath('userData'));
+let hosted: Hosted;
+let tray: Tray | undefined;
+let quitting = false, quitReady = false, confirmingQuit = false;
+let stopper: JobStopper;
+const showWindow = (id?: string) => { if (win.isMinimized()) win.restore(); win.show(); win.focus(); publish(id); };
+function updateTray() {
+  if (tray) tray.setContextMenu(Menu.buildFromTemplate(trayTemplate(store.jobs, showWindow, () => app.quit()) as Electron.MenuItemConstructorOptions[]));
+}
 function updateMenu() {
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate(applicationMenu()) : null);
 }
-const snapshot = (select?: string): Snapshot => ({ language: language(), languagePreference: prefs.value.language, jobs: store.jobs.filter((j: Job) => !prefs.value.hidden.includes(j.jobId)), runningCount: store.jobs.filter((j: Job) => j.state === 'running').length, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', select });
+const snapshot = (select?: string): Snapshot => ({ hosted: hosted?.enabled ?? false, language: language(), languagePreference: prefs.value.language, jobs: store.jobs.filter((j: Job) => !prefs.value.hidden.includes(j.jobId)), runningCount: store.jobs.filter((j: Job) => j.state === 'running').length, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', select });
 const publish = (select?: string) => { if (win && !win.isDestroyed()) win.webContents.send('snapshot', snapshot(select)); };
 function allowed(job: Job) {
   const files = new Set<string>([path.join(job.jobDir, 'preview.png')]);
@@ -72,8 +85,49 @@ if (primary) app.whenReady().then(async () => {
   const root = rendererRoot(app.isPackaged, process.resourcesPath, app.getAppPath());
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
   const config = new Configuration(root, homeDirectory());
+  hosted = new Hosted(store.home, version, { report: error => log('hosted', error), changed: () => { publish(); updateTray(); } });
+  const image = nativeImage.createFromPath(path.join(__dirname, 'brand', process.platform === 'win32' ? 'app.ico' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'));
+  if (process.platform === 'darwin') image.setTemplateImage(true);
+  tray = new Tray(image); tray.setToolTip(t('appName')); tray.on('click', () => showWindow()); updateTray();
+  win.on('close', event => {
+    if (!hideOnClose(hosted.enabled, quitting)) {
+      // Ask about a retained queue before destroying the only window.
+      if (!quitting) { event.preventDefault(); app.quit(); }
+      return;
+    }
+    event.preventDefault(); win.hide();
+    if (!prefs.value.trayExplained) {
+      void prefs.save({ trayExplained: true }).catch(error => log('preferences', error));
+      if (Notification.isSupported()) new Notification({ title: t('appName'), body: t('background') }).show();
+    }
+  });
+  app.on('before-quit', event => {
+    if (quitReady) return;
+    event.preventDefault();
+    if (confirmingQuit) return;
+    confirmingQuit = true;
+    void (async () => {
+      await store.refresh();
+      if (store.jobs.some((job: Job) => job.state === 'queued')) {
+        // TODO(design): Review queue-exit and forced-file-location copy introduced by 046.
+        const options: Electron.MessageBoxOptions = { type: 'question', message: t('quit'), detail: t('quitQueue'), buttons: [t('cancel'), t('quit')], defaultId: 0, cancelId: 0, noLink: true };
+        const answer = await (win.isDestroyed() ? dialog.showMessageBox(options) : dialog.showMessageBox(win, options));
+        if (answer.response !== 1) return;
+      }
+      quitting = true; updates.close(); await hosted.close(); await installer.cancel(); await store.close();
+      stopper?.close();
+      tray?.destroy(); tray = undefined; quitReady = true; app.quit();
+    })().catch(error => log('quit', error)).finally(() => { confirmingQuit = false; });
+  });
   const skills = new Skills(root, { ...process.env, MULTIPLANE_AGENT_HOME: process.env.MULTIPLANE_TEST_USER_HOME || process.env.MULTIPLANE_AGENT_HOME || os.homedir() });
   const settings = async () => ({ ...await config.read(), own: prefs.value, version, packaged: app.isPackaged });
+  const updates = new Updates({ platform: process.platform, packaged: app.isPackaged, version: app.getVersion(), updater: autoUpdater, fetcher: (input, init) => net.fetch(input instanceof URL ? input.href : input, init), log, publish: (state: unknown) => { if (!win.isDestroyed()) win.webContents.send('updates:state', state); } });
+  handle('updates:state', () => updates.state);
+  handle('updates:check', () => updates.check());
+  handle('updates:download', () => updates.download());
+  handle('updates:cancel', () => updates.cancel());
+  handle('updates:install', () => updates.install());
+  handle('updates:release', () => shell.openExternal(updates.state.releaseUrl));
   const installer = new BrowserInstaller(root, (state: unknown) => { if (!win.isDestroyed()) win.webContents.send('browser-install-state', state); }, path.join(__dirname, 'browser-worker.cjs'));
   handle('browser-install-state', () => installer.state);
   let confirmingBrowser = false;
@@ -86,15 +140,15 @@ if (primary) app.whenReady().then(async () => {
     } finally { confirmingBrowser = false; }
   });
   handle('cancel-browser-install', () => installer.cancel());
-  app.on('before-quit', event => { if (installer.child) { event.preventDefault(); void installer.cancel().then(() => app.quit()); } });
   handle('settings', settings);
   handle('check-ffmpeg', async () => checkFfmpeg(((await config.read()).values as Record<string, unknown>).ffmpeg));
   handle('save-setting', async (key, value, own) => {
     if (own) {
-      if (!(key === 'language' ? languagePreferences.includes(value) : key === 'theme' ? ['system', 'light', 'dark'].includes(value) : ['notifications', 'wizardDone'].includes(key) && typeof value === 'boolean')) throw Error('Invalid preference');
+      if (!(key === 'language' ? languagePreferences.includes(value) : key === 'theme' ? ['system', 'light', 'dark'].includes(value) : ['notifications', 'wizardDone', 'autoCheckUpdates'].includes(key) && typeof value === 'boolean')) throw Error('Invalid preference');
       await prefs.save({ [key]: value }); if (key === 'language') { setLanguage(resolveLanguage(value, app.getLocale())); updateMenu(); win.setTitle(t('appName')); installer.refresh(); } nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark'; publish();
       if (key === 'wizardDone') log('wizard', JSON.stringify({ done: value, discovered: store.jobs.length, visible: snapshot().jobs.length }));
-    } else { const saved = await config.save(key, value); return { ...await settings(), check: saved.check }; }
+      if (key === 'autoCheckUpdates') updates.configureAutomatic(value);
+    } else { const saved = await config.save(key, value); if (key === 'hosted') { await hosted.tick(); publish(); updateTray(); } return { ...await settings(), check: saved.check }; }
     return settings();
   });
   handle('choose-setting', async key => {
@@ -154,11 +208,12 @@ if (primary) app.whenReady().then(async () => {
     log('snapshot-request', JSON.stringify({ wizardDone: prefs.value.wizardDone, discovered: store.jobs.length, visible: value.jobs.length }));
     return value;
   });
-  handle('stop', async id => {
-    const job = jobFor(id); if (job.state !== 'running') return;
-    const result = await dialog.showMessageBox(win, { type: 'warning', message: t('stopTitle', { name: path.basename(job.shot) }), detail: t('stopDetail'), buttons: [t('cancel'), t('stop')], defaultId: 0, cancelId: 0, noLink: true });
-    if (result.response === 1) await store.stop(job.jobId);
+  stopper = new JobStopper(store, {
+    changed: () => hosted.tick(), report: error => log('stop', error),
+    confirm: async (job: Job) => (await dialog.showMessageBox(win, { type: 'warning', message: t(job.state === 'queued' ? 'queueStopT' : 'stopTitle', { name: path.basename(job.shot) }), detail: t(job.state === 'queued' ? 'queueStopH' : 'stopDetail'), buttons: [t('cancel'), t('stop')], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
+    confirmForce: async (job: Job) => (await dialog.showMessageBox(win, { type: 'warning', message: t('forceT', { name: path.basename(job.shot) }), detail: t('forceH'), buttons: [t('keepWaiting'), t('force')], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
   });
+  handle('stop', async id => { jobFor(id); await stopper.stop(id); });
   handle('hide', async id => { jobFor(id); await prefs.save({ hidden: [...new Set([...prefs.value.hidden, id])] }); publish(); });
   handle('open', async (id, file, reveal) => {
     const job = jobFor(id);
@@ -171,6 +226,7 @@ if (primary) app.whenReady().then(async () => {
     const summary = JSON.stringify({ discovered: store.jobs.length, visible: snapshot().jobs.length });
     if (summary !== previousSummary) { log('jobs-scan', summary); previousSummary = summary; }
     publish();
+    updateTray();
   });
   store.on('fault', error => log('jobs', error));
   store.on('finished', (job: Job) => {
@@ -190,8 +246,9 @@ if (primary) app.whenReady().then(async () => {
   });
   // Let the CLI migrate shared files before the first index read.
   try { await config.read(); } catch (error) { log('home-migration', error); }
+  await hosted.start();
   await store.start();
   await win.loadFile(path.join(__dirname, 'index.html')); win.show();
+  updates.configureAutomatic(prefs.value.autoCheckUpdates);
 }).catch(error => { log('startup', error); app.exit(1); });
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { void store.close(); });

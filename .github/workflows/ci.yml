@@ -40,26 +40,14 @@ jobs:
           node-version: '24'
       - name: Verified desktop font
         uses: ./.github/actions/desktop-font
-      - name: FFmpeg (Windows)
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg --yes --no-progress
-      - name: FFmpeg (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
       - name: FFmpeg and Xvfb (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes ffmpeg xvfb openbox wmctrl xdotool imagemagick
-      - name: Renderer dependencies
-        run: node tools/ci-run.mjs renderer-install . npm ci
-      - name: Chromium (Windows and macOS)
-        if: runner.os != 'Linux'
-        run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install chromium
-      - name: Chromium and system libraries (Linux)
-        if: runner.os == 'Linux'
-        run: node tools/ci-run.mjs chromium . node node_modules/playwright/cli.js install --with-deps chromium
-      - name: Renderer tests
+      - name: Cached renderer dependencies, Chromium and FFmpeg
+        uses: ./.github/actions/render-dependencies
+      - name: Renderer tests (daily)
         run: node tools/ci-run.mjs renderer-test . npm test
       - name: Desktop dependencies and tests
         uses: ./.github/actions/desktop-test
@@ -80,5 +68,8 @@ jobs:
             out/ci/**/*.log
             out/ci/**/*.json
             out/ci/**/*.png
+            out/tests/**/*.tap
+            out/tests/**/*.jsonl
+            out/tests/**/summary.json
           if-no-files-found: warn
           retention-days: 14

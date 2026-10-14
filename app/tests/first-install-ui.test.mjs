@@ -8,7 +8,7 @@ import en from '../src/shared/copy/en.mjs';
 import zh from '../src/shared/copy/zh-CN.mjs';
 import { completeFirstInstall } from '../tools/first-install-flow.mjs';
 
-test('first launch retains snapshots through all three wizard steps and accepts subsequent jobs', { timeout: 45000 }, async t => {
+for (const ffmpegAvailable of [false, true]) test(`first launch retains snapshots ${ffmpegAvailable ? 'when FFmpeg skips step two' : 'through all three wizard steps'} and accepts subsequent jobs`, { timeout: 45000 }, async t => {
   const browser = await chromium.launch(); t.after(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(5000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -16,7 +16,7 @@ test('first launch retains snapshots through all three wizard steps and accepts 
   const bundle = await build({ entryPoints: [fileURLToPath(source('index.ts'))], bundle: true, write: false, platform: 'browser', format: 'iife' });
   const html = (await readFile(source('index.html'), 'utf8')).replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '').replace(/<link[^>]*>/g, '').replace('<script src="renderer.js"></script>', '');
   await page.setContent(html);
-  await page.evaluate(() => {
+  await page.evaluate(ffmpegAvailable => {
     const own = { language: 'en', theme: 'light', wizardDone: false, notifications: true }, values = {};
     const jobs = Array.from({ length: 9 }, (_, i) => ({ jobId: `historical-${i}`, jobDir: '/fixtures/job', shot: '/fixtures/shot.html', state: 'succeeded', command: 'render', startedAt: '2025-01-02T03:04:05Z', events: [] }));
     const snapshot = () => ({ language: 'en', jobs: structuredClone(jobs), runningCount: 0, theme: 'light' });
@@ -30,19 +30,19 @@ test('first launch retains snapshots through all three wizard steps and accepts 
       settings: async () => settings(),
       saveSetting: async (key, value, personal) => { (personal ? own : values)[key] = value; window.saved.push({ key, value }); subscriber(snapshot()); return { ...settings(), ...(key === 'ffmpeg' ? { check: { usable: true, version: 'ffmpeg version fixture', reason: null, encoders: { libx264: true } } } : {}) }; },
       checkFfmpeg: async () => { throw Error('Saving must reuse the config command check'); },
-      browserInstallState: async () => ({ running: false, text: '' }), onBrowserInstallState: () => () => {}, onSkillConfirmation: () => () => {},
-      doctor: async () => ({ data: { checks: [{ name: 'ffmpeg', ok: false, detail: '' }] } }),
+      browserInstallState: async () => ({ running: false, text: '' }), updateState: async () => ({ phase: 'development' }), onUpdateState: () => () => {}, onBrowserInstallState: () => () => {}, onSkillConfirmation: () => () => {},
+      doctor: async () => ({ data: { checks: [{ name: 'ffmpeg', ok: ffmpegAvailable, detail: '' }] } }),
       environment: async () => ({ command: {}, skills: ['claude', 'codex'].map(host => ({ host, target: `/fixtures/${host}`, state: 'missing', detected: true })) }),
       skill: async host => { window.installed.push(host); subscriber(snapshot()); return {}; }
     };
-  });
+  }, ffmpegAvailable);
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await page.locator('.wizard').waitFor();
   await page.evaluate(() => window.pushJobs(false));
-  await completeFirstInstall(page, '/fixtures/ffmpeg');
+  await completeFirstInstall(page, '/fixtures/ffmpeg', ffmpegAvailable);
   assert.equal(await page.locator('[data-job]').count(), 9);
   assert.deepEqual(await page.evaluate(() => window.installed), ['claude', 'codex']);
-  assert.deepEqual(await page.evaluate(() => window.saved), [{ key: 'ffmpeg', value: '/fixtures/ffmpeg' }, { key: 'wizardDone', value: true }]);
+  assert.deepEqual(await page.evaluate(() => window.saved), [...(ffmpegAvailable ? [] : [{ key: 'ffmpeg', value: '/fixtures/ffmpeg' }]), { key: 'wizardDone', value: true }]);
   await page.evaluate(() => window.pushJobs(true));
   await page.locator('[data-job=new-cli-job]').waitFor();
   assert.equal(await page.locator('[data-job]').count(), 10);
@@ -76,7 +76,7 @@ test('mixed jobs stay visible; saved FFmpeg paths are checked automatically in s
       saveSetting: async (key, value, personal) => { (personal ? own : values)[key] = value; window.saved.push({ key, value }); return settings(); },
       chooseSetting: async () => { values.ffmpeg = '/fixtures/chosen-ffmpeg'; return settings(); },
       checkFfmpeg: () => new Promise(resolve => { window.completeCheck = resolve; }),
-      browserInstallState: async () => ({ running: false, text: '' }), onBrowserInstallState: () => () => {},
+      browserInstallState: async () => ({ running: false, text: '' }), updateState: async () => ({ phase: 'development' }), onUpdateState: () => () => {}, onBrowserInstallState: () => () => {},
       onSkillConfirmation: () => () => {},
       doctor: async () => ({ data: { checks: [{ name: 'ffmpeg', ok: false, detail: 'FFmpeg was not found.', hint: '--ffmpeg or PATH' }, { name: 'future', ok: 'maybe', detail: 'Future detail', hint: 'Future hint' }] } }),
       copyBundledCommand: async () => { window.copiedBundled = (window.copiedBundled ?? 0) + 1; },

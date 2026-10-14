@@ -1,6 +1,7 @@
+import { updateCard, updateHint } from './updates';
 import { t, language, list, number } from '../shared/i18n.mjs';
 import { userError } from '../shared/errors.mjs';
-import type { Settings, Environment, Event } from '../shared/types';
+import type { Settings, Environment, Event, UpdateState } from '../shared/types';
 import { menu } from './menu';
 import { displayPath, revealLabel } from './platform';
 import { doctorCopy } from '../shared/doctor-copy.mjs';
@@ -10,6 +11,7 @@ const names = (): Record<string, string> => ({ node: t('techNode'), browser: t('
 const states = (): Record<string, string> => ({ missing: t('notInstalled'), latest: t('upToDate'), update: t('updateAvailable'), modified: t('modified'), error: t('skillReadError') });
 const configNames = (): Record<string, string> => ({ ffmpeg: t('ffmpegPath'), raster: t('rasterization'), encoder: t('encoder'), workers: t('workers'), jobsDir: t('jobDirectory') });
 export class SettingsView {
+  updates?: UpdateState; busyJobs = 0;
   settings?: Settings; environment?: Environment; doctor?: Event;
   page = ''; step = 0; busy = false; checking = false; error = ''; doctorError = '';
   private ffmpegCheck?: Awaited<ReturnType<typeof api.checkFfmpeg>>;
@@ -40,6 +42,7 @@ export class SettingsView {
   private checkId = 0;
   private browserInstall = { running: false, text: '' };
   constructor(private container: HTMLElement, private navigate: (page: string) => void) {
+    api.onUpdateState(state => { this.updates = state; updateHint(state); if (this.page === 'about') this.render(); });
     api.onBrowserInstallState(state => { const finished = this.browserInstall.running && !state.running; this.browserInstall = state; this.render(); if (finished) void this.check(); });
     container.addEventListener('click', e => { const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button'); if (b && !b.disabled) void this.click(b).catch(e => this.failure(e)); });
     container.addEventListener('change', e => { const input = e.target as HTMLInputElement; if (input.dataset.host && input.type === 'checkbox') { input.checked ? this.selected.add(input.dataset.host) : this.selected.delete(input.dataset.host); return; } if (input.dataset.input) void this.save(input.dataset.input, input.type === 'number' ? input.value === '' ? null : Number(input.value) : input.value || null); });
@@ -47,8 +50,12 @@ export class SettingsView {
     container.addEventListener('scroll', () => document.querySelector('.page-h')?.classList.toggle('stuck', container.scrollTop > 0));
   }
   async init() {
-    try { this.settings = await api.settings(); this.browserInstall = await api.browserInstallState(); if (!this.settings.own.wizardDone) this.startWizard(); }
+    try { this.updates = await api.updateState(); updateHint(this.updates); this.settings = await api.settings(); this.browserInstall = await api.browserInstallState(); if (!this.settings.own.wizardDone) this.startWizard(); }
     catch (e) { this.failure(e); }
+  }
+  syncHosting(enabled: boolean) {
+    if (this.settings) this.settings.values.hosted = enabled;
+    this.container.querySelector('[data-pref=hosted]')?.setAttribute('aria-checked', String(enabled));
   }
   mount(page: string) { const changed = this.page !== page; this.page = page; this.error = ''; this.render(); if (changed) this.container.scrollTop = 0; if (page === 'environment' && !this.checking) void this.check(); }
   private failure(e: unknown) { this.error = userError(e); this.render(); }
@@ -100,20 +107,25 @@ export class SettingsView {
   private pathRow(key: string, label: string) {
     return this.row(key, label, `<input id="input-${key}" data-input="${key}" class="path-input" aria-label="${label}" value="${esc(this.settings?.values[key])}" placeholder="${key === 'ffmpeg' ? t('autoFind') : t('default')}" ${this.busy ? 'disabled' : ''}>${this.button(t(key === 'ffmpeg' ? 'chooseFfmpeg' : 'browse'), 'choose', `data-key="${key}"`)}${key === 'ffmpeg' ? this.button(t('detect'), 'test-ffmpeg') : this.button(t('default'), 'default-jobs')}`);
   }
+  private hostingRow() {
+    return `<div class="setting-row" id="setting-hosted"><div><label>${t('hostingL')}</label><small>${t('hostingD')}</small></div><div class="setting-control">${this.button('', 'hosted', `class="upd-switch" role="switch" aria-label="${t('hostingL')}" aria-checked="${this.settings?.values.hosted === true}"`)}</div></div>`;
+  }
   private settingsPage() {
     const s = this.settings!;
-    return `<h2>${t('renderer')}</h2><section class="card settings-card">${this.pathRow('ffmpeg', t('ffmpegPath'))}${this.row('raster', t('rasterization'), this.selector('raster', s.values.raster ?? 'gpu', this.choices('raster')))}${this.row('encoder', t('encoder'), this.selector('encoder', s.values.encoder ?? 'x264', this.choices('encoder')))}${this.row('workers', t('workers'), `<input id="input-workers" data-input="workers" type="number" min="1" step="1" aria-label="${t('workers')}" placeholder="${t('automatic')}" value="${esc(s.values.workers)}" ${this.busy ? 'disabled' : ''}>${this.button(t('automatic'), 'auto-workers')}`)}${this.pathRow('jobsDir', t('jobDirectory'))}${this.infoRow(t('configFile'), this.configPath(s.file))}</section><h2>${t('software')}</h2><section class="card settings-card">${this.row('language', t('language'), this.selector('language', s.own.language ?? 'system', this.choices('language')), true)}${this.row('theme', t('appearance'), this.selector('theme', s.own.theme, this.choices('theme')), true)}${this.row('notifications', t('notifyFinish'), this.button(s.own.notifications ? t('on') : t('off'), 'notifications', `role="switch" aria-label="${t('notifyFinish')}" aria-checked="${s.own.notifications}"`), true)}</section>`;
+    return `<h2>${t('renderer')}</h2><section class="card settings-card">${this.hostingRow()}${this.pathRow('ffmpeg', t('ffmpegPath'))}${this.row('raster', t('rasterization'), this.selector('raster', s.values.raster ?? 'gpu', this.choices('raster')))}${this.row('encoder', t('encoder'), this.selector('encoder', s.values.encoder ?? 'x264', this.choices('encoder')))}${this.row('workers', t('workers'), `<input id="input-workers" data-input="workers" type="number" min="1" step="1" aria-label="${t('workers')}" placeholder="${t('automatic')}" value="${esc(s.values.workers)}" ${this.busy ? 'disabled' : ''}>${this.button(t('automatic'), 'auto-workers')}`)}${this.pathRow('jobsDir', t('jobDirectory'))}${this.infoRow(t('configFile'), this.configPath(s.file))}</section><h2>${t('software')}</h2><section class="card settings-card">${this.row('language', t('language'), this.selector('language', s.own.language ?? 'system', this.choices('language')), true)}${this.row('theme', t('appearance'), this.selector('theme', s.own.theme, this.choices('theme')), true)}${this.row('notifications', t('notifyFinish'), this.button(s.own.notifications ? t('on') : t('off'), 'notifications', `role="switch" aria-label="${t('notifyFinish')}" aria-checked="${s.own.notifications}"`), true)}</section>`;
   }
   private about() {
     const mark = document.querySelector('.titlebar .brand-mark')?.outerHTML ?? '';
-    return `<section class="about"><div id="about-brand" class="brand-lockup">${mark}<span>${t('appName')}</span></div><p class="mono">${esc(this.settings?.version)}</p><p class="mono">multiplane/1</p><p>${t('description')}</p>${this.button(t('rerunWizard'), 'wizard')}</section>`;
+    return `<section class="about"><div id="about-brand" class="brand-lockup">${mark}<span>${t('appName')}</span></div><p class="mono">${esc(this.settings?.version)}</p><p class="mono">multiplane/1</p><p>${t('description')}</p>${this.button(t('rerunWizard'), 'wizard')}</section>${updateCard(this.updates, this.settings?.own.autoCheckUpdates !== false, this.busyJobs)}`;
   }
   private wizard() {
     const skills = this.environment?.skills.filter(s => s.detected) ?? [];
-    const body = this.step === 1 ? `<h2>${t('checkEnvironment')}</h2><section class="card">${this.checks()}</section>` : this.step === 2 ? `<h2>${t('setupFfmpeg')}</h2><section class="card">${this.pathRow('ffmpeg', t('ffmpegPath'))}</section>` : `<h2>${t('installAgentSkill')}</h2>${skills.map(s => `<label class="skill-choice"><input type="checkbox" data-host="${s.host}" ${this.selected.has(s.host) ? 'checked' : ''} ${this.busy ? 'disabled' : ''}><span>${names()[s.host]}</span><span class="muted">${states()[s.state]}</span></label>`).join('') || `<p class="muted">${t('noAgent')}</p>`}`;
-    return `<div class="wizard"><div class="wizard-steps">${[t('checkEnvironment'), t('setupFfmpeg'), t('installSkill')].map((name, i) => `<span class="${this.step === i + 1 ? 'active' : ''}">${number(i + 1)} ${name}</span>`).join('')}</div><div class="wizard-body">${body}</div><div class="wizard-footer">${this.button(t('skip'), 'skip')}${this.button(this.step === 3 ? t('done') : t('next'), 'next', `class="primary" ${this.checking ? 'disabled' : ''}`)}</div></div>`;
+    const body = this.step === 4 ? `<h2>${t('hosted')}</h2><section class="card">${this.hostingRow()}</section>` : this.step === 1 ? `<h2>${t('checkEnvironment')}</h2><section class="card">${this.checks()}</section>` : this.step === 2 ? `<h2>${t('setupFfmpeg')}</h2><section class="card">${this.pathRow('ffmpeg', t('ffmpegPath'))}</section>` : `<h2>${t('installAgentSkill')}</h2>${skills.map(s => `<label class="skill-choice"><input type="checkbox" data-host="${s.host}" ${this.selected.has(s.host) ? 'checked' : ''} ${this.busy ? 'disabled' : ''}><span>${names()[s.host]}</span><span class="muted">${states()[s.state]}</span></label>`).join('') || `<p class="muted">${t('noAgent')}</p>`}`;
+    return `<div class="wizard"><div class="wizard-steps">${[t('checkEnvironment'), t('setupFfmpeg'), t('installSkill'), t('hosted')].map((name, i) => `<span class="${this.step === i + 1 ? 'active' : ''}">${number(i + 1)} ${name}</span>`).join('')}</div><div class="wizard-body">${body}</div><div class="wizard-footer">${this.button(t('skip'), 'skip')}${this.button(this.step === 4 ? t('done') : t('next'), 'next', `class="primary" ${this.checking ? 'disabled' : ''}`)}</div></div>`;
   }
+  setBusyJobs(count: number) { if (count === this.busyJobs) return; this.busyJobs = count; if (this.page === 'about') this.render(); }
   render() {
+    updateHint(this.updates);
     if (this.page === 'jobs' && !this.step) { this.container.replaceChildren(); return; }
     const top = this.container.scrollTop;
     this.container.innerHTML = `${this.error ? `<div class="banner" role="alert">${esc(userError(this.error))}</div>` : ''}${this.page === 'environment' ? this.environmentPage() : !this.settings ? `<p>${t('settingsReadError')}</p>` : this.step ? this.wizard() : this.page === 'settings' ? this.settingsPage() : this.page === 'about' ? this.about() : ''}`;
@@ -127,6 +139,9 @@ export class SettingsView {
   private async advance(install: boolean) {
     if (this.step === 3) {
       if (install) for (const host of this.selected) { const result = await api.skill(host, 'install'); if (result.cancelled) return; this.selected.delete(host); }
+      this.step = 4; return;
+    }
+    if (this.step === 4) {
       this.settings = await api.saveSetting('wizardDone', true, true);
       this.step = 0; document.querySelectorAll<HTMLButtonElement>('[data-page]').forEach(b => b.disabled = false); this.navigate('jobs'); return;
     }
@@ -141,7 +156,7 @@ export class SettingsView {
   private async save(key: string, value: unknown) {
     if (key === 'ffmpeg') { ++this.ffmpegId; this.ffmpegChecking = true; this.ffmpegCheck = undefined; }
     this.busy = true; this.error = ''; this.render();
-    try { this.settings = await api.saveSetting(key, value, ['theme', 'notifications', 'language'].includes(key)); if (key === 'ffmpeg') await this.savedFfmpeg(); }
+    try { this.settings = await api.saveSetting(key, value, ['theme', 'notifications', 'language', 'autoCheckUpdates'].includes(key)); if (key === 'ffmpeg') await this.savedFfmpeg(); }
     catch (e) { this.failure(e); }
     finally { this.ffmpegChecking = false; this.busy = false; this.render(); }
   }
@@ -149,6 +164,13 @@ export class SettingsView {
     if (this.busy) return;
     const d = b.dataset;
     if (d.select) { const key = d.select; menu(b, this.choices(key).map(([value, label]) => ({ label, selected: value === (key === 'theme' || key === 'language' ? this.settings?.own[key] ?? 'system' : this.settings?.values[key]), run: () => { void this.save(key, value); } }))); return; }
+    if (d.pref === 'update-check') { await api.checkUpdates(); return; }
+    if (d.pref === 'update-download') { await api.downloadUpdate(); return; }
+    if (d.pref === 'update-cancel') { await api.cancelUpdate(); return; }
+    if (d.pref === 'update-install') { await api.installUpdate(); return; }
+    if (d.pref === 'update-release') { await api.openRelease(); return; }
+    if (d.pref === 'update-later') { this.navigate('jobs'); return; }
+    if (d.pref === 'autoCheckUpdates') { await this.save('autoCheckUpdates', this.settings?.own.autoCheckUpdates === false); return; }
     if (d.pref === 'wizard') { this.startWizard(); return; }
     if (d.pref === 'check') { await this.check(); return; }
     if (d.pref === 'ffmpeg') { if (this.step) { this.step = 2; this.render(); } else this.navigate('settings'); document.getElementById('setting-ffmpeg')?.scrollIntoView({ block: 'nearest' }); document.getElementById('input-ffmpeg')?.focus(); return; }
@@ -157,6 +179,7 @@ export class SettingsView {
     if (d.pref === 'install-browser') { await api.installBrowser(); return; }
     if (d.pref === 'cancel-browser') { await api.cancelBrowserInstall(); return; }
     if (d.pref === 'open-config') { await api.openConfig(); return; }
+    if (d.pref === 'hosted') { await this.save('hosted', !this.settings?.values.hosted); return; }
     if (d.pref === 'notifications') { await this.save('notifications', !this.settings?.own.notifications); return; }
     if (d.pref === 'auto-workers') { await this.save('workers', null); return; }
     if (d.pref === 'default-jobs') { await this.save('jobsDir', null); return; }

@@ -14,7 +14,7 @@ Your job has two parts: **write a page that follows the contract**, then **check
 1. Write the shot page (see "Shot contract" below).
 2. Run `multiplane lint shot.html --json`: it runs without a browser in under a second and flags patterns that break determinism or the contract, with line and column locations. Fix errors first.
 3. Run `multiplane stills shot.html --at 0,1,2.5 --json`: capture a few stills to inspect the images.
-4. Run `multiplane verify shot.html --json`: run a determinism check. **Do not render if it fails**. Fix the issues reported by `finding` first.
+4. Run `multiplane verify shot.html --json`: run a determinism check. **Do not render if it fails** (`ok: false`, code `nondeterministic_output`); fix the issues reported by `finding` first. A `gpu_raster_jitter` warning with `ok: true` is not a failure: GPU rasterization made a few scattered pixels differ by a level or two, which is invisible and not caused by the shot. Render as usual and mention it only if the user asks about determinism.
 5. Run `multiplane render shot.html --json`: produce the video.
 
 `stills`, `verify`, and `render` automatically run lint before starting. Errors end the command with `lint_failed`, avoiding wasted rendering time.
@@ -73,8 +73,9 @@ Shot.define({
 | `fonts` | No | Fonts to wait for: `[['48px MyFont', 'text used'], ...]`. |
 | `setup()` | No | One-time preparation (load images, create a 3D scene, etc.). May return a Promise; the renderer waits for it before starting. |
 | `cuts` | No | Array of hard cut times (seconds). Motion blur time samples do not cross these times. **Declare every hard cut in the image**, or frames on either side of the cut will blur together. |
-| `post` | No | Post-processing defaults: `motionBlur` (time samples per frame; 1 disables it), `shutter` (shutter fraction of a frame; 0.5 means 180°), `grain` (film grain intensity; 0 disables it). Command-line options override these. |
+| `post` | No | Post-processing defaults: `motionBlur` (time samples per frame; 1 disables it), `maxMotionBlur` (upper limit for adding samples where motion is fast; see below), `shutter` (shutter fraction of a frame; 0.5 means 180°), `grain` (film grain intensity; 0 disables it). Command-line options override these. |
 | `blurAt(t)` | No | Return the required number of time samples (a positive integer) at this time, using fewer samples for static sections and more for fast motion. |
+| `meta` | No | Any JSON data for tools that read the shot (beats, captions, notes), at most 1 MiB. Readable as `SHOT.meta`; returned by `inspect`; never affects pixels. |
 
 Use `Shot.ease` for `clamp`, `lerp`, `prog(t, start, dur)`, and several easing curves; use `Shot.size` for the stage's logical dimensions. You may also skip `Shot.define` and define `window.SHOT = { duration, fps, ready, render, cuts, post }` directly, where `ready` is a Promise that resolves when assets are ready.
 
@@ -103,7 +104,7 @@ Do not use the following in `render(t)` or the code it calls:
 
 The runtime uses wall-clock time for its own preview playback. You do not write that part, and it does not affect rendering.
 
-`lint` detects most direct patterns in the table above, but not indirect calls (such as `const now = Date.now; now()`) or accumulated state (such as `x += 1`). So **only a passing `verify` counts**.
+`lint` detects most direct patterns in the table above, but not indirect calls (such as `const now = Date.now; now()`) or accumulated state (such as `x += 1`). So **only a passing `verify` counts** (a pass with `gpu_raster_jitter` warnings still counts).
 
 If a prohibited pattern is necessary and you have confirmed that it cannot affect the image (for example, a log only in `setup()`), suppress it with a comment on the line **immediately above** it. Include the rule code:
 
@@ -143,7 +144,8 @@ Shot.define({
 ```
 
 - Use `createThreeLayer(options)` to add a transparent WebGL canvas inside `#stage`, layered with ordinary HTML elements (`zIndex` controls stacking). Common options: `fov`, `focusDistance`, `aperture` (0 keeps everything sharp), `samples` / `maxSamples` (depth-of-field sample count, adaptive to the amount of blur by default), `quality` (`'final'` uses accumulated depth of field and is the default; `'preview'` is a fast approximation for drafts only).
-- Use `layer.card({ src, width, height, position, rotation, radius, border, shadow, annotations })` to get a three.js `Group`. Change its position and rotation in `render(t)`.
+- Use `style` on `createThreeLayer` for layer-wide defaults, or on a card to override them: `annotationFontFamily`, `annotationColor` (lines), `annotationTextColor`, `textureBackground`, `browserFrameColor`, `browserFrameFontFamily`. Font options take a single family name; the renderer waits for it to load and fails with `resource_failed` instead of falling back.
+- Use `layer.card({ src, width, height, position, rotation, radius, border, shadow, annotations, style })` to get a three.js `Group`. Change its position and rotation in `render(t)`.
 - Call `layer.render({ t, ... })` inside every `render(t)` call and pass the same `t`. The renderer handles motion blur subsamples automatically.
 - Use `layer.scene` and `layer.camera` as ordinary three.js objects and add your own meshes. Their state must likewise depend only on `t`.
 - Use `apertureForBlurRadius({ radiusPixels, depth, focusDistance })` to convert a desired blur radius in pixels at a given depth into an aperture.
@@ -155,20 +157,28 @@ Use `--json` with any command. Resolve shot paths relative to `--root` (the curr
 | Command | Purpose | Common options |
 |---|---|---|
 | `multiplane lint <shot>` | Static code checks without a browser | `--root` |
-| `multiplane stills <shot>` | Stills and contact sheet | `--at 0,1.5,3` (seconds) or `--every 0.5`; `--out` |
+| `multiplane stills <shot>` | PNG stills at given times and a contact sheet; also for final images | `--at 0,1.5,3` (seconds) or `--every 0.5`; `--out` |
 | `multiplane verify <shot>` | Determinism check: pixel comparisons out of order, after reload, and with single/multiple processes | `--at` (must fall on frames), `--workers` (default 2) |
-| `multiplane render <shot>` | Render video | `--out`, `--from` / `--to` (seconds, end excluded), `--fps`, `--scale`, `--workers`, `--motion-blur`, `--shutter`, `--grain`, `--no-post`, `--draft`, `--encoder`, `--audio` |
+| `multiplane render <shot>` | Render video | `--out`, `--from` / `--to` (seconds, end excluded), `--fps`, `--scale`, `--workers`, `--quality`, `--motion-blur`, `--max-motion-blur`, `--shutter`, `--grain`, `--no-post`, `--draft`, `--encoder`, `--audio`, `--no-static-reuse` |
+| `multiplane inspect <shot>` | Read duration, frames, stage size, cuts and `meta` without rendering | `--fps`, `--root` |
+| `multiplane serve` | Serve shots on 127.0.0.1 so the user can open them in a browser; stop it when done | `--root`, `--port` |
+| `multiplane benchmark` | Measure the fastest worker count on this machine (2–3 minutes); renders then use it automatically | `--raster` |
 | `multiplane doctor` | Check the environment | — |
 | `multiplane config get\|set\|unset` | Read or change the user config | see "Set up a machine" |
 | `multiplane skill status\|install\|remove` | Manage this skill for Claude Code and Codex | `--host`, `--force` |
 | `multiplane status <job>` | View job status | — |
 | `multiplane cancel <job>` | Stop a job | `--wait` (seconds) |
+| `multiplane wait <job>` | Wait for a job started earlier and print its events | `--timeout` (seconds) |
 
 Use `--out`, `--overwrite`, and `--no-lint` (skip automatic lint) with `stills`, `verify`, or `render`. Run `multiplane <command> --help` to list all options for that command.
 
 Each run has its own job directory, `out/jobs/<jobId>/`. Without `--out`, artifacts are written there; use `artifacts` in the result for the paths. If `--out` points to an existing file, the command fails with `output_exists`. Add `--overwrite` when you intend to replace it (replacement happens only after the new artifact is fully written; on failure, the old file stays untouched).
 
 FFmpeg is not bundled. It is found in this order: `--ffmpeg <path>`, the environment variable `MULTIPLANE_FFMPEG`, `ffmpeg` in the user config `config.json`, then the system PATH. It must support libx264. To save a path for every project, use `multiplane config set ffmpeg <path>` with the user's approval (see "Set up a machine").
+
+Motion blur quality: the shot decides whether there is motion blur (`post.motionBlur` above 1, the starting number of samples); `--quality` decides how many samples fast frames get. The default `standard` compares adjacent samples block by block and doubles the count wherever something moved more than about 2 pixels, up to 64; `high` uses about 1 pixel and up to 256. Static frames drop to 1 sample. Use the default `standard` for iterating and for the final render: on real shots `high` takes several times longer for a difference visible only when zoomed in. Use `high` only when the user asks, for stills that will be viewed up close, or when very fast thin motion still strobes under `standard`. Do not raise `motionBlur` for the whole shot to fix strobing; use `high`, or `--max-motion-blur` for a custom limit. `result.data.blurSamples` (`{ min, max, mean, histogram }`) shows the counts used. A shot with its own `blurAt(t)` keeps full control of the count.
+
+When the user wants an image rather than a video (a cover, poster, thumbnail or illustration), write a shot and use `stills` for the final output: each PNG gets the same supersampling (`--scale 2`), motion blur, depth of field and `--alpha` as video. Pick a time during motion if the still should show motion blur. Hand over the `t-<seconds>.png` file from `result.data.stills`, not the contact sheet.
 
 Use `--draft` with `render` or `stills` while iterating: it captures at a scale of at most 0.5 and upscales, with no motion blur and no grain, so it is faster and visibly lower in quality. Options you pass explicitly override the preset. Render the final video without `--draft`; `result.data.draft` is `true` when a draft was produced, so do not hand a draft over as the final result.
 
@@ -199,3 +209,5 @@ With `--json`, stdout contains one JSON event per line. **The last line is alway
 ## Long renders
 
 Rendering may take a long time. Each run creates a job directory, `out/jobs/<jobId>/` (`jobId` appears in both the `start` event and the `result`). Read `status.json` for the latest progress snapshot and `events.jsonl` for the full event stream. To stop a job, run `multiplane cancel <jobId>` or create a file named `stop` in its job directory.
+
+If the user turned on hosting in the desktop app, the app runs the render and it keeps going after your session ends. Nothing changes in how you call the command; stderr says the job was handed over, and `status.json` may show `queued` while another hosted job runs. When a session resumes and you started a job earlier but never saw its `result`, run `multiplane wait <jobId> --json` to get its events and exit code instead of starting it again. Use `--no-hosted` only when the user asks for a render that should not go through the app.

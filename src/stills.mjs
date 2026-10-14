@@ -1,8 +1,9 @@
+import { reuseState, verifiedFrames } from './static-reuse.mjs';
 import { recoveryBudget } from './browser-recovery.mjs';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { openShot, number } from './capture.mjs';
-import { createPostCapture, resolveScale } from './post.mjs';
+import { createPostCapture, resolveScale, blurSampleReport } from './post.mjs';
 import { runCommand } from './events.mjs';
 import { loaded, observeBrowser } from './environment.mjs';
 import { invalidOption } from './errors.mjs';
@@ -13,6 +14,7 @@ export async function stillsShot(shot, options = {}) {
   return runCommand('stills', shot, options, async events => {
     options = { ...events.options };
     delete options.onEvent;
+    reuseState(options);
     options._browserRecovery = recoveryBudget();
     let result;
 
@@ -28,7 +30,7 @@ export async function stillsShot(shot, options = {}) {
       options.alpha = capture.alpha;
       await loaded(events, capture);
       const fps = number(options.fps ?? capture.fps, '--fps', { positive: true });
-      const processed = createPostCapture(capture, options, fps);
+      const processed = createPostCapture(capture, { ...options, onWarning: events.warning }, fps);
       let times;
       if (options.at !== undefined) times = options.at.split(',').map(t => number(t, '--at'));
       else {
@@ -42,14 +44,23 @@ export async function stillsShot(shot, options = {}) {
       await mkdir(out, { recursive: true });
       for (const file of [...times.map(t => `t-${t.toFixed(2)}.png`), '_sheet.png']) await requireNewOutput(path.join(out, file));
       const frames = [];
-      for (const t of times) {
+      const histogram = {};
+      const source = async function* (first, end) {
+        for (let index = first; index < end; index++) {
+          const t = times[index];
+          events.check();
+          const png = await processed.frame(t, Math.round(t * fps), index === end - 1);
+          events.progress('capture', index + 1, times.length);
+          yield { t, png, blurSamples: processed.lastBlurSamples };
+        }
+      };
+      for await (const { t, png: buffer, blurSamples } of verifiedFrames(source, { ...options, check: events.check }, times.length)) {
+        histogram[blurSamples] = (histogram[blurSamples] ?? 0) + 1;
         events.check();
-        const buffer = await processed.frame(t);
         await writeArtifact(path.join(out, `t-${t.toFixed(2)}.png`), buffer);
         await checkStill(path.join(out, `t-${t.toFixed(2)}.png`), { width: capture.width * scale, height: capture.height * scale });
         frames.push({ time: t.toFixed(2), image: buffer.toString('base64') });
         events.artifact(path.join(out, `t-${t.toFixed(2)}.png`), 'still');
-        events.progress('capture', frames.length, times.length);
       }
       const thumbnailHeight = 480 * capture.height / capture.width;
       const rowHeight = thumbnailHeight + 40;
@@ -62,7 +73,7 @@ export async function stillsShot(shot, options = {}) {
       await writeArtifact(path.join(out, '_sheet.png'), sheetPNG);
       await checkStill(path.join(out, '_sheet.png'), { width: 1920, height: Math.ceil(Math.ceil(frames.length / 4) * rowHeight) });
       events.artifact(path.join(out, '_sheet.png'), 'contact-sheet');
-      result = { format: 'png', alpha: capture.alpha, stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
+      result = { staticReuse: processed.staticReuse, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, blurSamples: blurSampleReport(histogram), format: 'png', alpha: capture.alpha, stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
     } finally { await cleanup(); }
 
     return options.draft ? { ...result, draft: true } : result;

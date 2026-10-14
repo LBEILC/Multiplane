@@ -36,17 +36,36 @@ function roundedGeometry(w, h, radius) {
   return geometry;
 }
 
-function annotate(ctx, annotations, width, height) {
+const defaultStyle = Object.freeze({ annotationFontFamily: 'sans-serif', annotationColor: '#555555',
+  annotationTextColor: '#222222', textureBackground: '#eeeeee', browserFrameColor: '#666666', browserFrameFontFamily: 'sans-serif' });
+
+async function loadTextureFont(family, weight, text) {
+  try {
+    if (typeof family !== 'string' || !family.trim() || !CSS.supports('font-family', family)) throw new Error('Invalid font family.');
+    if (!/^(['"]).*\1$/.test(family.trim()) && family.includes(',')) throw new Error('Provide a single font family.');
+    const loaded = await document.fonts.load(`${weight} 64px ${family}`, text || 'Text');
+    // FontFaceSet.load succeeds with an empty list for an unknown family.
+    // Probe local fonts explicitly instead of silently drawing a fallback.
+    if (!loaded.length && !/^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-serif|ui-sans-serif|ui-monospace|ui-rounded|math)$/i.test(family.trim())) {
+      const name = family.trim().replace(/^(['"])(.*)\1$/, '$2');
+      await new FontFace('MultiplaneFontProbe', `local(${JSON.stringify(name)})`, { weight: String(weight) }).load();
+    }
+  } catch (cause) {
+    throw Object.assign(new Error(`Texture font failed to load: ${family}`, { cause }), { code: 'resource_failed' });
+  }
+}
+
+function annotate(ctx, annotations, width, height, style) {
   for (const a of annotations) {
     const x = a.x * width, y = a.y * height, w = (a.w ?? 0) * width, h = (a.h ?? 0) * height;
-    ctx.fillStyle = ctx.strokeStyle = a.color ?? '#555555';
+    ctx.fillStyle = ctx.strokeStyle = a.color ?? style.annotationColor;
     ctx.lineWidth = (a.lineWidth ?? 0.003) * width;
     if (a.type === 'highlight') ctx.fillRect(x, y, w, h);
     if (a.type === 'underline') { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.stroke(); }
     if (a.type === 'circle') { ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
     if (a.text) {
-      ctx.fillStyle = a.textColor ?? '#222222';
-      ctx.font = `${a.weight ?? 500} ${(a.fontSize ?? 0.03) * width}px sans-serif`;
+      ctx.fillStyle = a.textColor ?? style.annotationTextColor;
+      ctx.font = `${a.weight ?? 500} ${(a.fontSize ?? 0.03) * width}px ${style.annotationFontFamily}`;
       ctx.textBaseline = 'middle';
       ctx.fillText(a.text, x + (a.type === 'highlight' ? 0.006 * width : 0), y + h / 2);
     }
@@ -57,7 +76,10 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
   pixelRatio = devicePixelRatio, fov = 38, near = 0.1, far = 100,
   focusDistance = 10, aperture = 0.15, samples = 64, quality = 'final',
   adaptiveSamples = true, maxSamples = 1024, sampleSpacing = 1.5, sampleBlur = 1, rotateSamples = true,
-  previewAperture = 0.008, maxBlur = 0.016, toneMapping = false, zIndex = 1 } = {}) {
+  previewAperture = 0.008, maxBlur = 0.016, toneMapping = false, zIndex = 1, style = {} } = {}) {
+  // TODO(design): Document the shared layer/card style fields and single-family font values.
+  const layerStyle = { ...defaultStyle, ...style };
+  const layerBackground = style.textureBackground !== undefined;
   const renderer = new THREE.WebGLRenderer({ alpha: true, premultipliedAlpha: false, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(size.w, size.h);
@@ -205,7 +227,9 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
     return texture;
   }
   function card({ src, width, height, radius = 0, position = [0, 0, 0], rotation = [0, 0, 0],
-    border = null, shadow = false, annotations = [], browserFrame = false, textureWidth = 2048 }) {
+    border = null, shadow = false, annotations = [], browserFrame = false, textureWidth = 2048, style = {} }) {
+    const textureStyle = { ...layerStyle, ...style };
+    const composeBackground = layerBackground || style.textureBackground !== undefined;
     const group = new THREE.Group();
     group.position.fromArray(position); group.rotation.set(...rotation);
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
@@ -226,28 +250,32 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
         new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
       plane.layers.set(1); plane.position.set(0.04, -0.07, -0.025); group.add(plane);
     }
-    const key = JSON.stringify({ src, annotations, browserFrame, textureWidth, aspect: width / height });
+    const key = JSON.stringify({ src, annotations, browserFrame, textureWidth, aspect: width / height, style: textureStyle, composeBackground });
     if (!textureCache.has(key)) textureCache.set(key, (async () => {
       const image = await new THREE.ImageLoader().loadAsync(src);
-      if (!annotations.length && !browserFrame) return configureTexture(new THREE.Texture(image));
-      await document.fonts.load('500 64px sans-serif', annotations.map(a => a.text ?? '').join('') || 'Text');
+      if (!annotations.length && !browserFrame && !composeBackground) return configureTexture(new THREE.Texture(image));
+      const fontLoads = annotations.filter(a => a.text).map(a => loadTextureFont(textureStyle.annotationFontFamily, a.weight ?? 500, a.text));
+      const title = new URL(src, location.href).pathname.split('/').pop();
+      if (browserFrame) fontLoads.push(loadTextureFont(textureStyle.browserFrameFontFamily, 400, title));
+      await Promise.all(fontLoads);
       const c = document.createElement('canvas');
       c.width = Math.min(renderer.capabilities.maxTextureSize, Math.max(image.width, textureWidth));
       c.height = Math.round(c.width * height / width);
       const ctx = c.getContext('2d');
       const bar = browserFrame ? Math.round(c.height * 0.065) : 0;
-      ctx.fillStyle = '#eeeeee'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.fillStyle = textureStyle.textureBackground; ctx.fillRect(0, 0, c.width, c.height);
       ctx.drawImage(image, 0, bar, c.width, c.height - bar);
       if (browserFrame) {
-        ctx.fillStyle = '#666666';
+        ctx.fillStyle = textureStyle.browserFrameColor;
         for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(c.width * (0.022 + i * 0.019), bar / 2, c.width * 0.004, 0, 2 * Math.PI); ctx.fill(); }
-        ctx.font = `${bar * 0.45}px sans-serif`; ctx.textBaseline = 'middle';
-        ctx.fillText(new URL(src, location.href).pathname.split('/').pop(), c.width * 0.10, bar / 2);
+        ctx.font = `${bar * 0.45}px ${textureStyle.browserFrameFontFamily}`; ctx.textBaseline = 'middle';
+        ctx.fillText(title, c.width * 0.10, bar / 2);
       }
-      annotate(ctx, annotations, c.width, c.height);
+      annotate(ctx, annotations, c.width, c.height, textureStyle);
       return configureTexture(new THREE.CanvasTexture(c));
     })());
     const loaded = textureCache.get(key).then(texture => { texture.needsUpdate = true; material.map = texture; material.needsUpdate = true; });
+    loaded.catch(() => {});
     pending.push(loaded); scene.add(group);
     group.userData.material = material;
     return group;

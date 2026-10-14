@@ -32,7 +32,7 @@ test('live language changes preserve jobs, tabs, scroll and inputs and update al
       snapshot: async () => snapshot, subscribe: fn => { subscriber = fn; return () => {}; },
       settings: async () => settings(),
       saveSetting: async (key, value, personal) => { (personal ? own : values)[key] = value; if (key === 'language') window.changeLanguage(value); return settings(); },
-      browserInstallState: async () => ({ running: false, text: '' }), onBrowserInstallState: () => () => {},
+      browserInstallState: async () => ({ running: false, text: '' }), updateState: async () => ({ phase: 'development' }), onUpdateState: () => () => {}, onBrowserInstallState: () => () => {},
       onSkillConfirmation: fn => { confirmation = fn; return () => {}; }, answerSkillConfirmation: async () => {},
       doctor: async () => ({ data: { checks: [{ name: 'ffmpeg', ok: false, detail: 'FFmpeg was not found.', hint: 'Choose an executable.' }] } }),
       environment: async () => ({ command: {}, skills: [{ host: 'codex', target: '/skills/multiplane', state: 'modified', detected: true, version: '1.0.0', availableVersion: '1.0.0' }] })

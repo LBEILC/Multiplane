@@ -26,7 +26,7 @@ test('renderer uses Darwin labels, home paths and brand spacing after delayed pl
       snapshot: async () => snapshot,
       settings: async () => ({ file: '/Users/test/config.json', values: {}, overrides: {}, own: { language: 'en', wizardDone: true, theme: 'system', notifications: false }, version: version }),
       browserInstallState: async () => ({ running: false, text: '' }),
-      onBrowserInstallState: () => () => {}, onSkillConfirmation: () => () => {},
+      updateState: async () => ({ phase: 'development' }), onUpdateState: () => () => {}, onBrowserInstallState: () => () => {}, onSkillConfirmation: () => () => {},
       doctor: async () => ({ data: { checks: [], config: { path: '/Users/test/config.json', exists: true } } }),
       environment: async () => ({ command: { path: '/Users/test/bin/multiplane', version: version }, skills: [] })
     };

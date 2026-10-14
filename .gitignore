@@ -7,3 +7,6 @@ logs/
 .tmp/
 app/build/
 app/release/
+
+# Per-machine settings for tests (for example the FFmpeg path); never committed
+.local/

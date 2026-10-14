@@ -1,7 +1,9 @@
+import { reuseState, reuseReport, reuseEnabled, REUSE_INTERVAL } from './static-reuse.mjs';
 import { recoveryBudget } from './browser-recovery.mjs';
 import { MultiplaneError } from './errors.mjs';
 import { availableParallelism, freemem, totalmem } from 'node:os';
 import { Worker } from 'node:worker_threads';
+import { blurSampleReport } from './post.mjs';
 
 export function defaultWorkers(scale = 1, hardware = {}) {
   const cores = hardware.cores ?? availableParallelism();
@@ -12,7 +14,9 @@ export function defaultWorkers(scale = 1, hardware = {}) {
 
 export function createRenderPool(shot, options, fps, workers, size, onWarning) {
   options = { ...options, _browserRecovery: options._browserRecovery ?? recoveryBudget() };
+  reuseState(options);
   const slots = [], stats = { frames: 0, samples: 0, staticFrames: 0 };
+  const histogram = {};
   let failure;
   for (let i = 0; i < workers; i++) {
     const worker = new Worker(new URL('./render-worker.mjs', import.meta.url), { workerData: { shot, options, fps, size } });
@@ -37,18 +41,20 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning) {
     }));
     slots.push(slot);
   }
-  return {
+  const api = {
     stats,
+    get blurSamples() { return blurSampleReport(histogram); },
+    get staticReuse() { return reuseReport(options); },
     progress: () => `Samples: ${stats.samples}; static: ${stats.staticFrames}; adaptive: ${stats.adaptiveFrames ?? 0}; hooks: ${stats.hookFrames ?? 0}`,
     async *frames(first, end) {
       await Promise.all(slots.map(s => s.ready));
-      const queue = [], chunk = options.transport === 'raw' ? 1 : 4;
+      const queue = [], chunk = reuseEnabled(options) ? Math.min(REUSE_INTERVAL + 1, Math.ceil((end - first) / slots.length)) : options.transport === 'raw' ? 1 : 4;
       let next = first;
       const schedule = slot => {
         if (next >= end) return;
         if (failure) throw failure;
         const begin = next;
-        next = Math.min(end, next + chunk);
+        next = Math.min(end, next + chunk, reuseEnabled(options) ? (Math.floor(begin / REUSE_INTERVAL) + 1) * REUSE_INTERVAL + 1 : end);
         const promise = new Promise((resolve, reject) => { slot.pending = { resolve, reject }; });
         promise.catch(() => {});
         slot.worker.postMessage({ type: 'render', first: begin, end: next });
@@ -61,7 +67,12 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning) {
         if (failure) throw failure;
         for (const [key, value] of Object.entries(batch.stats)) stats[key] = (stats[key] ?? 0) + value;
         if (options.transport === 'raw') schedule(slot);
-        for (const [i, png] of batch.frames.entries()) yield { frame: batch.first + i, png, hash: batch.hashes?.[i] };
+        // Worker audits have already replaced invalid frames in this batch.
+        for (const [i, png] of batch.frames.entries()) {
+          const count = batch.blurSamples[i];
+          histogram[count] = (histogram[count] ?? 0) + 1;
+          yield { frame: batch.first + i, png, hash: batch.hashes?.[i], blurSamples: count };
+        }
         if (options.transport !== 'raw') schedule(slot);
       }
     },
@@ -74,4 +85,9 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning) {
       await Promise.all(slots.map(s => s.exited));
     },
   };
+  const frames = api.frames.bind(api);
+  api.frames = async function* (first, end, onCaptured) {
+    for await (const item of frames(first, end)) { await onCaptured?.(item); yield item; }
+  };
+  return api;
 }

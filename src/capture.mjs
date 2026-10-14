@@ -1,3 +1,4 @@
+import { installStaticObserver, reuseEnabled, reuseState, observationReasons } from './static-reuse.mjs';
 import path from 'node:path';
 import { browserClosed, crashedError, recoveryBudget, MAX_BROWSER_RESTARTS } from './browser-recovery.mjs';
 import { access } from 'node:fs/promises';
@@ -41,12 +42,20 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     browser = await launchBrowser(options);
     await options.onBrowser?.(browser);
     page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: scale });
+    if (reuseEnabled(options)) await page.addInitScript(installStaticObserver);
     page.on('crash', () => { crashed = true; });
     const errors = [];
+    const observerProbe = request => {
+      const headers = request.headers();
+      return headers['x-multiplane-image-probe'] === '1'
+        || headers['access-control-request-headers']?.toLowerCase().split(',').some(name => name.trim() === 'x-multiplane-image-probe');
+    };
     page.on('pageerror', error => errors.push(new MultiplaneError('shot_load_failed', undefined, { details: { reason: error.message } })));
     page.on('console', message => { if (['log', 'warning', 'error'].includes(message.type())) process.stderr.write(message.text() + '\n'); });
-    page.on('response', response => { if (response.status() >= 400) errors.push(new MultiplaneError(response.headers()['x-multiplane-error'] === 'three_not_installed' ? 'three_not_installed' : 'resource_failed', undefined, { details: { status: response.status(), url: response.url() } })); });
-    page.on('requestfailed', request => errors.push(new MultiplaneError('resource_failed', undefined, { details: { url: request.url() } })));
+    // Optional image inspection may fail CORS/CSP even when the actual image
+    // loads. Its failure means no reuse, not a shot resource failure.
+    page.on('response', response => { if (response.status() >= 400 && !observerProbe(response.request())) errors.push(new MultiplaneError(response.headers()['x-multiplane-error'] === 'three_not_installed' ? 'three_not_installed' : 'resource_failed', undefined, { details: { status: response.status(), url: response.url() } })); });
+    page.on('requestfailed', request => { if (!observerProbe(request)) errors.push(new MultiplaneError('resource_failed', undefined, { details: { url: request.url() } })); });
     const url = `${server.url}/${relative.split(path.sep).map(encodeURIComponent).join('/')}?mode=render`;
     const response = await page.goto(url).catch(cause => { throw new MultiplaneError('shot_load_failed', undefined, { cause }); });
     if (!response.ok()) throw new MultiplaneError('shot_load_failed');
@@ -59,8 +68,14 @@ async function openShotOnce(shot, scale = 1, options = {}) {
       ]);
       const stage = document.querySelector('#stage')?.getBoundingClientRect();
       if (!stage || ![stage.width, stage.height].every(v => Number.isSafeInteger(v) && v > 0)) throw new Error('stage_size_invalid');
-      return { width: stage.width, height: stage.height, duration: SHOT.duration, fps: SHOT.fps ?? 30, cuts: SHOT.cuts ?? [], post: SHOT.post ?? {}, hasBlurAt: typeof SHOT.blurAt === 'function' };
-    }).catch(cause => { throw new MultiplaneError(cause.message.includes('ready_timeout') ? 'ready_timeout' : cause.message.includes('stage_size_invalid') ? 'stage_size_invalid' : 'resource_failed', undefined, { cause }); });
+      let meta;
+      try {
+        const json = JSON.stringify(SHOT.meta === undefined ? null : SHOT.meta);
+        if (typeof json !== 'string' || new TextEncoder().encode(json).length > 1024 * 1024) throw new Error('Invalid metadata.');
+        meta = JSON.parse(json);
+      } catch { throw new Error('shot_contract_invalid'); }
+      return { width: stage.width, height: stage.height, duration: SHOT.duration, fps: SHOT.fps ?? 30, cuts: SHOT.cuts ?? [], post: SHOT.post ?? {}, hasBlurAt: typeof SHOT.blurAt === 'function', meta };
+    }).catch(cause => { throw new MultiplaneError(['ready_timeout', 'stage_size_invalid', 'shot_contract_invalid'].find(code => cause.message.includes(code)) ?? 'resource_failed', undefined, { cause }); });
     const { width, height } = metadata;
     if (width !== 1920 || height !== 1080) {
       await page.setViewportSize({ width, height });
@@ -76,6 +91,17 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     const check = () => { if (errors.length) throw errors[0]; };
     check();
     const cdp = (options.capture ?? 'cdp') === 'cdp' ? await page.context().newCDPSession(page) : null;
+    if (reuseEnabled(options)) {
+      const inspection = cdp ?? await page.context().newCDPSession(page);
+      try {
+        // Include closed declarative shadow roots, which page JavaScript cannot inspect.
+        const { root } = await inspection.send('DOM.getDocument', { depth: -1, pierce: true });
+        const shadowed = node => node.shadowRoots?.some(root => root.shadowRootType !== 'user-agent') || node.children?.some(shadowed);
+        if (shadowed(root)) await page.evaluate(() => globalThis.__multiplaneStatic?.disqualify());
+      } catch {
+        await page.evaluate(() => globalThis.__multiplaneStatic?.disqualify());
+      } finally { if (!cdp) await inspection.detach(); }
+    }
     const alpha = options.alpha ?? metadata.post.alpha ?? false;
     if (typeof alpha !== 'boolean') throw invalidOption('--alpha', 'alpha must be a boolean.');
     if (alpha && scale < 1) {
@@ -85,10 +111,11 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     }
     if (alpha && cdp) await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
     const timings = { renderCallMs: 0, screenshotMs: 0 };
-    let closing;
-    const beginFrame = async (t, { motionBlur = 1 } = {}) => {
+    let closing, sampleContextUsed = false;
+    const draw = async (t, { motionBlur = 1 } = {}) => {
         const renderStart = performance.now();
-        await page.evaluate(({ t, motionBlur, alpha }) => {
+        const changed = await page.evaluate(({ t, motionBlur, alpha }) => {
+          globalThis.__multiplaneStatic?.suspend();
           if (alpha) document.documentElement.style.setProperty('--multiplane-page-background', 'transparent');
           const stage = document.querySelector('#stage');
           const display = stage.style.getPropertyValue('display');
@@ -97,18 +124,31 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           stage.getBoundingClientRect();
           if (display) stage.style.setProperty('display', display, priority);
           else stage.style.removeProperty('display');
+          globalThis.__multiplaneStatic?.resume();
           const previous = SHOT.sampleContext;
-          SHOT.sampleContext = { time: t, motionBlur };
+          let contextUsed = false;
+          SHOT.sampleContext = { time: t, get motionBlur() { contextUsed = true; return motionBlur; } };
           let failure;
           try { SHOT.render(t); } catch (error) { failure = String(error?.message ?? error); } finally {
             if (previous === undefined) delete SHOT.sampleContext;
             else SHOT.sampleContext = previous;
           }
           stage.getBoundingClientRect();
-          return failure;
-        }, { t, motionBlur, alpha }).then(reason => { if (reason !== undefined) throw new MultiplaneError('render_threw', undefined, { details: { t, reason } }); });
+          const changed = globalThis.__multiplaneStatic?.read() ?? true;
+          return { failure, contextUsed, changed, reason: globalThis.__multiplaneStatic?.reason };
+        }, { t, motionBlur, alpha }).then(({ failure, changed, contextUsed, reason }) => {
+          sampleContextUsed = contextUsed;
+          const index = observationReasons.indexOf(reason);
+          if (index >= 0) Atomics.add(reuseState(options), index + 4, 1);
+          if (failure !== undefined) throw new MultiplaneError('render_threw', undefined, { details: { t, reason: failure } });
+          return changed;
+        });
         timings.renderCallMs += performance.now() - renderStart;
         check();
+        return changed;
+    };
+    const beginFrame = async (t, context) => {
+        if (!context?.observed) await draw(t, context);
         const screenshotStart = performance.now();
         const png = cdp ? cdp.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, captureBeyondViewport: false,
             clip: { x: 0, y: 0, width, height, scale: alpha ? Math.max(1, scale) : scale } }).then(({ data }) => {
@@ -122,6 +162,8 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     };
     return {
       page, browser, server, ...metadata, alpha, beginFrame, timings,
+      get sampleContextUsed() { return sampleContextUsed; },
+      ...(reuseEnabled(options) ? { observe: draw } : {}),
       isCrash: error => browserClosed(error, browser, page, crashed),
       ...(metadata.hasBlurAt ? { blurAt: async t => {
         const result = await page.evaluate(t => { try { return { value: SHOT.blurAt(t) }; } catch (error) { return { reason: String(error?.message ?? error) }; } }, t);
@@ -161,6 +203,8 @@ export async function openShot(shot, scale = 1, options = {}) {
     ...current,
     get page() { return current.page; },
     get browser() { return current.browser; },
+    get sampleContextUsed() { return current.sampleContextUsed; },
+    ...(current.observe ? { observe: (...args) => current.observe(...args) } : {}),
     beginFrame: (...args) => current.beginFrame(...args),
     frame: (...args) => current.frame(...args),
     ...(current.blurAt ? { blurAt: (...args) => current.blurAt(...args) } : {}),

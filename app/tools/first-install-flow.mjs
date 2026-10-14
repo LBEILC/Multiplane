@@ -1,4 +1,5 @@
 import path from 'node:path';
+import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 
 // Complete historical records keep this regression independent of malformed-job handling.
@@ -21,15 +22,32 @@ export async function seedFirstInstallJobs(home, directory) {
   return Array.from({ length: 9 }, (_, i) => `historical-${i}`);
 }
 
-export async function completeFirstInstall(page, ffmpeg) {
+export async function completeFirstInstall(page, ffmpeg, ffmpegAvailable = false) {
   await page.locator('.wizard').waitFor();
   await page.locator('[data-pref=next]:not([disabled])').waitFor();
+  assert.equal(await page.locator('.wizard-steps > span.active').evaluate(el => Array.from(el.parentElement.children).indexOf(el)), 0);
+  const doctor = await page.evaluate(() => window.multiplane.doctor());
+  assert.equal(doctor.data.checks.find(check => check.name === 'ffmpeg')?.ok, ffmpegAvailable, 'Controlled FFmpeg availability must match the wizard scenario');
   await page.locator('[data-pref=next]').click();
-  await page.locator('#input-ffmpeg').fill(ffmpeg);
-  await page.locator('#input-ffmpeg').press('Enter');
-  await page.locator('[data-pref=next]:not([disabled])').waitFor();
-  await page.locator('[data-pref=next]').click();
+  if (!ffmpegAvailable) {
+    await page.locator('#input-ffmpeg').fill(ffmpeg);
+    assert.equal(await page.locator('.wizard-steps > span.active').evaluate(el => Array.from(el.parentElement.children).indexOf(el)), 1);
+    await page.locator('#input-ffmpeg').press('Enter');
+    await page.locator('[data-pref=next]:not([disabled])').waitFor();
+    const settings = await page.evaluate(() => window.multiplane.settings());
+    assert.equal(settings.values.ffmpeg, ffmpeg, 'Manual FFmpeg path must be persisted');
+    assert.match(await page.locator('.ffmpeg-feedback .mono').innerText(), /^ffmpeg version\s/i, 'The saved path must have successful FFmpeg feedback');
+    await page.locator('[data-pref=next]').click();
+  }
+  await page.locator('input[data-host=claude]').waitFor();
+  assert.equal(await page.locator('.wizard-steps > span.active').evaluate(el => Array.from(el.parentElement.children).indexOf(el)), 2);
+  assert.equal(await page.locator('#input-ffmpeg').count(), 0);
+  if (ffmpegAvailable) assert.ok(!(await page.evaluate(() => window.multiplane.settings())).values.ffmpeg, 'Skipped step must not save an explicit FFmpeg path');
   for (const host of ['claude', 'codex']) await page.locator(`input[data-host=${host}]`).check();
   await page.locator('[data-pref=next]').click();
+  await page.locator('[data-pref=hosted]').waitFor();
+  assert.equal(await page.locator('[data-pref=hosted]').getAttribute('aria-checked'), 'false');
+  await page.locator('[data-pref=next]').click();
   await page.locator('#jobs').waitFor();
+  return { ffmpegAvailable, steps: ffmpegAvailable ? [1, 3, 4] : [1, 2, 3, 4], manualPathSaved: !ffmpegAvailable };
 }

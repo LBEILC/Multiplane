@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>Adaptive blur benchmark</title>
+<style>
+html,body{margin:0}#stage{width:640px;height:360px;position:relative;overflow:hidden;background:#181818}
+#wheel{position:absolute;left:140px;top:40px;width:280px;height:280px}
+#text{position:absolute;left:24px;top:326px;font:18px sans-serif;color:#eee;white-space:nowrap}
+</style></head><body><div id="stage"><svg id="wheel" viewBox="-140 -140 280 280">
+<circle r="134" fill="none" stroke="#888" stroke-width="2"/><g id="spokes" fill="#eee"></g>
+<circle r="10" fill="#888"/></svg><div id="text">SLOW TRANSLATION 0123456789</div></div>
+<script>
+const wheel = document.querySelector('#wheel'), text = document.querySelector('#text');
+const spokes = document.querySelector('#spokes');
+for (let i = 0; i < 12; i++) {
+  const spoke = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  for (const [key, value] of Object.entries({ x: 12, y: -2, width: 116, height: 4, transform: `rotate(${i * 30})` })) spoke.setAttribute(key, value);
+  spokes.append(spoke);
+}
+// Slow / medium / fast plateaus stay continuous; the text always moves slowly.
+function angle(t) {
+  if (t < 0.4) return 30 * t;
+  if (t < 0.8) return 12 + 540 * (t - 0.4);
+  return 228 + 1440 * (t - 0.8);
+}
+window.SHOT = { duration: 1.2, fps: 30, ready: Promise.resolve(), render(t) {
+  wheel.style.transform = `rotate(${angle(t)}deg)`;
+  text.style.transform = `translateX(${t * 12}px)`;
+} };
+</script></body></html>

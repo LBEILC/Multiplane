@@ -4,21 +4,18 @@ import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import * as fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawnOwned, stopOwned } from './owned-process.mjs';
 
 export const rendererRoot = (packaged, resources, appPath) => packaged ? path.join(resources, 'renderer') : path.resolve(appPath, '..');
 export function execute(file, args, { env = process.env, cwd, timeout = 60000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { env, cwd, shell: false, windowsHide: true, detached: process.platform !== 'win32' });
+    const child = spawnOwned(file, args, { env, cwd, shell: false, windowsHide: true });
     let stdout = '', stderr = '';
     let failure, stopping;
     const stop = message => {
       if (stopping || !child.pid) return;
       failure = Error(message);
-      stopping = process.platform === 'win32' ? new Promise(done => {
-        const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
-        killer.once('error', done); killer.once('close', done);
-      }) : Promise.resolve().then(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } });
+      stopping = stopOwned(child).catch(error => { failure = Error(`${message}; cleanup failed: ${error.message}`); });
     };
     const timer = setTimeout(() => stop('Command timed out'), timeout);
     child.stdout.on('data', b => { stdout += b; if (stdout.length > 4e6) stop('Command output exceeded its limit'); });

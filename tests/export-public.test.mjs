@@ -13,7 +13,7 @@ test('export validation gives each npm step 30 minutes with tree cleanup and tim
     assert.equal(options.cwd, output);
     assert.equal(options.timeout, 1800000);
     assert.equal(options.killTree, true);
-    assert.equal(options.timeoutMessage(1801500), `Public export npm ${args[0]} timed out after 30.025 min (limit 30 min)`);
+    assert.equal(options.timeoutMessage(1801500), `Public export npm ${args.join(' ')} timed out after 30.025 min (limit 30 min)`);
   });
   assert.deepEqual(calls, [['ci'], ['test']]);
 });
@@ -21,7 +21,8 @@ test('export validation gives each npm step 30 minutes with tree cleanup and tim
 test('export validation stops on npm failure and preserves the error', async () => {
   for (const failedStep of ['ci', 'test']) {
     const failure = Error('npm failed'), calls = [];
-    await assert.rejects(validatePublicExport(path.resolve('public-test-output'), async ([command]) => {
+    await assert.rejects(validatePublicExport(path.resolve('public-test-output'), async (args) => {
+      const command = args.join(' ');
       calls.push(command);
       if (command === failedStep) throw failure;
     }), error => error === failure);

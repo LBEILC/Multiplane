@@ -1,6 +1,7 @@
 import './test-home.mjs';
 import { errorCodes } from '../src/errors.mjs';
 import test from 'node:test';
+import { fullTest } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -20,13 +21,13 @@ const cli = (args, extra = {}) => run(process.execPath, ['bin/multiplane', ...ar
 const silence = () => {};
 
 for (const name of ['animation', 'typography', 'three-cards']) {
-  test(`${name}: unordered, reload and single/multiple worker determinism`, { timeout: 120000 }, async () => {
+  (name === 'typography' ? test : fullTest)(`${name}: unordered, reload and single/multiple worker determinism`, { timeout: 120000 }, async () => {
     const result = await verifyShot(`examples/${name}.html`, { out: path.join(out, name, 'verify'), at: '0,0.5,1,1.5',
       grain: 2, workers: 2, onEvent: silence });
     assert.equal(result.ok, true);
     assert.equal(JSON.parse(await readFile(result.artifacts[0].path, 'utf8')).changedPixels, 0);
   });
-  test(`${name}: CLI encodes complete example to a playable video`, { timeout: 120000 }, async () => {
+  (name === 'typography' ? test : fullTest)(`${name}: CLI encodes complete example to a playable video`, { timeout: 120000 }, async () => {
     const file = path.join(out, name, 'video.mp4');
     const result = await cli(['render', `examples/${name}.html`, '--workers', '2', '--out', file, '--json']);
     assert.equal(result.code, 0, result.stdout + result.stderr);
@@ -43,7 +44,7 @@ for (const name of ['animation', 'typography', 'three-cards']) {
     assert.ok(bytes.indexOf(Buffer.from('moov')) < bytes.indexOf(Buffer.from('mdat')));
   });
 }
-test('stills and verify emit final NDJSON results; failures exit nonzero', { timeout: 120000 }, async () => {
+fullTest('stills and verify emit final NDJSON results; failures exit nonzero', { timeout: 120000 }, async () => {
   const result = await cli(['stills', 'examples/animation.html', '--at', '0.99,1', '--out', path.join(out, 'stills'), '--json']);
   assert.equal(result.code, 0, result.stdout + result.stderr);
   const report = result.stdout.trim().split('\n').map(JSON.parse).at(-1);
@@ -109,7 +110,7 @@ test('worker load failure propagates and closes the pool', { timeout: 15000 }, a
   finally { await pool.close(); }
 });
 
-for (const name of ['typography', 'three-cards']) test(`${name}: software rendering remains pixel deterministic across workers`, { timeout: 120000 }, async () => {
+for (const name of ['typography', 'three-cards']) fullTest(`${name}: software rendering remains pixel deterministic across workers`, { timeout: 120000 }, async () => {
   const result = await verifyShot(`examples/${name}.html`, { raster: 'software', out: path.join(out, name, 'software-verify'), at: '0,0.5', workers: 2, onEvent: silence });
   assert.equal(result.ok, true);
   assert.equal(JSON.parse(await readFile(result.artifacts[0].path, 'utf8')).changedPixels, 0);

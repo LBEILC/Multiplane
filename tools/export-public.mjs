@@ -4,8 +4,9 @@ import { readFile, lstat, mkdir, readdir, writeFile, rm, rmdir, chmod } from 'no
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { npm } from './process.mjs';
+import { ensureLocalFfmpeg } from '../tests/local-ffmpeg.mjs';
 
-export const excluded = name => ['AGENTS.md', 'docs/requirements.md', 'docs/internal.md', 'docs/design.md'].includes(name) || ['docs/roles/', 'docs/specs/', 'tools/reports/', '.claude/'].some(prefix => name.startsWith(prefix));
+export const excluded = name => ['AGENTS.md', 'docs/requirements.md', 'docs/internal.md', 'docs/design.md'].includes(name) || ['docs/roles/', 'docs/specs/', 'tools/reports/', '.claude/', 'app/design/preview.'].some(prefix => name.startsWith(prefix));
 const git = (root, args) => execFileSync('git', args, { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
 async function noLinks(file, root) {
   for (let current = path.resolve(file); current !== root; current = path.dirname(current)) {
@@ -162,9 +163,12 @@ export async function exportPublic(root, output, log = console.log, { message } 
   log(JSON.stringify(summary, null, 2)); return summary;
 }
 export async function validatePublicExport(output, npmCommand = npm) {
+  // The public copy has no per-machine settings of its own; use this checkout's FFmpeg for its tests.
+  ensureLocalFfmpeg();
   const timeout = 30 * 60000;
-  for (const command of ['ci', 'test']) {
-    await npmCommand([command], { cwd: output, timeout, killTree: true,
+  for (const args of [['ci'], ['test']]) {
+    const command = args.join(' ');
+    await npmCommand(args, { cwd: output, timeout, killTree: true,
       timeoutMessage: elapsed => `Public export npm ${command} timed out after ${Number((elapsed / 60000).toFixed(4))} min (limit ${timeout / 60000} min)` });
   }
 }
@@ -174,6 +178,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const output = path.resolve(process.argv[2]);
     await exportPublic(process.cwd(), output, console.log, { message: process.argv[4] });
     await validatePublicExport(output);
-    console.log('Public export: npm ci and npm test passed.');
+    console.log('Public export: npm ci and npm test (daily suite) passed.');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

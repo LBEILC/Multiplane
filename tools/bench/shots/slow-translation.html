@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8"><link rel="icon" href="data:,"><title>Slow translation benchmark</title>
+<style>html,body{margin:0}#stage{width:640px;height:360px;position:relative;overflow:hidden;background:#181818}i{position:absolute;left:80px;top:40px;width:400px;height:280px;background:repeating-linear-gradient(90deg,#eee 0 24px,#555 24px 48px)}</style>
+<div id="stage"><i></i></div><script>
+const panel = document.querySelector('i');
+window.SHOT = { duration: 1.2, fps: 30, render(t) {
+  panel.style.transform = `translateX(${12 * t}px)`;
+} };
+</script>

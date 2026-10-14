@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><link rel="icon" href="data:,"><title>Temporal sampling</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>#stage{width:528px;height:360px;background:#181818}#wheel{position:absolute;left:104px;top:20px;width:320px;height:320px}</style>
+<div id="stage"><svg id="wheel" viewBox="-160 -160 320 320"><circle r="154" fill="none" stroke="#888" stroke-width="2"/><g id="spokes" fill="#eee"></g><circle r="10" fill="#888"/></svg></div>
+<script src="/multiplane/runtime/shot.js"></script><script>
+const wheel = document.querySelector('#wheel');
+for (let i = 0; i < 12; i++) {
+  const spoke = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  for (const [key, value] of Object.entries({ x: 12, y: -2, width: 138, height: 4, transform: `rotate(${i * 30})` })) spoke.setAttribute(key, value);
+  document.querySelector('#spokes').append(spoke);
+}
+Shot.define({ duration: 2, fps: 30, render(t) { wheel.style.transform = `rotate(${1440 * t + 7}deg)`; } });
+</script></html>

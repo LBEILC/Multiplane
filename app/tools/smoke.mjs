@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { captureWindow, checkWindowControls, ensureWindowManager } from './window-smoke.mjs';
 import { checkEnvironmentIsolation } from './environment-smoke.mjs';
 import { captureFailure, privacyMasks } from './smoke-diagnostics.mjs';
+import { stopOwned } from '../src/main/owned-process.mjs';
 
 const appRoot = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const out = path.resolve(appRoot, '../out/ci/smoke'); await mkdir(out, { recursive: true });
@@ -65,7 +66,7 @@ try {
 }
 finally {
   try { await app?.close(); } catch (error) { evidence.cleanup = error.message; }
-  windowManager?.kill();
+  if (windowManager) await stopOwned(windowManager);
   // A passing run leaves nothing to inspect in its simulated profile; a failing one keeps it.
   if (!evidence.failure) await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(error => console.warn(`Could not remove ${work}: ${error.code || error.message}`));
   await writeFile(path.join(out, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n');

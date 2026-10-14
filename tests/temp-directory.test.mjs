@@ -18,7 +18,9 @@ const forbidden = new Set(['tmpdir', 'mkdtemp', 'mkdtempSync', 'mkdtempDisposabl
 test('test commands always preload the isolated renderer home', async () => {
   for (const [manifest, preload] of [['../package.json', './tests/test-home.mjs'], ['../app/package.json', '../tests/test-home.mjs']]) {
     const pkg = JSON.parse(await readFile(new URL(manifest, import.meta.url), 'utf8'));
-    assert.ok(pkg.scripts.test.includes(`--import ${preload}`));
+    for (const script of manifest === '../package.json' ? ['test', 'test:full'] : ['test']) {
+      assert.ok(pkg.scripts[script].includes(`--import ${preload}`));
+    }
   }
   const preload = await readFile(new URL('./test-home.mjs', import.meta.url), 'utf8');
   assert.match(preload, /process\.env\.MULTIPLANE_AGENT_HOME\s*=\s*createTempDirectory/);

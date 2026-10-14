@@ -1,26 +1,21 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnOwned, stopOwned } from '../src/main/owned-process.mjs';
 import { chromium } from 'playwright';
-import { run } from '../../tools/process.mjs';
 
-// Own the PID before connecting, including startup failures and timeouts.
+// Own the Windows job before connecting; owner exit closes the control pipe.
 export async function launchOwned(executable, env, onSpawn = () => {}) {
   if (process.platform !== 'win32') throw Error('Owned PID-tree diagnostics currently require Windows');
-  const child = spawn(executable, ['--inspect=0', '--remote-debugging-port=0'], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnOwned(executable, ['--inspect=0', '--remote-debugging-port=0'], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '', browser, socket, closing;
   child.stdout.on('data', b => { output += b; });
   child.stderr.on('data', b => { output += b; });
   child.on('error', e => { output += e.stack; });
-  const emergencyCleanup = () => {
-    if (child.pid && child.exitCode === null) spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-  };
-  process.once('exit', emergencyCleanup);
   const close = () => closing ??= (async () => {
     socket?.close();
-    if (child.exitCode === null) await run('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { capture: true });
+    await stopOwned(child);
     await browser?.close();
-    process.removeListener('exit', emergencyCleanup);
   })();
-  onSpawn({ pid: child.pid, close });
+  const diagnostics = () => ({ exitCode: child.exitCode, signalCode: child.signalCode, output: output.slice(-16000) });
+  onSpawn({ pid: child.pid, close, diagnostics });
   try {
     const wait = async fn => {
       const end = Date.now() + 30000;
@@ -44,6 +39,6 @@ export async function launchOwned(executable, env, onSpawn = () => {}) {
     const endpoint = await wait(() => output.match(/DevTools listening on (ws:\/\/\S+)/)?.[1]);
     browser = await chromium.connectOverCDP(endpoint);
     const page = await wait(() => browser.contexts()[0]?.pages()[0]);
-    return { page, firstWindow: async () => page, evaluate, close, pid: child.pid };
+    return { page, firstWindow: async () => page, evaluate, close, pid: child.pid, diagnostics };
   } catch (error) { await close(); throw error; }
 }

@@ -2,10 +2,25 @@ import { generateBrand } from './brand.mjs';
 import { build } from 'esbuild';
 import { mkdir, copyFile, cp, readFile, writeFile } from 'node:fs/promises';
 import { checkFont, prepareFont, copyFont } from './fonts.mjs';
+import path from 'node:path';
 await generateBrand();
 await mkdir('dist', { recursive: true });
 await Promise.all([
-  ...['main', 'preload', 'renderer'].map(part => build({ entryPoints: [`src/${part}/index.ts`], outfile: `dist/${part}.${part === 'renderer' ? 'js' : 'cjs'}`, bundle: true, platform: part === 'renderer' ? 'browser' : 'node', format: part === 'renderer' ? 'iife' : 'cjs', external: ['electron'], target: part === 'renderer' ? 'chrome140' : 'node24' })),
+  ...['main', 'preload', 'renderer'].map(async part => {
+    const result = await build({ entryPoints: [`src/${part}/index.ts`], outfile: `dist/${part}.${part === 'renderer' ? 'js' : 'cjs'}`, bundle: true, metafile: part === 'main', platform: part === 'renderer' ? 'browser' : 'node', format: part === 'renderer' ? 'iife' : 'cjs', external: ['electron'], target: part === 'renderer' ? 'chrome140' : 'node24' });
+    if (part === 'main') {
+      const roots = new Set();
+      for (const input of Object.keys(result.metafile.inputs)) {
+        if (!input.includes('node_modules/')) continue;
+        let directory = path.dirname(input);
+        while (directory !== '.') {
+          try { await readFile(path.join(directory, 'package.json')); roots.add(directory.replaceAll('\\', '/')); break; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; directory = path.dirname(directory); }
+        }
+      }
+      await writeFile('dist/bundled-dependencies.json', JSON.stringify([...roots].sort()) + '\n');
+    }
+  }),
   copyFile('src/renderer/style.css', 'dist/style.css'),
   copyFile('src/main/browser-worker.cjs', 'dist/browser-worker.cjs'),
   copyFile('design/tokens.css', 'dist/tokens.css'),

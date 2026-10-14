@@ -1,23 +1,29 @@
 import { launchOwned } from './owned-electron.mjs';
 import { mkdir, mkdtemp, writeFile, readFile, readdir, cp, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { run } from '../../tools/process.mjs';
 import { seedFirstInstallJobs, completeFirstInstall } from './first-install-flow.mjs';
 import { fileSnapshot } from './file-snapshot.mjs';
 import { isolateDevelopmentHome } from '../../tools/development-home.mjs';
+import { findCommand } from '../src/main/settings.mjs';
 
 isolateDevelopmentHome('037b');
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const [executable, ffmpeg, mode = 'single'] = process.argv.slice(2);
-assert.ok(executable && ffmpeg, 'Usage: node tools/diagnose-first-install.mjs <executable> <ffmpeg> [single|multi|lock]');
+const [executable, ffmpeg, mode = 'single', ffmpegState = 'missing'] = process.argv.slice(2);
+assert.ok(executable && ffmpeg, 'Usage: node tools/diagnose-first-install.mjs <executable> <ffmpeg> [single|multi|lock] [missing|available]');
 assert.ok(['single', 'multi', 'lock'].includes(mode));
+assert.ok(['missing', 'available'].includes(ffmpegState));
+// Doctor preserves a bare command name when FFmpeg came from PATH (as on CI).
+const ffmpegFile = path.isAbsolute(ffmpeg) || /[\\/]/.test(ffmpeg) ? path.resolve(ffmpeg) : await findCommand(path.parse(ffmpeg).name);
+assert.ok(ffmpegFile && existsSync(ffmpegFile), 'The doctor FFmpeg executable must resolve to an existing file');
 const installation = path.dirname(path.resolve(executable));
 const before = await fileSnapshot(installation);
 const out = path.join(root, 'out/037b'); await mkdir(out, { recursive: true });
-const work = await mkdtemp(path.join(out, `${mode}-`));
+const work = await mkdtemp(path.join(out, `${mode}-${ffmpegState}-`));
 const roaming = path.join(work, 'roaming'), user = path.join(work, 'user'), home = path.join(user, '.multiplane'), legacyHome = path.join(roaming, 'multiplane');
 for (const dir of [home, user, path.join(work, 'local'), path.join(user, 'AppData/Roaming'), path.join(user, 'AppData/Local'), path.join(user, '.claude'), path.join(user, '.codex')]) await mkdir(dir, { recursive: true });
 const expected = await seedFirstInstallJobs(legacyHome, path.join(work, 'jobs'));
@@ -25,11 +31,19 @@ const expected = await seedFirstInstallJobs(legacyHome, path.join(work, 'jobs'))
 // the platform default inside the fake profile to exercise home migration.
 const env = { ...process.env, APPDATA: roaming, LOCALAPPDATA: path.join(work, 'local'), HOME: user, USERPROFILE: user, MULTIPLANE_TEST_USER_HOME: user, PLAYWRIGHT_BROWSERS_PATH: path.join(work, 'browsers') };
 for (const key of ['ELECTRON_RUN_AS_NODE', 'MULTIPLANE_HOME', 'MULTIPLANE_APP_DATA', 'MULTIPLANE_FFMPEG', 'MULTIPLANE_NO_INDEX', 'MULTIPLANE_JOBS_DIR']) delete env[key];
+// Normalize Windows' case-insensitive PATH before changing only the child environment.
+const pathKeys = Object.keys(env).filter(key => key.toUpperCase() === 'PATH').sort();
+const inheritedPath = env[pathKeys[0]] ?? '';
+for (const key of pathKeys) delete env[key];
+const cleanPath = inheritedPath.split(path.delimiter).filter(directory => directory && !existsSync(path.join(directory.replace(/^"|"$/g, ''), 'ffmpeg.exe')));
+assert.equal(path.basename(ffmpegFile).toLowerCase(), 'ffmpeg.exe', 'PATH regression requires the real ffmpeg.exe');
+env.PATH = [...(ffmpegState === 'available' ? [path.dirname(ffmpegFile)] : []), ...cleanPath].join(path.delimiter);
 // Reuse an isolated verification cache only; never inspect the user's browser cache.
 const cache = process.env.MULTIPLANE_DIAGNOSTIC_BROWSER_CACHE;
 if (cache) await cp(cache, env.PLAYWRIGHT_BROWSERS_PATH, { recursive: true });
-const apps = [], evidence = { mode, expected, work, executable: path.resolve(executable), phases: [], errors: [] };
+const apps = [], evidence = { mode, ffmpegState, expected, work, executable: path.resolve(executable), phases: [], errors: [] };
 try {
+  console.log(`First-install FFmpeg scenario: ${ffmpegState}`);
   const launch = async () => {
     const app = await launchOwned(path.resolve(executable), env, owned => { apps.push(owned); console.log('owned PID', owned.pid); });
     const page = app.page; page.setDefaultTimeout(30000);
@@ -59,7 +73,7 @@ try {
     evidence.phases.push({ phase, ...value }); console.log(phase, value.snapshot.length, value.rows.length);
   };
   await observe('wizard');
-  await completeFirstInstall(page, path.resolve(ffmpeg));
+  evidence.wizard = await completeFirstInstall(page, ffmpegFile, ffmpegState === 'available');
   await observe('after-wizard');
   const project = path.join(work, 'project'); await mkdir(project);
   await cp(path.join(root, 'examples/animation.html'), path.join(project, 'animation.html'));
@@ -91,8 +105,8 @@ try {
     evidence.firstInstanceStillInWizard = await firstPage.evaluate(() => document.querySelector('.wizard') !== null);
     assert.equal(evidence.firstInstanceStillInWizard, true);
   }
-  console.log(JSON.stringify({ work, phases: evidence.phases, notifications: evidence.observed.notifications, result: evidence.result.ok }, null, 2));
-} catch (error) { evidence.failure = error.stack; throw error; }
+  console.log(JSON.stringify({ work, wizard: evidence.wizard, phases: evidence.phases, notifications: evidence.observed.notifications, result: evidence.result.ok }, null, 2));
+} catch (error) { evidence.failure = error.stack; evidence.processes = apps.map(app => app.diagnostics()); throw error; }
 finally {
   evidence.cleanup = await Promise.allSettled(apps.reverse().map(app => app.close()));
   evidence.pids = apps.map(app => app.pid);

@@ -1,6 +1,7 @@
 import releasePackage from '../package.json' with { type: 'json' };
 import './test-home.mjs';
 import test from 'node:test';
+import { fullTest } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
@@ -45,7 +46,7 @@ test('event stream is final, throttled, and identical to the job log', async () 
   assert.match(result.jobId, /^\d{8}-\d{6}-example-[0-9a-f]{4}$/);
 });
 
-test('all commands have structured success and failure, with separate stderr', { timeout: 120000 }, async () => {
+fullTest('all commands have structured success and failure, with separate stderr', { timeout: 120000 }, async () => {
   const shot = path.join(directory, 'tiny.html');
   await writeFile(shot, '<div id="stage" style="width:32px;height:32px;background:red"></div><script>console.log("browser-diagnostic");window.SHOT={duration:0.25,fps:4,render(){}}</script>');
   for (const command of ['render', 'stills', 'verify']) {
@@ -139,7 +140,7 @@ test('JS API errors retain code, details, final result and callback', async () =
   assert.equal(events.at(-1).type,'result');
 });
 
-test('known shot failures have specific codes and render time details', async () => {
+fullTest('known shot failures have specific codes and render time details', async () => {
   const cases = [
     ['contract', '<div></div>', 'shot_contract_invalid'],
     ['stage', '<script>window.SHOT={duration:1,render(){}}</script>', 'stage_size_invalid'],

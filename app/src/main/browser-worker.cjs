@@ -1,4 +1,8 @@
 // Exit normally so Playwright releases only its own installation lock.
+// The Windows job supervisor forwards cooperative cancellation over stdin.
+if (process.platform === 'win32') {
+  require('node:readline').createInterface({ input: process.stdin }).on('line', line => { if (line === 'cancel') process.exit(130); });
+}
 process.on('message', message => { if (message?.action === 'cancel') process.exit(130); });
 process.on('disconnect', () => process.exit(130));
 const path = require('node:path');

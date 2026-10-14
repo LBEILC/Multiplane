@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><link rel="icon" href="data:,"><title>Looping cards</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>#stage{width:960px;height:540px;background:#e6e8eb}</style>
+<script type="importmap">{"imports":{"three":"/multiplane/vendor/three/build/three.module.js","three/addons/":"/multiplane/vendor/three/examples/jsm/"}}</script>
+<div id="stage"></div><script src="/multiplane/runtime/shot.js"></script>
+<script type="module">
+import { createThreeLayer } from '/multiplane/three.js';
+const layer = createThreeLayer({ samples: 32, maxSamples: 64, aperture: 0.65, focusDistance: 8, rotateSamples: false });
+const cards = [0, 1, 2].map(i => layer.card({ src: `./assets/readme-card-${i}.svg`, width: 2.5, height: 3.1, radius: 0.08, border: { width: 0.025, color: '#26333a' } }));
+// Render seconds 1–5 for a four-second loop with unclamped shutter samples.
+Shot.define({ duration: 6, fps: 24, post: { motionBlur: 8, shutter: 0.8 }, setup: () => layer.ready,
+  render(t) {
+    const phase = t * Math.PI / 2;
+    cards.forEach((card, i) => {
+      const a = phase + i * Math.PI * 2 / 3;
+      card.position.set(Math.sin(a) * 2.7, Math.cos(a * 2) * 0.3, Math.cos(a) * 2);
+      card.rotation.set(0, Math.sin(a) * -0.35, Math.sin(a) * 0.06);
+    });
+    layer.render({ t, focusDistance: 8, aperture: 0.65 });
+  }
+});
+</script></html>

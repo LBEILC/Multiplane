@@ -62,7 +62,7 @@ export async function releaseCheck(root, log = console.log) {
     if (!pack) throw Error('Package inventory unavailable');
     const forbidden = forbiddenPackageFiles(files);
     if (!files.includes('README.md')) forbidden.push('Missing README.md');
-    if (!files.includes('README.zh-CN.md')) forbidden.push('Missing README.zh-CN.md');
+    if (!files.includes('README.en.md')) forbidden.push('Missing README.en.md');
     if (forbidden.length) throw Error('\n' + forbidden.join('\n'));
   });
   await check('README relative links', async () => {

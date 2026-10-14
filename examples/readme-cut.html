@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><link rel="icon" href="data:,"><title>Cut boundary</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>#stage{width:800px;height:450px}#shape{position:absolute;width:220px;height:220px;top:115px}</style>
+<div id="stage"><div id="shape"></div></div><script src="/multiplane/runtime/shot.js"></script><script>
+const stage = document.querySelector('#stage'), shape = document.querySelector('#shape');
+Shot.define({ duration: 2, fps: 30, cuts: [1], post: { motionBlur: 16, shutter: 1 }, render(t) {
+  stage.style.background = t < 1 ? '#14365d' : '#f1c85a';
+  shape.style.background = t < 1 ? '#73cef5' : '#30251a';
+  shape.style.left = t < 1 ? '100px' : '480px';
+  shape.style.borderRadius = t < 1 ? '50%' : '0';
+} });
+</script></html>

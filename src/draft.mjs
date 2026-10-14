@@ -14,8 +14,9 @@ export function draftScale(width, height, outputScale = 1) {
 
 export async function applyDraft(command, shot, explicit, configured, probe = {}) {
   if (!explicit.draft) return configured;
-  if (!['render', 'stills'].includes(command)) throw invalidOption('--draft', '--draft is supported by render and stills.');
+  if (!['render', 'stills', 'verify'].includes(command)) throw invalidOption('--draft', '--draft is supported by render, stills and verify.');
   const options = { ...configured, 'motion-blur': 1, grain: 0, upscale: 'lanczos', ...explicit, draft: true };
+  options['max-motion-blur'] = 1;
   if (options['no-post']) Object.assign(options, { 'motion-blur': 1, grain: 0, shutter: 0.5 });
   if (explicit['render-scale'] === undefined) {
     // TODO(design): Document the dimension preflight before start for --draft in the v1 protocol.

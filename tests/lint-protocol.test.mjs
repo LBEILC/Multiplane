@@ -1,11 +1,12 @@
 import './test-home.mjs';
 import test from 'node:test';
+import { fullTest } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
 import { run, createTempDirectory } from './helpers.mjs';
-import { cancelJob, statusJob, stillsShot, verifyShot, renderShot } from '../src/index.mjs';
+import { cancelJob, statusJob, waitJob, stillsShot, verifyShot, renderShot } from '../src/index.mjs';
 import { publishVideo } from '../src/artifacts.mjs';
 import { decodePNG } from '../src/png.mjs';
 import { warnGpuFallback } from '../src/environment.mjs';
@@ -18,7 +19,7 @@ await writeFile(shot, html);
 const opts = { 'job-dir': root };
 
 test('each command exposes human-readable help even with --json', async () => {
-  for (const command of ['render', 'stills', 'verify', 'lint', 'doctor', 'status', 'cancel']) {
+  for (const command of ['render', 'stills', 'verify', 'lint', 'doctor', 'status', 'cancel', 'wait']) {
     const result = await run(process.execPath, ['bin/multiplane', command, '--help', '--json']);
     assert.equal(result.code, 0); assert.ok(result.stdout.startsWith('Usage: multiplane ' + command));
     assert.match(result.stdout, /--json/); assert.ok(!result.stdout.includes('"schema"'));
@@ -26,13 +27,16 @@ test('each command exposes human-readable help even with --json', async () => {
   }
 });
 test('missing and corrupt snapshots use job_not_found; wait timeout retains snapshot', async () => {
-  for (const value of ['not json', 'null', '{}', '{"schema":"multiplane/1","pid":1,"state":"invalid"}']) {
+  for (const value of ['not json', 'null', '{}', '{"schema":"multiplane/1","pid":1,"state":123}']) {
     const job = createTempDirectory(path.join(root, 'corrupt-')); await writeFile(path.join(job, 'status.json'), value);
-    for (const action of [statusJob, cancelJob]) await assert.rejects(action(job), { code: 'job_not_found', exitCode: 2 });
+    for (const action of [statusJob, cancelJob, waitJob]) await assert.rejects(action(job), { code: 'job_not_found', exitCode: 2 });
   }
   const job = createTempDirectory(path.join(root, 'waiting-'));
-  await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid, state: 'running' }));
-  await assert.rejects(cancelJob(job, { wait: 0 }), error => error.code === 'cancel_timeout' && error.exitCode === 1 && error.result.data.state === 'running');
+  for (const state of ['running', 'queued', 'future-active-state']) {
+    await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid, state }));
+    assert.equal((await statusJob(job)).data.state, state);
+    await assert.rejects(cancelJob(job, { wait: 0 }), error => error.code === 'cancel_timeout' && error.exitCode === 1 && error.result.data.state === state);
+  }
 });
 test('doctor reports unsupported_node, dedicated software warning and a single-line reason', async () => {
   const preload = path.join(root, 'old-node.mjs');
@@ -57,7 +61,7 @@ test('default verification times are unique for sub-frame-duration shots', async
   const result = await verifyShot(shot, opts);
   assert.deepEqual(result.data.times, [0]);
 });
-test('overwrite replaces completed output only, for video and both directory commands', { timeout: 120000 }, async () => {
+fullTest('overwrite replaces completed output only, for video and both directory commands', { timeout: 120000 }, async () => {
   for (const [command, action] of [['render', renderShot], ['stills', stillsShot], ['verify', verifyShot]]) {
     const out = path.join(root, command === 'render' ? 'existing.mp4' : command);
     if (command === 'render') await writeFile(out, 'original');

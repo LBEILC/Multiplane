@@ -1,3 +1,4 @@
+import { resolveQuality } from './post.mjs';
 import { resolveFormat } from './format.mjs';
 import path from 'node:path';
 import { checkLint, scanShot } from './lint.mjs';
@@ -11,6 +12,7 @@ import { loadUserConfig, appendJobIndex, retryFileOperation } from './user-home.
 import { userHome } from './platform.mjs';
 import { applyDraft } from './draft.mjs';
 import { createResourceSampler } from './resources.mjs';
+import { hostedAvailable, hostedEnvironment, handoff, followJob } from './hosted.mjs';
 
 export const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
 export const jobDirectory = (options = {}, env = process.env) => path.resolve(options['job-dir'] ?? env.MULTIPLANE_JOBS_DIR ?? 'out/jobs');
@@ -22,11 +24,17 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
   if (job) {
     const stamp = startedAt.replaceAll('-', '').replaceAll(':', '').replace('T', '-').slice(0, 15);
     try {
-      mkdirSync(jobDirectory(options), { recursive: true });
-      for (;;) {
-        jobId = `${stamp}-${path.parse(shot).name}-${randomBytes(2).toString('hex')}`;
-        directory = path.join(jobDirectory(options), jobId);
-        try { mkdirSync(directory); break; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+      if (options['job-dir-exact']) {
+        directory = path.resolve(options['job-dir-exact']);
+        if (!statSync(directory).isDirectory()) throw Error('Missing executor job directory.');
+        jobId = path.basename(directory);
+      } else {
+        mkdirSync(jobDirectory(options), { recursive: true });
+        for (;;) {
+          jobId = `${stamp}-${path.parse(shot).name}-${randomBytes(2).toString('hex')}`;
+          directory = path.join(jobDirectory(options), jobId);
+          try { mkdirSync(directory); break; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+        }
       }
       // Exercise actual file creation, writing and removal before launching a browser.
       const probe = path.join(directory, '.write-check');
@@ -87,11 +95,16 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
     for (const handler of cancelHandlers) Promise.resolve().then(handler).catch(() => {});
   };
   const signals = job ? stopSignals().map(signal => [signal, requestStop]) : [];
-  for (const [signal, handler] of signals) process.on(signal, handler);
-  const timer = job ? setInterval(() => { if (existsSync(path.join(directory, 'stop'))) requestStop(); }, 100) : null;
-  timer?.unref();
+  let timer;
+  const monitor = () => {
+    if (!job || timer) return;
+    for (const [signal, handler] of signals) process.on(signal, handler);
+    timer = setInterval(() => { if (existsSync(path.join(directory, 'stop'))) requestStop(); }, 100);
+    timer.unref();
+  };
+  if (!options._hostedCLI) monitor();
   return {
-    directory, jobId, emit, warning, artifacts, options,
+    directory, jobId, emit, warning, artifacts, options, monitor,
     // TODO(design): Document memoryBytes in status.json (latest sample, null on failure).
     memory(bytes) { state.memoryBytes = bytes; state.updatedAt = new Date().toISOString(); save(); },
     preview(frame) { state.previewFrame = frame; state.updatedAt = new Date().toISOString(); save(); },
@@ -99,8 +112,8 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
       if (startedEvent) return;
       if (deferStart && !resolved) { save(); return; }
       startedEvent = true;
-      const { onEvent, _preview, _resources, _probeVideo, _inspectFFmpeg, ...effective } = options;
-      emit('start', { version, shot, ...(jobId ? { jobId } : {}), options: effective });
+      const { onEvent, _preview, _resources, _probeVideo, _inspectFFmpeg, _hostedCLI, ...effective } = options;
+      emit('start', { version, shot, ...(jobId ? { jobId } : {}), options: effective, ...(this.workersSource ? { workersSource: this.workersSource } : {}) });
       index('start', { command, shot, pid: process.pid });
       for (const [type, fields] of pendingEvents.splice(0)) emit(type, fields);
     },
@@ -126,22 +139,26 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
 }
 
 export async function runCommand(command, shot, options, action, job = true) {
-  let events, resources;
+  let events, resources, linted = false;
   try {
     const explicit = options;
     const user = loadUserConfig(command, options);
     options = user.options;
-    if (job || command === 'lint') {
+    if (['render', 'stills', 'verify'].includes(command)) {
+      options.quality = resolveQuality(options);
+      if (options.quality === 'draft') options.draft = true;
+    }
+    if (job || ['lint', 'inspect'].includes(command)) {
       if (typeof shot !== 'string' || !shot.trim()) throw invalidOption('shot', 'Provide a shot HTML path.');
       if (options.root !== undefined && typeof options.root !== 'string') throw invalidOption('--root', '--root must be a path.');
       shot = path.resolve(options.root ?? process.cwd(), shot);
     }
-    const positive = ['scale', 'render-scale', 'fps', 'workers', 'motion-blur', 'every', 'max-bitrate'];
+    const positive = ['scale', 'render-scale', 'fps', 'workers', 'motion-blur', 'max-motion-blur', 'every', 'max-bitrate'];
     for (const key of [...positive, 'from', 'to', 'shutter', 'grain', 'adaptive-blur', 'audio-offset', 'wait']) {
       if (options[key] === undefined) continue;
       const value = Number(options[key]);
       if (!String(options[key]).trim() || !Number.isFinite(value) || value < 0 || (positive.includes(key) && value === 0)
-        || (['workers', 'motion-blur'].includes(key) && !Number.isSafeInteger(value))) throw invalidOption(`--${key}`, `Invalid value for --${key}.`);
+        || (['workers', 'motion-blur', 'max-motion-blur'].includes(key) && !Number.isSafeInteger(value))) throw invalidOption(`--${key}`, `Invalid value for --${key}.`);
       options[key] = value;
     }
     if (command === 'render') {
@@ -161,19 +178,41 @@ export async function runCommand(command, shot, options, action, job = true) {
       ...(command === 'render' ? { from: 0, ...(options.format === 'mp4' ? { encoder: 'x264' } : {}), workers: defaultWorkers(Number(options.scale ?? 1)), ffmpeg: process.env.MULTIPLANE_FFMPEG ?? ffmpegName() } : {}),
       ...(command === 'verify' ? { workers: 2 } : {}),
       ...(command === 'stills' && options.at === undefined ? { every: 1 } : {}) }
-      : command === 'lint' ? { root: process.cwd() } : command === 'doctor' ? { raster: 'gpu', ffmpeg: process.env.MULTIPLANE_FFMPEG ?? ffmpegName() }
+      : ['lint', 'inspect', 'serve'].includes(command) ? { root: process.cwd() } : command === 'benchmark' ? { raster: 'gpu' }
+        : command === 'doctor' ? { raster: 'gpu', ffmpeg: process.env.MULTIPLANE_FFMPEG ?? ffmpegName() }
         : { 'job-dir': jobDirectory(options), ...(command === 'cancel' ? { wait: 30 } : {}) };
     // TODO(design): Document that start waits for effective shot alpha defaults.
     events = createEvents(command, shot, { ...defaults, ...options }, job, job && ['render', 'stills', 'verify'].includes(command));
+    events.config = user.config;
+    if (command === 'render') events.workersSource = explicit.workers !== undefined ? 'option' : user.config.applied.includes('workers') ? 'config' : 'estimate';
+    events.migration = user.migration;
+    if (options['hosted-executor']) events.start();
+    // Defer start events until the owner is known. Lint failure remains local.
+    if (await hostedAvailable(command, options)) {
+      if (!options['no-lint']) { await checkLint(shot, events.options, events); linted = true; }
+      events.start();
+      const request = { schema: 'multiplane/1', jobId: events.jobId, jobDir: events.directory,
+        command, args: options._hostedCLI.args, cwd: process.cwd(), node: process.execPath,
+        bin: options._hostedCLI.bin, env: hostedEnvironment(process.env), at: new Date().toISOString() };
+      const ownership = await handoff(request);
+      if (ownership.hosted) {
+        const directory = events.directory;
+        events.dispose(); events = undefined;
+        return await followJob(directory, { onBytes: options._hostedCLI.onBytes });
+      }
+      process.stderr.write('Rendering locally: ' + ownership.reason + '\n');
+    }
+    // CLI transport callbacks must never enter workerData or shot evaluation.
+    delete options._hostedCLI;
+    delete events.options._hostedCLI;
+    events.monitor();
     if (job) {
       resources = createResourceSampler({ enabled: options._resources !== false, onSample: events.memory });
       events.resources = resources;
     }
-    events.config = user.config;
-    events.migration = user.migration;
     if (options.draft) {
       // Keep lint and cancellation active before the dimension-only draft probe.
-      if (!options['no-lint']) {
+      if (!linted && !options['no-lint']) {
         const { findings, data } = await scanShot(shot, events.options);
         if (data.errors) {
           events.start();
@@ -181,7 +220,7 @@ export async function runCommand(command, shot, options, action, job = true) {
           throw new MultiplaneError('lint_failed', undefined, { result: { data } });
         }
       }
-      const normalized = Object.fromEntries(Object.keys(explicit).map(key => [key, options[key]]));
+      const normalized = { ...Object.fromEntries(Object.keys(explicit).filter(key => key !== '_hostedCLI').map(key => [key, options[key]])), draft: true };
       Object.assign(events.options, await applyDraft(command, shot, normalized, options, {
         check: events.check,
         onBrowser: browser => {
@@ -193,20 +232,21 @@ export async function runCommand(command, shot, options, action, job = true) {
     }
     events.start();
     for (const warning of user.warnings) events.warning(warning);
-    if (job && !options['no-lint']) await checkLint(shot, events.options, events);
+    if ((job || command === 'inspect') && !linted && !options['no-lint']) await checkLint(shot, events.options, events);
     if (job && options.out && !options.overwrite) await requireNewOutput(path.resolve(options.out));
     const data = job && ['stills', 'verify'].includes(command) && options.out && options.overwrite
       ? await directoryOutput(events, action) : await action(events);
     events.check();
     if (job) events.finalize();
-    if (resources) { await resources.stop(); data.resources = resources.snapshot(); }
+    if (resources) { await resources.stop(); data.resources = { ...resources.snapshot(), ...(events.workersSource ? { workersSource: events.workersSource } : {}) }; }
+    if (['render', 'stills', 'verify'].includes(command)) data.quality = options.quality;
     return events.finish(data);
   } catch (failure) {
     let error = asError(failure);
     try { events?.check(); } catch (cancelled) { error = cancelled; }
     events ??= createEvents(command, shot, options);
     await resources?.stop();
-    error.result = events.finish({ ...error.result?.data, ...(resources ? { resources: resources.snapshot() } : {}) }, error);
+    error.result = events.finish({ ...error.result?.data, ...(resources ? { resources: { ...resources.snapshot(), ...(events.workersSource ? { workersSource: events.workersSource } : {}) } } : {}) }, error);
     throw error;
   } finally { await resources?.stop(); events?.dispose(); }
 }

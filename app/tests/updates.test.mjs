@@ -1,0 +1,83 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { FakeUpdater } from './updates-fake.mjs';
+import { Updates, newerVersion, releasePage } from '../src/main/updates.mjs';
+import { Preferences } from '../src/main/store.mjs';
+import { createTempDirectory } from './helpers.mjs';
+import { rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const make = (extra = {}) => new Updates({ platform: 'win32', packaged: true, version: '0.3.0', updater: new FakeUpdater(), ...extra });
+
+test('Windows explicit download, progress, cancel/retry, install and no background install', async () => {
+  const updates = make(), fake = updates.updater, phases = [];
+  updates.publish = state => phases.push(state.phase);
+  assert.equal(fake.autoDownload, false); assert.equal(fake.autoInstallOnAppQuit, false); assert.equal(fake.allowPrerelease, false); assert.equal(fake.allowDowngrade, false);
+  assert.equal(fake.feed.repo, 'Multiplane');
+  updates.install(); await updates.download(); assert.equal(fake.installs + fake.downloads, 0);
+  await updates.check(); assert.equal(updates.state.phase, 'available'); assert.equal(fake.downloads, 0);
+  const download = updates.download(); await updates.download(); await updates.check(); assert.equal(fake.downloads, 1); assert.equal(fake.checks, 1);
+  fake.emit('download-progress', { percent: 35, transferred: 35, total: 100 }); assert.equal(updates.state.percent, 35);
+  updates.cancel(); fake.emit('download-progress', { percent: 90 }); await download;
+  assert.equal(updates.state.phase, 'available'); assert.equal(updates.state.percent, 0);
+  const retry = updates.download(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fake.checks, 2); assert.equal(fake.token.cancelled, false);
+  fake.resolveDownload([]); await retry; assert.equal(updates.state.phase, 'downloaded');
+  await updates.check(); assert.equal(updates.state.phase, 'downloaded'); assert.equal(fake.checks, 2);
+  updates.install(); updates.install(); assert.equal(fake.installs, 1); assert.deepEqual(fake.installArgs, [false, true]);
+  updates.close(); assert.ok(phases.includes('checking')); assert.ok(phases.includes('downloading'));
+});
+
+test('check, download and installation failures are recoverable and late events are ignored', async () => {
+  const u = make(), f = u.updater;
+  f.checkError = true; await u.check(); assert.equal(u.state.errorStage, 'check');
+  f.checkError = false; await u.check(); const pending = u.download(); f.rejectDownload(Error('offline')); await pending; assert.equal(u.state.errorStage, 'download');
+  f.emit('download-progress', { percent: 50 }); assert.equal(u.state.phase, 'error');
+  await u.check(); const retry = u.download(); f.resolveDownload([]); await retry;
+  f.installError = true; u.install(); assert.equal(u.state.errorStage, 'install'); assert.equal(u.state.phase, 'error');
+  await u.check(); assert.equal(u.state.phase, 'available');
+});
+
+test('updater eligibility is respected and closed checks cannot publish late results', async () => {
+  const u = make(); u.updater.available = false;
+  await u.check(); assert.equal(u.state.phase, 'current'); await u.download(); assert.equal(u.updater.downloads, 0);
+  let finish; u.updater.waitCheck = new Promise(resolve => { finish = resolve; });
+  const pending = u.check(); u.close(); let events = 0; u.publish = () => events++;
+  finish(); await pending; assert.equal(events, 0);
+});
+
+test('automatic startup/daily checks honor preferences, development and active operations', async () => {
+  let tick, interval, clears = 0;
+  const u = make({ timers: { setInterval(fn, ms) { tick = fn; interval = ms; return 1; }, clearInterval() { clears++; } } });
+  u.configureAutomatic(false); assert.equal(u.updater.checks, 0);
+  u.configureAutomatic(true); await new Promise(resolve => setImmediate(resolve)); assert.equal(u.updater.checks, 1); assert.equal(interval, 86400000);
+  tick(); await new Promise(resolve => setImmediate(resolve)); assert.equal(u.updater.checks, 2);
+  u.configureAutomatic(false); assert.ok(clears); await u.check(); assert.equal(u.updater.checks, 3);
+  u.close(); await u.check(); assert.equal(u.updater.checks, 3);
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    const dev = make({ platform, packaged: false, fetcher() { throw Error('must not fetch'); } });
+    dev.configureAutomatic(true); await dev.check(); await dev.download(); dev.install();
+    assert.equal(dev.state.phase, 'development'); assert.equal(dev.updater.checks, 0);
+  }
+});
+
+test('macOS/Linux use stable Release metadata only and cannot download/install', async () => {
+  for (const platform of ['darwin', 'linux']) {
+    let release = { tag_name: 'v0.3.1', body: 'Notes', html_url: 'https://untrusted.invalid/file', published_at: '2026-10-01' };
+    const u = make({ platform, fetcher: async (url, options) => { assert.match(url, /LBEILC\/Multiplane\/releases\/latest$/); assert.ok(options.signal); return { ok: true, json: async () => release }; } });
+    await u.check(); assert.equal(u.state.phase, 'manual'); assert.equal(u.state.releaseUrl, releasePage);
+    await u.download(); u.install(); assert.equal(u.updater.downloads + u.updater.installs + u.updater.checks, 0);
+    release = { ...release, tag_name: 'v0.3.0' }; await u.check(); assert.equal(u.state.phase, 'current');
+    release.prerelease = true; await u.check(); assert.equal(u.state.phase, 'error');
+  }
+  assert.equal(newerVersion('0.3.1-beta.1', '0.3.0'), false);
+  assert.equal(newerVersion('0.10.0', '0.9.0'), true);
+  assert.equal(newerVersion('0.2.9', '0.3.0'), false);
+});
+
+test('auto-check preference migrates to true and persists false independently of renderer config', async t => {
+  const dir = createTempDirectory('updates-prefs-'); t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(path.join(dir, 'preferences.json'), JSON.stringify({ theme: 'dark' }));
+  const prefs = new Preferences(dir); await prefs.load(); assert.equal(prefs.value.autoCheckUpdates, true);
+  await prefs.save({ autoCheckUpdates: false }); const next = new Preferences(dir); await next.load(); assert.equal(next.value.autoCheckUpdates, false); assert.equal(next.value.theme, 'dark');
+});

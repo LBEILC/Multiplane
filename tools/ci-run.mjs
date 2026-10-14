@@ -18,7 +18,7 @@ const log = path.join(logs, name + '.log'); await writeFile(log, '');
 // Persist every chunk so failed or interrupted jobs retain partial logs.
 const onOutput = (bytes, stream) => { appendFileSync(log, bytes); process[stream].write(bytes); };
 try {
-  const options = { cwd, capture: true, onOutput, timeout, killTree: true,
+  const options = { cwd: path.resolve(cwd), capture: true, onOutput, timeout, killTree: true,
     timeoutMessage: elapsed => `Step ${name} timed out after ${Number((elapsed / 60000).toFixed(4))} min (limit ${Number(minutes)} min)` };
   await (command === 'npm' ? npm(args, options) : run(command === 'node' ? process.execPath : command, args, options));
 } catch (error) {

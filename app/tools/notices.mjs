@@ -36,6 +36,19 @@ async function allFiles(root, prefix = '') {
   }
   return files.sort();
 }
+export async function desktopLicenseSources(app, directory) {
+  const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
+  const selected = (await licenseFiles(directory)).map(file => ({ source: path.join(directory, file), file }));
+  if (!selected.length && pkg.name === 'lazy-val' && pkg.version === '1.0.5' && pkg.license === 'MIT') {
+    selected.push({ source: path.join(directory, 'package.json'), file: 'package.json' }, { source: path.join(app, 'licenses/lazy-val-NOTICE.txt'), file: 'NOTICE.txt' });
+  }
+  if (!selected.length) throw Error(`Missing license text for ${pkg.name}@${pkg.version}`);
+  return { pkg, selected };
+}
+export function desktopLicenseLocation(relative) {
+  // Packagers prune node_modules directories even when they only contain notices.
+  return relative.slice('node_modules/'.length).replaceAll('/node_modules/', '/nested/');
+}
 export async function generateNotices(root, app, renderer, output) {
   await ensureElectron(app);
   const entries = [], inventory = [];
@@ -58,6 +71,16 @@ export async function generateNotices(root, app, renderer, output) {
     const location = path.relative(path.join(renderer, 'node_modules'), directory).replaceAll('\\', '/').replaceAll('/node_modules/', '/nested/');
     for (const file of files) licenses.push(await add(path.join(directory, file), `licenses/dependencies/${location}/${file}`));
     if (libvips) licenses.push(await add(path.join(root, 'licenses/native/vips-COPYING'), `licenses/dependencies/${location}/COPYING`));
+    inventory.push({ name: pkg.name, version: pkg.version, license: pkg.license, licenses });
+  }
+  // esbuild records the exact packages whose code is included in main.cjs.
+  for (const relative of JSON.parse(await readFile(path.join(output, 'bundled-dependencies.json'), 'utf8'))) {
+    const directory = path.resolve(app, relative);
+    if (path.relative(app, directory).startsWith('..') || !relative.startsWith('node_modules/')) throw Error('Invalid bundled dependency path');
+    const { pkg, selected } = await desktopLicenseSources(app, directory);
+    const licenses = [];
+    const location = desktopLicenseLocation(relative);
+    for (const { source, file } of selected) licenses.push(await add(source, `licenses/desktop/${location}/${file}`));
     inventory.push({ name: pkg.name, version: pkg.version, license: pkg.license, licenses });
   }
   for (const [name, directory, selected] of [

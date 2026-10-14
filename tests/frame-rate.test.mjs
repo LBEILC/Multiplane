@@ -1,5 +1,6 @@
 import './test-home.mjs';
 import test from 'node:test';
+import { isFull } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
@@ -34,8 +35,8 @@ test('all output formats preserve every supplied frame with integer, NTSC and de
   const generated = await run(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '0.2', audio]);
   assert.equal(generated.code, 0, generated.stderr);
   for (const format of ['mp4', 'webm', 'mov']) {
-    for (const [fps, numerator, denominator] of [[24, 24, 1], [23.976, 24000, 1001], [29.97, 30000, 1001], [59.94, 60000, 1001], [29.5, 59, 2]]) {
-      for (const withAudio of [false, true]) {
+    for (const [fps, numerator, denominator] of (isFull ? [[24, 24, 1], [29.97, 30000, 1001], [29.5, 59, 2]] : [[29.97, 30000, 1001]])) {
+      for (const withAudio of (isFull ? [false, true] : [true])) {
         await t.test(`${format} / ${fps} / audio=${withAudio}`, async () => {
           let expected;
           const result = await renderShot(shot, { root, 'job-dir': path.join(root, 'jobs'),

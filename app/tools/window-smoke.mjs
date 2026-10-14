@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { spawnOwned, stopOwned } from '../src/main/owned-process.mjs';
+import { run as runOwned } from '../../tools/process.mjs';
 import { promisify } from 'node:util';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -44,18 +46,19 @@ export async function trafficLightPixels(png, windowBounds, buttons) {
 
 export async function ensureWindowManager(evidence) {
   if (process.platform !== 'linux') return;
-  try { await run('wmctrl', ['-m']); evidence.windowManager = 'existing'; return; } catch { /* Xvfb alone has no window manager. */ }
-  const child = spawn('openbox', ['--sm-disable'], { stdio: 'ignore' });
+  const probe = () => runOwned('wmctrl', ['-m'], { capture: true, timeout: 30000 });
+  try { await probe(); evidence.windowManager = 'existing'; return; } catch { /* Xvfb alone has no window manager. */ }
+  const child = spawnOwned('openbox', ['--sm-disable'], { stdio: 'ignore' });
   let failure;
   child.on('error', error => { failure = error; });
   try {
     for (let i = 0; i < 50; i++) {
       if (failure) throw failure;
       if (child.exitCode !== null) throw Error('Openbox exited before becoming ready');
-      try { await run('wmctrl', ['-m']); evidence.windowManager = 'openbox'; return child; } catch { await delay(100); }
+      try { await probe(); evidence.windowManager = 'openbox'; return child; } catch { await delay(100); }
     }
     throw Error('No X11 window manager became ready');
-  } catch (error) { child.kill(); throw error; }
+  } catch (error) { await stopOwned(child); throw error; }
 }
 
 async function geometry(app) {

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><link rel="icon" href="data:,"><title>Depth comparison</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>#stage{width:800px;height:450px;background:#e6e8eb}</style>
+<script type="importmap">{"imports":{"three":"/multiplane/vendor/three/build/three.module.js","three/addons/":"/multiplane/vendor/three/examples/jsm/"}}</script>
+<div id="stage"></div><script src="/multiplane/runtime/shot.js"></script>
+<script type="module">
+import { createThreeLayer } from '/multiplane/three.js';
+const layer = createThreeLayer({ samples: 128, maxSamples: 128, adaptiveSamples: false, aperture: 0.7 });
+[-2.4, 0, 2.4].forEach((x, i) => layer.card({ src: './assets/readme-detail.svg', width: 2.35, height: 3.2,
+  position: [x, 0, 2 - i * 2], border: { width: 0.025, color: '#172c3e' } }));
+Shot.define({ duration: 2, fps: 24, setup: () => layer.ready,
+  render(t) { layer.render({ t, focusDistance: t < 1 ? 8 : 12, aperture: 0.7 }); }
+});
+</script></html>

@@ -6,7 +6,7 @@ import { userHome } from './platform.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { ffmpegOutput } from './ffmpeg.mjs';
 
-export const configKeys = ['ffmpeg', 'raster', 'encoder', 'workers', 'jobsDir'];
+export const configKeys = ['ffmpeg', 'raster', 'encoder', 'workers', 'jobsDir', 'hosted'];
 export async function probeFfmpeg(file) {
   const check = { usable: false, version: null, encoders: { libx264: false, 'libvpx-vp9': false, prores_ks: false }, reason: null };
   try {
@@ -46,10 +46,11 @@ export class Configuration {
     if (!configKeys.includes(key)) throw invalidOption('key', 'Unknown configuration key.');
     if (key === 'workers' && value === 'auto') value = null;
     if (value !== null) {
+      if (key === 'hosted' && ['true', 'false'].includes(value)) value = value === 'true';
       if (key === 'workers' && /^\d+$/.test(String(value))) value = Number(value);
       const valid = ['ffmpeg', 'jobsDir'].includes(key) ? typeof value === 'string' && !!value.trim() && !value.includes('\0')
         : key === 'raster' ? ['gpu', 'software'].includes(value) : key === 'encoder' ? ['x264', 'nvenc-h264', 'nvenc-hevc'].includes(value)
-          : Number.isSafeInteger(value) && value > 0;
+          : key === 'hosted' ? typeof value === 'boolean' : Number.isSafeInteger(value) && value > 0;
       if (!valid) throw invalidOption(key, 'Invalid configuration value.');
       if (['ffmpeg', 'jobsDir'].includes(key)) value = path.resolve(value);
     }

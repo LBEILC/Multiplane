@@ -54,3 +54,11 @@ test('CI default accepts successful commands and preserves ordinary failures', a
   const failure = await run(process.execPath, [wrapper, 'failure-test', root, 'node', '-e', 'process.exit(7)'], { env: baseEnv });
   assert.notEqual(failure.code, 0); assert.match(failure.stderr, /Command failed \(7\)/); assert.doesNotMatch(failure.stderr, /timed out/);
 });
+
+test('CI resolves a relative child directory before entering the owned process scope', async () => {
+  const result = await run(process.execPath, [wrapper, 'relative-cwd-test', 'app', 'node', '-e', 'console.log(JSON.stringify(process.cwd()))'], {
+    cwd: root, env: baseEnv,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(path.resolve(JSON.parse(result.stdout.trim())), path.resolve(root, 'app'));
+});

@@ -10,10 +10,11 @@ const fields = {
   raster: ['raster', v => ['gpu', 'software'].includes(v)],
   encoder: ['encoder', v => encoders.includes(v)],
   workers: ['workers', v => Number.isSafeInteger(v) && v > 0],
+  hosted: ['hosted', v => typeof v === 'boolean'],
 };
 const supported = command => command === 'render' ? Object.keys(fields)
-  : command === 'doctor' ? ['ffmpeg', 'raster'] : command === 'verify' ? ['jobsDir', 'raster', 'workers']
-    : command === 'stills' ? ['jobsDir', 'raster'] : ['status', 'cancel'].includes(command) ? ['jobsDir'] : [];
+  : command === 'benchmark' ? ['raster'] : command === 'doctor' ? ['ffmpeg', 'raster'] : command === 'verify' ? ['jobsDir', 'raster', 'workers', 'hosted']
+    : command === 'stills' ? ['jobsDir', 'raster', 'hosted'] : ['status', 'cancel', 'wait'].includes(command) ? ['jobsDir'] : [];
 
 // Share one bounded retry budget across lock acquisition and index operations.
 export function retryFileOperation(operation, deadline, { platform = process.platform, now = () => performance.now(), sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {

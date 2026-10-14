@@ -1,7 +1,16 @@
+import { readBenchmark, validBenchmark, benchmarkMachine } from './workers.mjs';
 import { runCommand } from './events.mjs';
 import { launchBrowser, environment, warnGpuFallback } from './environment.mjs';
 import { inspectFFmpeg, ffmpegOutput } from './ffmpeg.mjs';
 import { MultiplaneError } from './errors.mjs';
+
+export function benchmarkCheck(record, machine) {
+  const current = validBenchmark(record, machine);
+  const limits = Object.entries(record.shots ?? {}).filter(([, shot]) => shot?.limitedBy === 'memory')
+    .map(([type, shot]) => `${type}: 受内存限制，只测到 ${shot.points?.at(-1)?.workers ?? shot.workers} 个并发。`);
+  return { name: 'benchmark', ok: current,
+    detail: [current ? 'Local performance benchmark is current.' : '本机性能测试已过期。Run multiplane benchmark to retest; rendering can continue.', ...limits].join(' ') };
+}
 
 export const doctor = (options = {}) => runCommand('doctor', null, options, async events => {
   options = events.options;
@@ -17,6 +26,10 @@ export const doctor = (options = {}) => runCommand('doctor', null, options, asyn
     info = await environment(browser);
     checks.push({ name: 'gpu', ok: info.gpu.hardware, detail: `GPU renderer: ${info.gpu.renderer}.` });
     warnGpuFallback(events, info, options);
+    const record = readBenchmark();
+    if (record) {
+      checks.push(benchmarkCheck(record, benchmarkMachine(info, options.raster)));
+    }
   } catch (error) {
     failure ??= error;
     checks.push({ name: 'browser', ok: false, detail: error.message }, { name: 'gpu', ok: false, detail: 'GPU could not be inspected.' });

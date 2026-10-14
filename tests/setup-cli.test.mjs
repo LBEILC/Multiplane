@@ -32,7 +32,7 @@ test('config CLI validates every key, resolves paths, reports overrides and crea
   const f = await fixture(t);
   const initial = await f.command('config', 'get');
   assert.equal(initial.data.exists, false);
-  assert.deepEqual(initial.data.values, { ffmpeg: null, raster: null, encoder: null, workers: null, jobsDir: null });
+  assert.deepEqual(initial.data.values, { ffmpeg: null, raster: null, encoder: null, workers: null, jobsDir: null, hosted: null });
   const values = [['raster', 'gpu'], ['raster', 'software'], ['encoder', 'x264'], ['encoder', 'nvenc-h264'], ['encoder', 'nvenc-hevc'], ['workers', '3'], ['jobsDir', 'space directory'], ['ffmpeg', 'missing ffmpeg']];
   for (const [key, value] of values) {
     const saved = await f.command('config', 'set', key, value);

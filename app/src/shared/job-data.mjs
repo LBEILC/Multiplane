@@ -4,10 +4,11 @@ const artifacts = value => Array.isArray(value) ? value.filter(a => object(a) &&
 // Normalize only the desktop snapshot; never rewrite renderer-owned files.
 export function jobData(value, report = (_error) => {}) {
   if (!object(value) || typeof value.jobId !== 'string' || typeof value.shot !== 'string'
-    || !['running', 'succeeded', 'failed', 'cancelled'].includes(value.state)) {
+    || typeof value.state !== 'string') {
     report(Error('Invalid job identity, shot or state')); return null;
   }
   const job = { ...value };
+  if (!['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(job.state)) job.state = 'running';
   for (const field of ['startedAt', 'updatedAt', 'command']) if (typeof job[field] !== 'string') {
     report(Error(`Job ${job.jobId}: missing or invalid ${field}`)); job[field] = '';
   }

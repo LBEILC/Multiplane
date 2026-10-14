@@ -551,3 +551,33 @@ button.primary:disabled { background: var(--surface-2); border-color: transparen
 :lang(en) .filters .sel { max-width: none; }
 :lang(en) #state-filter { flex: 1.5; }
 :lang(en) .check-row { grid-template-columns: 128px minmax(0,1fr) auto; }
+
+/* Update card follows the approved About preview. */
+.upd-card { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); padding: 14px 16px; margin-top: 8px; }
+.upd-head { display: flex; align-items: flex-start; gap: 10px; }
+.upd-head > i { font-size: 18px; line-height: 20px; }
+.upd-head > div:first-of-type { display: grid; gap: 2px; min-width: 0; max-width: 520px; }
+.upd-head b { font-weight: 500; }
+.upd-head small { color: var(--text-2); font-size: 12px; line-height: 18px; }
+.upd-head .sp { flex: 1; }
+.upd-actions { display: flex; gap: 8px; flex: none; }
+.upd-card progress { width: 100%; height: 6px; margin-top: 12px; accent-color: var(--info); }
+.upd-card .notes { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--divider); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.upd-tip { margin-top: 10px; font-size: 12px; color: var(--text-2); }
+.nav .upd-hint { display: flex; align-items: center; gap: 6px; height: 26px; margin: 0 -4px 4px; padding: 0 6px; border: 0; border-radius: 6px; background: var(--info-bg); color: var(--info); font-size: 12px; }
+.nav .upd-hint[hidden] { display: none; }
+.nav .upd-hint:hover { background: color-mix(in srgb, var(--info) 18%, transparent); }
+.upd-setting { grid-template-columns: minmax(0,1fr) auto; }
+.upd-switch { width: 34px; height: 20px; border-radius: 10px; background: var(--border); position: relative; border: 0; padding: 0; }
+.upd-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.upd-switch[aria-checked=true] { background: var(--toggle-on); }
+.upd-switch[aria-checked=true]::after { transform: translateX(14px); background: var(--toggle-knob-on); }
+.upd-head .info { color: var(--info); }
+
+.tag.hosted { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: 11px; line-height: 18px; color: var(--text-2); background: var(--surface-2); font-weight: 400; }
+.detail-head .hosted { margin-left: 8px; vertical-align: middle; }
+.row-top .hosted { margin-right: auto; }
+.nav-foot #hosting-status { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; }
+.nav-foot #hosting-status i { font-size: 13px; }
+.row-top .tag.stuck { color: var(--warn); }
+.tag.queued { color: var(--text-2); }

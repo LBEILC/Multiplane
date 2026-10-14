@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8"><link rel="icon" href="data:,"><title>Small translation benchmark</title>
+<style>html,body{margin:0}#stage{width:640px;height:360px;position:relative;overflow:hidden;background:#181818}i{position:absolute;top:172px;width:16px;height:16px;background:#eee}</style>
+<div id="stage"><i></i></div><script>
+const square = document.querySelector('i');
+window.SHOT = { duration: 1.2, fps: 30, render(t) {
+  square.style.transform = `translateX(${40 + 240 * t + 120 * Math.sin(12 * t)}px)`;
+} };
+</script>

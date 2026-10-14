@@ -51,6 +51,8 @@ export async function generateBrand() {
   const scale = 64 / 84;
   const tile = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1E1C1A"/><path fill="#F4F1EC" transform="translate(${f(50 - 50 * scale)} ${f(50 - 52 * scale)}) scale(${f(scale)})" d="${d}"/></svg>\n`;
   await writeFile(path.join(design, 'mark.svg'), mark); await writeFile(path.join(design, 'app.svg'), tile);
+  const traySvg = mark.replace('currentColor', '#000000');
+  for (const [name, size] of [['trayTemplate.png', 16], ['trayTemplate@2x.png', 32], ['tray.png', 32]]) await writeFile(path.join(build, name), await sharp(Buffer.from(traySvg)).resize(size, size).png().toBuffer());
   const images = [];
   for (const size of [16, 24, 32, 48, 64, 128, 256, 512, 1024]) {
     const png = await sharp(Buffer.from(tile), { density: size * 72 / 100 }).resize(size, size).png().toBuffer();

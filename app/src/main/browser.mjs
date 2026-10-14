@@ -2,7 +2,7 @@ import { t } from '../shared/i18n.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { userError } from '../shared/errors.mjs';
-import { spawn } from 'node:child_process';
+import { spawnOwned, stopOwned } from './owned-process.mjs';
 
 export class BrowserInstaller {
   child = null;
@@ -14,7 +14,7 @@ export class BrowserInstaller {
     const status = this.statusKey ? t(this.statusKey, values) : '';
     return { running: this.rawState.running, text: [status, this.rawState.text].filter(Boolean).join('\n') };
   }
-  constructor(root, notify, worker, launch = spawn) { this.root = root; this.notify = notify; this.worker = worker; this.launch = launch; }
+  constructor(root, notify, worker, launch = spawnOwned) { this.root = root; this.notify = notify; this.worker = worker; this.launch = launch; }
   refresh() { this.notify(this.state); }
   publish(patch) { this.rawState = { ...this.rawState, ...patch }; this.refresh(); }
   start() {
@@ -41,14 +41,7 @@ export class BrowserInstaller {
     const child = this.child;
     // A normal exit runs Playwright's lock cleanup; its downloader exits on IPC disconnect.
     await new Promise(resolve => {
-      const fallback = () => {
-        if (process.platform !== 'win32') {
-          try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') child.kill('SIGKILL'); }
-          return;
-        }
-        const killer = this.launch('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { shell: false, windowsHide: true, stdio: 'ignore' });
-        killer.once('error', () => child.kill());
-      };
+      const fallback = () => { stopOwned(child).catch(error => { this.statusKey = 'installError'; this.statusValues = { error }; this.refresh(); resolve(); }); };
       const timer = setTimeout(fallback, 5000);
       child.once('close', () => { clearTimeout(timer); resolve(); });
       try { child.send({ action: 'cancel' }, error => { if (error) { clearTimeout(timer); fallback(); } }); }

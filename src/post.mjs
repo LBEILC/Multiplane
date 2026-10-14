@@ -1,3 +1,5 @@
+import { reuseEnabled, reuseState, reuseReport, REUSE_INTERVAL } from './static-reuse.mjs';
+import { pixelDifference, classifyPixelDifference } from './pixel-comparison.mjs';
 import { averageAlpha, resizeAlpha, clearHiddenColors } from './alpha.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { number, validateScale } from './capture.mjs';
@@ -6,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { decodeNativePNG } from './png-native.mjs';
 import sharp from 'sharp';
 
-export const postArgs = ['motion-blur', 'shutter', 'grain', 'no-post', 'adaptive-blur'];
+export const postArgs = ['quality', 'motion-blur', 'max-motion-blur', 'shutter', 'grain', 'no-post', 'adaptive-blur'];
 export const scaleArgs = ['scale', 'render-scale', 'upscale'];
 export const DEFAULT_ADAPTIVE_BLUR = 0.5;
 
@@ -41,11 +43,66 @@ export async function resizeImage(image, width, height, upscale) {
     .resize(width, height, { kernel: upscale === 'neighbor' ? 'nearest' : 'lanczos3' }).raw().toBuffer();
   return { width, height, data };
 }
+export function resolveQuality(options = {}) {
+  const quality = options.quality ?? (options.draft ? 'draft' : 'standard');
+  if (!['draft', 'standard', 'high'].includes(quality) || (options.draft && quality !== 'draft')) throw invalidOption('--quality', 'Quality must be draft, standard or high, and agree with --draft.');
+  return quality;
+}
+
 export function resolvePost(options = {}, post = {}) {
-  if (options['no-post']) return { motionBlur: 1, shutter: 0.5, grain: 0 };
+  const quality = resolveQuality(options);
+  if (options['no-post']) return { motionBlur: 1, maxMotionBlur: 1, shutter: 0.5, grain: 0 };
   const motionBlur = number(options['motion-blur'] ?? post.motionBlur ?? 1, 'motionBlur', { positive: true });
   if (!Number.isSafeInteger(motionBlur)) throw invalidOption('motionBlur', 'motionBlur must be a positive integer.');
-  return { motionBlur, shutter: number(options.shutter ?? post.shutter ?? 0.5, 'shutter'), grain: number(options.grain ?? post.grain ?? 0, 'grain') };
+  const maxMotionBlur = number(quality === 'draft' ? 1 : options['max-motion-blur'] ?? post.maxMotionBlur ?? (quality === 'high' ? 256 : 64), 'maxMotionBlur', { positive: true });
+  if (!Number.isSafeInteger(maxMotionBlur)) throw invalidOption('maxMotionBlur', 'maxMotionBlur must be a positive integer.');
+  // TODO(design): Document max <= base as disabling upward adaptation, including draft overrides.
+  return { motionBlur, maxMotionBlur, shutter: number(options.shutter ?? post.shutter ?? 0.5, 'shutter'), grain: number(options.grain ?? post.grain ?? 0, 'grain') };
+}
+
+// Local temporal change divided by spatial edge strength estimates displacement.
+// Edge normalization avoids treating dense text as faster than a single straight edge.
+export function localMotionDifference(a, b, alpha = false, stopAbove = Infinity) {
+  if (a.width !== b.width || a.height !== b.height) throw new MultiplaneError('internal_error', 'Sample dimensions differ.');
+  let maximum = 0;
+  const channels = alpha ? 4 : 3;
+  const value = (image, p, c) => image.data[p + c] * (alpha && c < 3 ? image.data[p + 3] / 255 : 1);
+  for (let y = 0; y < a.height; y += 8) for (let x = 0; x < a.width; x += 8) {
+    const right = Math.min(x + 8, a.width), bottom = Math.min(y + 8, a.height);
+    let changed = false;
+    for (let yy = y; yy < bottom && !changed; yy++) for (let xx = x; xx < right && !changed; xx++) {
+      const p = (yy * a.width + xx) * 4;
+      for (let c = 0; c < channels; c++) if (value(a, p, c) !== value(b, p, c)) { changed = true; break; }
+    }
+    if (!changed) continue;
+    const sums = [0, 0, 0, 0], edgesA = [0, 0, 0, 0], edgesB = [0, 0, 0, 0];
+    for (let yy = y; yy < bottom; yy++) for (let xx = x; xx < right; xx++) {
+      const p = (yy * a.width + xx) * 4;
+      for (let c = 0; c < channels; c++) {
+        const av = value(a, p, c), bv = value(b, p, c);
+        sums[c] += Math.abs(av - bv);
+        if (xx > 0) {
+          edgesA[c] += Math.abs(av - value(a, p - 4, c));
+          edgesB[c] += Math.abs(bv - value(b, p - 4, c));
+        }
+        if (yy > 0) {
+          edgesA[c] += Math.abs(av - value(a, p - a.width * 4, c));
+          edgesB[c] += Math.abs(bv - value(b, p - b.width * 4, c));
+        }
+      }
+    }
+    // A byte-scale floor bounds division in flat or nearly flat blocks.
+    for (let c = 0; c < channels; c++) maximum = Math.max(maximum, sums[c] / Math.max(16, edgesA[c], edgesB[c]));
+    if (maximum > stopAbove) return maximum;
+  }
+  return maximum;
+}
+
+export function blurSampleReport(histogram) {
+  const entries = Object.entries(histogram).map(([n, count]) => [Number(n), count]).filter(([, count]) => count > 0).sort((a, b) => a[0] - b[0]);
+  const frames = entries.reduce((sum, [, count]) => sum + count, 0);
+  return { min: entries[0]?.[0] ?? 0, max: entries.at(-1)?.[0] ?? 0,
+    mean: frames ? entries.reduce((sum, [n, count]) => sum + n * count, 0) / frames : 0, histogram: Object.fromEntries(entries) };
 }
 
 export function sampleTimes(t, fps, duration, cuts, { motionBlur, shutter }) {
@@ -55,6 +112,34 @@ export function sampleTimes(t, fps, duration, cuts, { motionBlur, shutter }) {
     else hi = Math.min(hi, Math.max(t, c - 1e-6));
   }
   return Array.from({ length: motionBlur }, (_, i) => Math.min(hi, Math.max(lo, t + ((i + 0.5) / motionBlur - 0.5) * shutter / fps)));
+}
+
+// Work backwards from the final midpoint grid. Mirrored pairs keep the
+// centroid at zero; each smaller level chooses evenly spaced remaining pairs.
+export function nestedSampleGrids(t, fps, duration, cuts, post) {
+  const counts = [post.motionBlur];
+  while (counts.at(-1) < post.maxMotionBlur) counts.push(Math.min(post.maxMotionBlur, counts.at(-1) * 2));
+  const maximum = counts.at(-1);
+  let pairs = Array.from({ length: Math.floor(maximum / 2) }, (_, i) => (i + 0.5) / maximum - 0.5);
+  const grids = new Map();
+  for (const count of [...counts].reverse()) {
+    const size = Math.floor(count / 2);
+    let first = 0;
+    pairs = Array.from({ length: size }, (_, i) => {
+      const target = (i + 0.5) / count - 0.5;
+      let best = first;
+      for (let j = first + 1; j <= pairs.length - (size - i); j++) {
+        if (Math.abs(pairs[j] - target) < Math.abs(pairs[best] - target)) best = j;
+      }
+      first = best + 1;
+      return pairs[best];
+    });
+    const offsets = [...pairs, ...(count % 2 ? [0] : []), ...pairs.map(x => -x)].sort((a, b) => a - b);
+    // Reuse the existing clipping rules, including the cut epsilon.
+    const bounds = sampleTimes(t, fps, duration, cuts, { motionBlur: 2, shutter: post.shutter * 2 });
+    grids.set(count, offsets.map(x => Math.min(bounds[1], Math.max(bounds[0], t + x * post.shutter / fps))));
+  }
+  return grids;
 }
 
 const linear = Float64Array.from({ length: 256 }, (_, i) => {
@@ -131,9 +216,11 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
   validateScale(capture.width, capture.height, sizes.scale);
   validateScale(capture.width, capture.height, sizes.renderScale, '--render-scale');
   const adaptive = number(options['adaptive-blur'] ?? DEFAULT_ADAPTIVE_BLUR, '--adaptive-blur');
-  const post = resolvePost(options, capture.post), stats = { samples: 0, staticFrames: 0, adaptiveFrames: 0, hookFrames: 0, reusedDecodes: 0, frames: 0, captureMs: 0, decodeMs: 0, averageMs: 0, grainMs: 0, pngMs: 0, resizeMs: 0 };
+  const post = resolvePost(options, capture.post), stats = { samples: 0, staticFrames: 0, adaptiveFrames: 0, hookFrames: 0, reusedDecodes: 0, frames: 0, observeMs: 0, auditMs: 0, captureMs: 0, decodeMs: 0, averageMs: 0, grainMs: 0, pngMs: 0, resizeMs: 0 };
   const timed = (key, fn) => { const start = performance.now(); const value = fn(); stats[key] += performance.now() - start; return value; };
-  let decodedCache;
+  let decodedCache, previousRaw;
+  const state = reuseState(options);
+  const enabled = reuseEnabled(options) && !!capture.observe;
   const decode = async (png, reuse = false) => {
     if (reuse && decodedCache?.png.equals(png)) { stats.reusedDecodes++; return decodedCache.image; }
     const start = performance.now();
@@ -149,8 +236,9 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
   };
   const api = {
     post, stats,
+    get staticReuse() { return reuseReport(options); },
     progress: () => `Samples: ${stats.samples}; static: ${stats.staticFrames}; adaptive: ${stats.adaptiveFrames}; hooks: ${stats.hookFrames}`,
-    async frame(t, frame = Math.round(t * fps)) {
+    async frame(t, frame = Math.round(t * fps), audit = false) {
       let motionBlur = post.motionBlur;
       const hooked = motionBlur > 1 && typeof capture.blurAt === 'function';
       if (hooked) {
@@ -159,15 +247,42 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         motionBlur = Math.min(requested, motionBlur);
         stats.hookFrames++;
       }
-      const times = sampleTimes(t, fps, capture.duration, capture.cuts, { ...post, motionBlur });
+      // Explicit shot hooks retain their existing authority over sampling.
+      // TODO(design): Document that blurAt bypasses upward adaptation.
+      const upward = !hooked && motionBlur > 1 && post.maxMotionBlur > motionBlur;
+      const initialMotionBlur = motionBlur;
+      const grids = upward ? nestedSampleGrids(t, fps, capture.duration, capture.cuts, post) : null;
+      const endpoints = sampleTimes(t, fps, capture.duration, capture.cuts, { motionBlur: 2, shutter: post.shutter * 2 });
+      const times = sampleTimes(t, fps, capture.duration, capture.cuts, { ...post, motionBlur: upward ? Math.max(2, motionBlur) : motionBlur });
+      let candidate = false, uniform = motionBlur === 1, observedTime;
+      if (enabled && !Atomics.load(state, 0)) {
+        const probes = [...new Set(motionBlur === 1 && !upward ? [t] : [...endpoints, ...times, t])].sort((a, b) => a - b);
+        const changes = [];
+        const observeStart = performance.now();
+        for (const time of probes) {
+          changes.push(await capture.observe(time, { motionBlur }));
+          observedTime = time;
+          if (changes.at(-1)) break;
+        }
+        stats.observeMs += performance.now() - observeStart;
+        uniform = !changes.some(Boolean);
+        const nearCut = capture.cuts.some(c => Math.abs(t - c) <= 1 / fps + 1e-9 || (previousRaw && c > previousRaw.t && c <= t));
+        candidate = !!previousRaw && previousRaw.uniform && previousRaw.motionBlur === motionBlur
+          && frame === previousRaw.frame + 1 && t > previousRaw.t && !nearCut && !changes.some(Boolean);
+      }
+      const verifyReuse = candidate && (audit || previousRaw.run === 0 || frame % REUSE_INTERVAL === 0);
       const cache = new Map();
+      let contextUsed = false;
       const sample = async (time, reuse = false) => {
         if (!cache.has(time)) {
           const start = performance.now();
-          const png = await capture.frame(time, { motionBlur });
+          const observed = time === observedTime;
+          observedTime = undefined;
+          const png = await capture.frame(time, { motionBlur, observed });
+          contextUsed ||= capture.sampleContextUsed === true;
           stats.captureMs += performance.now() - start;
           stats.samples++;
-          cache.set(time, { png, image: post.motionBlur > 1 || post.grain > 0 ? await decode(png, reuse) : null });
+          cache.set(time, { png, image: post.motionBlur > 1 || upward || post.grain > 0 ? await decode(png, reuse) : null });
         }
         return cache.get(time);
       };
@@ -179,7 +294,10 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
           return;
         }
         const begin = async time => {
-          const start = performance.now(), pending = await capture.beginFrame(time, { motionBlur });
+          const start = performance.now(), observed = time === observedTime;
+          observedTime = undefined;
+          const pending = await capture.beginFrame(time, { motionBlur, observed });
+          contextUsed ||= capture.sampleContextUsed === true;
           const png = pending.png.then(buffer => { stats.captureMs += performance.now() - start; return buffer; });
           png.catch(() => {});
           return { png };
@@ -193,8 +311,49 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
           pending = next;
         }
       };
-      let png, result;
-      if (motionBlur === 1) ({ png, image: result } = await sample(t));
+      const auditStart = performance.now();
+      let png, result, usedSamples = motionBlur;
+      if (candidate && !verifyReuse) { ({ png, image: result, usedSamples } = previousRaw); }
+      else if (upward) {
+        // Calibrated in capture raster pixels: about 2px for standard, 1px for high.
+        const threshold = resolveQuality(options) === 'high' ? 1 : 2;
+        await sampleMany([...endpoints, t], true);
+        const centerProbe = cache.get(t);
+        const still = endpoints.every(time => cache.get(time).image.data.equals(centerProbe.image.data));
+        let legacy = contextUsed;
+        let grid = legacy ? times : grids.get(motionBlur);
+        if (still) {
+          png = centerProbe.png; result = centerProbe.image; usedSamples = 1;
+          stats.staticFrames++; stats.adaptiveFrames++;
+        } else {
+          if (legacy) cache.clear();
+          while (true) {
+            await sampleMany([...grid, t], true);
+            // A conditional read discovered after the probes restarts the frame
+            // on the old grids. No image from a different sample context survives.
+            if (contextUsed && !legacy) {
+              legacy = true; motionBlur = initialMotionBlur;
+              cache.clear(); observedTime = undefined; grid = times; continue;
+            }
+            const images = grid.map(time => cache.get(time).image), center = cache.get(t);
+            const identical = images.every(image => image.data.equals(center.image.data));
+            if (identical) {
+              png = center.png; result = center.image; usedSamples = 1;
+              stats.staticFrames++; stats.adaptiveFrames++; break;
+            }
+            let difference = 0;
+            for (let i = 1; i < images.length && difference <= threshold; i++) difference = Math.max(difference, localMotionDifference(images[i - 1], images[i], alpha, threshold));
+            if (difference <= threshold || motionBlur >= post.maxMotionBlur) {
+              usedSamples = motionBlur;
+              result = timed('averageMs', () => average(images)); break;
+            }
+            motionBlur = Math.min(post.maxMotionBlur, motionBlur * 2);
+            if (legacy) cache.clear();
+            observedTime = undefined;
+            grid = legacy ? sampleTimes(t, fps, capture.duration, capture.cuts, { ...post, motionBlur }) : grids.get(motionBlur);
+          }
+        }
+      } else if (motionBlur === 1) ({ png, image: result } = await sample(t));
       else if (hooked) {
         await sampleMany(times);
         result = timed('averageMs', () => average(times.map(time => cache.get(time).image)));
@@ -203,7 +362,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         const first = cache.get(times[0]), last = cache.get(times.at(-1));
         const identical = first.image.data === last.image.data || first.image.data.equals(last.image.data);
         if (identical || (!alpha && imageDifference(first.image, last.image) < adaptive)) {
-          png = first.png; result = first.image; stats.adaptiveFrames++;
+          png = first.png; result = first.image; usedSamples = 1; stats.adaptiveFrames++;
           if (identical) stats.staticFrames++;
         } else {
           await sampleMany(times);
@@ -213,13 +372,31 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         await sampleMany([times[0], times.at(-1), t]);
         const first = cache.get(times[0]), last = cache.get(times.at(-1)), center = cache.get(t);
         if (first.image.data.equals(last.image.data) && first.image.data.equals(center.image.data)) {
-          png = center.png; result = center.image; stats.staticFrames++;
+          png = center.png; result = center.image; usedSamples = 1; stats.staticFrames++;
         } else {
           await sampleMany(times);
           const images = times.map(time => cache.get(time).image);
           result = timed('averageMs', () => average(images));
         }
       }
+      if (verifyReuse) {
+        stats.auditMs += performance.now() - auditStart;
+        Atomics.add(state, 2, 1);
+        const actual = result ??= await decode(png), expected = previousRaw.image ??= await decode(previousRaw.png);
+        if (classifyPixelDifference(pixelDifference(expected, actual), options.raster) === 'different') {
+          if (Atomics.compareExchange(state, 0, 0, 1) === 0) {
+            Atomics.store(state, 3, frame);
+            options.onWarning?.({ code: 'static_reuse_disabled', message: 'Static reuse disabled after a pixel mismatch; frames will be recaptured.', details: { frame, t } });
+          }
+          candidate = false;
+        }
+      }
+      if (candidate && !verifyReuse) Atomics.add(state, 1, 1);
+      // Keep a decoded raw reference as well; never retain a transferable output buffer.
+      if (enabled && options.transport === 'raw') result ??= await decode(png);
+      previousRaw = { t, frame, motionBlur, uniform, png, image: result, usedSamples, run: candidate ? previousRaw.run + 1 : 0 };
+      // Contributing temporal samples, excluding probes and failed attempts.
+      api.lastBlurSamples = usedSamples;
       stats.frames++;
       if (sizes.renderScale !== sizes.scale) {
         result ??= await decode(png);
@@ -238,7 +415,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       }
       if (options.transport === 'raw') {
         const image = result ?? await decode(png);
-        return image === decodedCache?.image ? Buffer.from(image.data) : image.data;
+        return image === decodedCache?.image || image === previousRaw?.image ? Buffer.from(image.data) : image.data;
       }
       if (post.grain > 0) return timed('pngMs', () => encodePNG(result));
       return png ?? timed('pngMs', () => encodePNG(result));
@@ -246,10 +423,10 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
   };
   if (capture.retryFrame) {
     const frame = api.frame.bind(api);
-    api.frame = (t, index) => capture.retryFrame(t, async () => {
+    api.frame = (t, index, audit) => capture.retryFrame(t, async () => {
       const before = { ...stats };
-      try { return await frame(t, index); }
-      catch (error) { Object.assign(stats, before); decodedCache = undefined; throw error; }
+      try { return await frame(t, index, audit); }
+      catch (error) { Object.assign(stats, before); decodedCache = previousRaw = undefined; throw error; }
     });
   }
   return api;

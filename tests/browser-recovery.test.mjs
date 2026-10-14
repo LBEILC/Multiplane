@@ -1,5 +1,6 @@
 import './test-home.mjs';
 import test from 'node:test';
+import { fullTest } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -98,7 +99,7 @@ test('crash diagnostics retain exit and bounded stderr but omit launch arguments
 });
 
 for (const [command, scope] of [['stills', 'main'], ['verify', 'main'], ['verify', 'worker'], ['render', 'worker']]) {
-  test(`${command} ${scope} crash recovers in the job, including worker transport`, { timeout: 90000 }, async () => {
+  (command === 'render' ? test : fullTest)(`${command} ${scope} crash recovers in the job, including worker transport`, { timeout: 90000 }, async () => {
     const f = await fixture();
     if (command === 'render') await writeFile(f.shot, html.replace('fps:4', 'fps:8'));
     const common = [command, f.shot, '--raster', 'software', '--no-lint', '--motion-blur', '4', '--grain', '2', '--json', '--job-dir', path.join(f.root, 'jobs')];
@@ -117,7 +118,7 @@ for (const [command, scope] of [['stills', 'main'], ['verify', 'main'], ['verify
   });
 }
 
-test('main capture and successive worker pools share a single job recovery limit', { timeout: 90000 }, async () => {
+fullTest('main capture and successive worker pools share a single job recovery limit', { timeout: 90000 }, async () => {
   const f = await fixture();
   const result = await run(process.execPath, ['--import', './tests/browser-fault.mjs', 'bin/multiplane', 'verify', f.shot, '--raster', 'software', '--no-lint', '--motion-blur', '4', '--at', '0,0.5', '--workers', '2', '--json', '--job-dir', path.join(f.root, 'jobs')], { env: { ...process.env, MULTIPLANE_TEST_FAULT_DIR: f.root, MULTIPLANE_TEST_FAULT_SCOPE: 'all', MULTIPLANE_TEST_FAULT_COUNT: '3', MULTIPLANE_TEST_FAULT_ONCE: '1' } });
   assert.equal(result.code, 4, result.stdout + result.stderr);
@@ -126,7 +127,7 @@ test('main capture and successive worker pools share a single job recovery limit
   assert.equal(events.at(-1).code, 'browser_crashed');
 });
 
-test('verify still detects a stateful shot after recovering a browser', { timeout: 90000 }, async () => {
+fullTest('verify still detects a stateful shot after recovering a browser', { timeout: 90000 }, async () => {
   const f = await fixture();
   await writeFile(f.shot, html.replace('Math.round(t*40)', '(window.counter=(window.counter||0)+1)'));
   const result = await run(process.execPath, ['--import', './tests/browser-fault.mjs', 'bin/multiplane', 'verify', f.shot, '--raster', 'software', '--no-lint', '--motion-blur', '4', '--at', '0,0.5', '--json', '--job-dir', path.join(f.root, 'jobs')], { env: { ...process.env, MULTIPLANE_TEST_FAULT_DIR: f.root, MULTIPLANE_TEST_FAULT_SCOPE: 'main' } });

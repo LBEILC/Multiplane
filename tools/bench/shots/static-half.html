@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>Static frame reuse benchmark</title>
+<style>
+html,body{margin:0}#stage{position:relative;width:1920px;height:1080px;overflow:hidden;background:#18202c}
+.tile{position:absolute;width:100px;height:72px;background:#587ba1;box-shadow:4px 4px 8px #0006}
+</style></head><body><div id="stage"></div><script>
+const stage = document.querySelector('#stage'), tiles = [];
+for (let i = 0; i < 80; i++) {
+  const tile = document.createElement('div'); tile.className = 'tile';
+  tile.style.left = `${(i % 10) * 180 + 40}px`; tile.style.top = `${Math.floor(i / 10) * 120 + 40}px`;
+  stage.append(tile); tiles.push(tile);
+}
+window.SHOT = { duration: 4, fps: 30, ready: Promise.resolve(), render(t) {
+  const x = t < 2 ? 0 : (t - 2) * 30;
+  const transform = `translateX(${x}px)`;
+  for (const tile of tiles) tile.style.transform = transform;
+} };
+</script></body></html>

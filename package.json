@@ -1,6 +1,6 @@
 {
   "name": "multiplane",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "license": "Apache-2.0",
   "publishConfig": {
@@ -24,17 +24,23 @@
     "examples/",
     "skills/",
     "tools/install-browser.mjs",
+    "tools/bench/shots/dom-light.html",
+    "tools/bench/shots/canvas-2d.html",
+    "tools/bench/shots/webgl.html",
+    "tools/bench/shots/scene.js",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "licenses/",
-    "README.md"
+    "README.md",
+    "README.en.md"
   ],
   "scripts": {
     "postinstall": "node tools/install-browser.mjs",
-    "test": "node --import ./tests/test-home.mjs --test --test-concurrency=1 tests/*.test.mjs",
+    "test": "node --import ./tests/test-home.mjs tools/test-suite.mjs",
     "export:public": "node tools/export-public.mjs",
     "release:check": "node tools/release-check.mjs",
-    "bench": "node tools/bench/run.mjs"
+    "bench": "node tools/bench/run.mjs",
+    "test:full": "node --import ./tests/test-home.mjs tools/test-suite.mjs --full"
   },
   "dependencies": {
     "acorn": "8.15.0",

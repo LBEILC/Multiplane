@@ -6,6 +6,13 @@ const invoke = (channel: string, ...args: unknown[]) => ipcRenderer.invoke(chann
   throw Error(message);
 });
 const bridge: Bridge = {
+  updateState: () => invoke('updates:state'),
+  checkUpdates: () => invoke('updates:check'),
+  downloadUpdate: () => invoke('updates:download'),
+  cancelUpdate: () => invoke('updates:cancel'),
+  installUpdate: () => invoke('updates:install'),
+  openRelease: () => invoke('updates:release'),
+  onUpdateState: fn => { const listener = (_event: unknown, state: import('../shared/types').UpdateState) => fn(state); ipcRenderer.on('updates:state', listener); return () => ipcRenderer.removeListener('updates:state', listener); },
   reportFault: message => ipcRenderer.send('renderer-fault', String(message).slice(0, 12000)),
   platform: () => invoke('platform'),
   browserInstallState: () => invoke('browser-install-state'),

@@ -1,16 +1,38 @@
 import { normalizeResourcePath, isInsideResourceRoot } from './resource-path.mjs';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MultiplaneError, invalidOption } from './errors.mjs';
 
 export const root = process.cwd();
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json' };
 
 export async function startServer(port = 0, root = process.cwd()) {
+  if (typeof root !== 'string' || !root.trim()) throw invalidOption('--root', '--root must be a directory path.');
+  if (!String(port).trim() || !Number.isInteger(Number(port)) || Number(port) < 0 || Number(port) > 65535) throw invalidOption('--port', '--port must be an integer from 0 to 65535.');
+  port = Number(port);
   const base = await normalizeResourcePath(root);
+  try { if (!(await stat(base)).isDirectory()) throw new Error(); }
+  catch { throw invalidOption('--root', '--root must be an existing directory.'); }
+  root = base;
+  async function shots(directory = base, ancestors = new Set()) {
+    const canonical = await normalizeResourcePath(directory);
+    if (ancestors.has(canonical) || !await isInsideResourceRoot(base, canonical)) return [];
+    const parents = new Set([...ancestors, canonical]), found = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || ['node_modules', 'out'].includes(entry.name)) continue;
+      const file = path.join(directory, entry.name);
+      if (!await isInsideResourceRoot(base, file)) continue;
+      let info;
+      try { info = await stat(file); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+      if (info.isDirectory()) found.push(...await shots(file, parents));
+      else if (info.isFile() && path.extname(file).toLowerCase() === '.html') found.push(path.relative(base, file).split(path.sep).join('/'));
+    }
+    return found;
+  }
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
@@ -22,6 +44,11 @@ export async function startServer(port = 0, root = process.cwd()) {
       let resourceRoot = root, resourceBase = base, resourcePath = pathname;
       // /multiplane/ is reserved for runtime resources.
       if (pathname.startsWith('/multiplane/')) {
+        if (pathname === '/multiplane/shots.json') {
+          const body = JSON.stringify((await shots()).sort());
+          res.writeHead(200, { 'Content-Type': mime['.json'], 'Content-Length': Buffer.byteLength(body) });
+          return res.end(req.method === 'HEAD' ? undefined : body);
+        }
         if (pathname.startsWith('/multiplane/runtime/')) { resourceRoot = path.join(packageRoot, 'src/runtime'); resourcePath = pathname.slice('/multiplane/runtime'.length); }
         else if (pathname === '/multiplane/three.js') { resourceRoot = path.join(packageRoot, 'src/three'); resourcePath = '/index.js'; }
         else if (pathname.startsWith('/multiplane/vendor/three/')) {
@@ -59,6 +86,8 @@ export async function startServer(port = 0, root = process.cwd()) {
       res.end('Cannot read the requested file.');
     }
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
-  return { url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); })
+    .catch(cause => { if (cause.code === 'EADDRINUSE') throw new MultiplaneError('port_in_use', undefined, { cause }); throw cause; });
+  return { url: `http://127.0.0.1:${server.address().port}`, root: base, port: server.address().port,
+    close: () => new Promise((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
 }

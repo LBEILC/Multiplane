@@ -1,3 +1,4 @@
+import { readBenchmark, validBenchmark, benchmarkMachine, selectWorkers, classifyShot } from './workers.mjs';
 import { recoveryBudget } from './browser-recovery.mjs';
 import path from 'node:path';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -7,12 +8,12 @@ import { stopChild } from './process.mjs';
 import { inspectFFmpeg } from './ffmpeg.mjs';
 import { openShot, number } from './capture.mjs';
 import { createPostCapture, resolveScale } from './post.mjs';
-import { createRenderPool, defaultWorkers } from './render-pool.mjs';
+import { createRenderPool } from './render-pool.mjs';
 import { resolveFormat, videoEncoding } from './format.mjs';
 import { checkAlphaVideo } from './output-alpha.mjs';
 import { writeFrame } from './video-pipe.mjs';
 import { runCommand } from './events.mjs';
-import { loaded, observeBrowser } from './environment.mjs';
+import { loaded, observeBrowser, environment } from './environment.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { requireNewOutput, publishVideo } from './artifacts.mjs';
 import { createPreview } from './preview.mjs';
@@ -53,11 +54,23 @@ export async function renderShot(shot, options = {}) {
       const ffmpegInfo = await inspect(options.ffmpeg, process.env, { x264: 'libx264', 'nvenc-h264': 'h264_nvenc', 'nvenc-hevc': 'hevc_nvenc' }[encoding.encoder] ?? encoding.encoder);
       const ffmpeg = ffmpegInfo.path;
       options.transport = 'raw';
-      const workers = number(options.workers ?? defaultWorkers(scale), '--workers', { positive: true });
-      if (!Number.isSafeInteger(workers)) throw invalidOption('--workers', '--workers must be a positive integer.');
       const audioOffset = number(options['audio-offset'] ?? 0, '--audio-offset');
       if (options['audio-offset'] !== undefined && !options.audio) throw invalidOption('--audio-offset', '--audio-offset requires --audio.');
       capture = await openShot(shot, renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events, ffmpegInfo) });
+      const record = ['option', 'config'].includes(events.workersSource) ? null : readBenchmark();
+      let machine, type;
+      if (record) {
+        try {
+          machine = benchmarkMachine(await environment(capture.browser), options.raster);
+          if (validBenchmark(record, machine)) type = await classifyShot(capture);
+        } catch { /* Optional tuning must not prevent an otherwise valid render. */ }
+      }
+      const selection = selectWorkers({ workers: options.workers, source: events.workersSource, record, machine, type,
+        scale, memoryScale: Math.max(scale, renderScale) });
+      const workers = selection.workers;
+      options.workers = events.options.workers = workers;
+      // TODO(design): Document workersSource on start and result.data.resources.
+      events.workersSource = selection.source;
       options.alpha = events.options.alpha = capture.alpha;
       resolveFormat(options);
       Object.assign(encoding, videoEncoding(options));
@@ -106,18 +119,19 @@ export async function renderShot(shot, options = {}) {
       let encoderWriteMs = 0, framesSent = 0;
       // Internal switch for the pixel-equivalence and overhead tests, not a CLI option.
       const preview = createPreview(events, width * scale, height * scale, { enabled: options._preview !== false });
-      for await (const { frame, png } of pool.frames(first, end)) {
+      for await (const { frame, png } of pool.frames(first, end, async ({ frame, png }) => {
+        events.check();
+        await preview(png, frame);
+        events.progress('capture', frame - first + 1, total);
+      })) {
         events.check();
         if (failure) throw new MultiplaneError('encode_failed', undefined, { cause: failure });
         if (options.alpha && (framesSent === 0 || framesSent === Math.floor(total / 2))) alphaReferences.set(framesSent, Buffer.from(png.filter((_, i) => i % 4 === 3)));
         frameHashes?.push({ frame, sha256: createHash('sha256').update(png).digest('hex') });
-        await preview(png, frame);
         const writeStarted = performance.now();
         await writeFrame(encoder.stdin, png).catch(cause => { throw new MultiplaneError('encode_failed', undefined, { cause, details: { reason: cause.message } }); });
         encoderWriteMs += performance.now() - writeStarted;
         framesSent++;
-        const done = frame - first + 1;
-        events.progress('capture', done, total);
       }
       const drainStarted = performance.now();
       events.progress('encode', total, total);
@@ -135,7 +149,7 @@ export async function renderShot(shot, options = {}) {
       if (frameHashes) await writeFile(process.env.RENDER_FRAME_HASHES, JSON.stringify(frameHashes, null, 2));
       if (process.env.RENDER_PROFILE) await writeFile(process.env.RENDER_PROFILE, JSON.stringify({elapsed,frames:total,workers:actualWorkers,options,stats:pool.stats,encoderWriteMs,encoderDrainMs,outputCheckMs},null,2));
       events.artifact(out, 'video');
-      result = { output: out, frames: framesSent, fps, from, to, width: width * scale, height: height * scale, encoder: encoding.encoder, format: options.format, alpha: options.alpha, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, renderScale, scale, outputCheck };
+      result = { staticReuse: pool.staticReuse, blurSamples: pool.blurSamples, output: out, frames: framesSent, fps, from, to, width: width * scale, height: height * scale, encoder: encoding.encoder, format: options.format, alpha: options.alpha, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, renderScale, scale, outputCheck };
     } finally { await cleanup(); }
 
     return options.draft ? { ...result, draft: true } : result;

@@ -1,5 +1,6 @@
 import './test-home.mjs';
 import test from 'node:test';
+import { fullTest } from './suite.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFile, writeFile, mkdir, rename, readdir } from 'node:fs/promises';
@@ -83,7 +84,7 @@ test('format inference, mismatch errors, alpha MP4 hint and fixed encoders', () 
   assert.deepEqual(videoEncoding({ format: 'mp4', encoder: null }).args, ['-c:v', 'libx264', '-profile:v', 'high', '-crf', '16']);
 });
 
-test('fast PNG preserves alpha; authored opaque backgrounds remain opaque; explicit alpha overrides metadata', async () => {
+fullTest('fast PNG preserves alpha; authored opaque backgrounds remain opaque; explicit alpha overrides metadata', async () => {
   const capture = await openShot('examples/alpha.html');
   try {
     const fast = decodePNG(await capture.frame(0.5));
@@ -100,7 +101,7 @@ test('fast PNG preserves alpha; authored opaque backgrounds remain opaque; expli
   }
 });
 
-test('transparent browser canvas needs no runtime CSS and preserves authored page backgrounds', async () => {
+fullTest('transparent browser canvas needs no runtime CSS and preserves authored page backgrounds', async () => {
   const file = path.join(out, 'plain-alpha.html');
   await writeFile(file, '<style>html,body{margin:0}#stage{width:16px;height:16px}</style><div id="stage"></div><script>window.SHOT={duration:1,post:{alpha:true},render(){}}</script>');
   for (const backend of ['cdp', 'playwright']) {
@@ -114,7 +115,7 @@ test('transparent browser canvas needs no runtime CSS and preserves authored pag
   }
 });
 
-test('transparent stills, scaling and contact sheet; start and result report effective defaults', { timeout: 120000 }, async () => {
+fullTest('transparent stills, scaling and contact sheet; start and result report effective defaults', { timeout: 120000 }, async () => {
   for (const [scale, renderScale] of [[1, 1], [0.5, 0.5], [1, 0.5]]) {
     const recorded = [];
     const result = await stillsShot('examples/alpha.html', { ...options, scale, 'render-scale': renderScale, at: '0.5', out: path.join(out, `stills-${scale}-${renderScale}`), onEvent: e => recorded.push(e) });
@@ -136,22 +137,31 @@ test('alpha RGBA determinism: reordered samples, reload, one and two workers, bl
   assert.deepEqual(result.data.checks.map(c => c.name), ['reorder', 'reload', 'workers:1', 'workers:2', 'range']);
 });
 
-for (const [format, encoder] of [['webm', 'libvpx-vp9'], ['mov', 'prores_ks']]) {
-  const missing = !hasEncoder(encoder) ? `${process.platform}: FFmpeg lacks ${encoder}; ${format} alpha test requires it.`
-    : format === 'webm' && !/\blibvpx-vp9\b/.test(decoderList) ? `${process.platform}: FFmpeg lacks libvpx-vp9 decoder; alpha cannot be inspected.` : false;
-  test(`${process.platform}: ${format} encoder availability and real alpha round trip`, { timeout: 120000, skip: missing }, async t => {
-    t.diagnostic(`${process.platform}: ${encoder} available${format === 'webm' ? '; libvpx-vp9 decoder available' : ''}.`);
-    const recorded = [];
-    const result = await renderShot('examples/alpha.html', { ...options, out: path.join(out, `alpha.${format}`), onEvent: e => recorded.push(e) });
-    assert.equal(result.data.format, format); assert.equal(result.data.alpha, true);
-    assert.equal(result.data.outputCheck.verified, true); assert.match(result.data.outputCheck.pixelFormat, /^yuva/);
-    assert.equal(recorded[0].options.alpha, true); assert.equal(recorded[0].options.format, format);
+// Both encoders compare against the same source pixels; cache only the references.
+let referencePromise;
+function alphaReferences() {
+  return referencePromise ??= (async () => {
     const capture = await openShot('examples/alpha.html');
     const references = new Map();
     try {
       const processed = createPostCapture(capture, { transport: 'raw' });
       for (const frame of [0, 12]) references.set(frame, (await processed.frame(frame / 12, frame)).filter((_, i) => i % 4 === 3));
     } finally { await capture.close(); }
+    return references;
+  })();
+}
+
+for (const [format, encoder] of [['webm', 'libvpx-vp9'], ['mov', 'prores_ks']]) {
+  const missing = !hasEncoder(encoder) ? `${process.platform}: FFmpeg lacks ${encoder}; ${format} alpha test requires it.`
+    : format === 'webm' && !/\blibvpx-vp9\b/.test(decoderList) ? `${process.platform}: FFmpeg lacks libvpx-vp9 decoder; alpha cannot be inspected.` : false;
+  (format === 'mov' ? test : fullTest)(`${process.platform}: ${format} encoder availability and real alpha round trip`, { timeout: 120000, skip: missing }, async t => {
+    t.diagnostic(`${process.platform}: ${encoder} available${format === 'webm' ? '; libvpx-vp9 decoder available' : ''}.`);
+    const recorded = [];
+    const result = await renderShot('examples/alpha.html', { ...options, out: path.join(out, `alpha.${format}`), onEvent: e => recorded.push(e) });
+    assert.equal(result.data.format, format); assert.equal(result.data.alpha, true);
+    assert.equal(result.data.outputCheck.verified, true); assert.match(result.data.outputCheck.pixelFormat, /^yuva/);
+    assert.equal(recorded[0].options.alpha, true); assert.equal(recorded[0].options.format, format);
+    const references = await alphaReferences();
     const checked = await checkAlphaVideo(ffmpeg, result.data.output, format, references, 320, 180, observer);
     t.diagnostic(`frames 0,12: maximum alpha error ${checked.maxAlphaError}/255.`);
     assert.ok(checked.maxAlphaError <= 2);
@@ -176,7 +186,7 @@ for (const [format, encoder] of [['webm', 'libvpx-vp9'], ['mov', 'prores_ks']]) 
   });
 }
 
-test('missing requested encoder fails render with ffmpeg_unusable; doctor reports optional availability', { timeout: 120000 }, async () => {
+fullTest('missing requested encoder fails render with ffmpeg_unusable; doctor reports optional availability', { timeout: 120000 }, async () => {
   const { inspectFFmpeg } = await import('../src/ffmpeg.mjs');
   for (const [format, encoder] of [['webm', 'libvpx-vp9'], ['mov', 'prores_ks']]) {
     await assert.rejects(renderShot('examples/alpha.html', { ...options, format,
@@ -197,7 +207,7 @@ test('transparent probe failure is fatal and opaque-format metadata cannot claim
   await assert.rejects(checkVideo('', '', expected, observer, async () => ({ ...expected, codec: 'vp9', pixelFormat: 'yuv420p' })), { code: 'output_invalid' });
 });
 
-test('CLI accepts alpha for stills and verify, rejects alpha MP4 and conflicting format flags', { timeout: 120000 }, async () => {
+fullTest('CLI accepts alpha for stills and verify, rejects alpha MP4 and conflicting format flags', { timeout: 120000 }, async () => {
   for (const args of [['--alpha'], ['--format', 'webm', '--encoder', 'x264'], ['--format', 'mov', '--out', path.join(out, 'bad.webm')]]) {
     const result = await run(process.execPath, ['bin/multiplane', 'render', 'examples/alpha.html', ...args, '--json', '--job-dir', path.join(out, 'jobs')]);
     assert.notEqual(result.code, 0);
@@ -214,7 +224,7 @@ test('CLI accepts alpha for stills and verify, rejects alpha MP4 and conflicting
   }
 });
 
-test('fixed-format rendering ignores a saved MP4 encoder preference but rejects an explicit encoder', { timeout: 60000, skip: !hasEncoder('prores_ks') && `${process.platform}: FFmpeg lacks prores_ks.` }, async () => {
+fullTest('fixed-format rendering ignores a saved MP4 encoder preference but rejects an explicit encoder', { timeout: 60000, skip: !hasEncoder('prores_ks') && `${process.platform}: FFmpeg lacks prores_ks.` }, async () => {
   const home = path.join(out, 'configured-home'); await mkdir(home);
   await writeFile(path.join(home, 'config.json'), JSON.stringify({ schema: 'multiplane/1', encoder: 'nvenc-h264' }));
   const result = await run(process.execPath, ['bin/multiplane', 'render', 'examples/alpha.html', '--format', 'mov', '--to', '0.08333333333333333', '--workers', '1', '--job-dir', path.join(out, 'jobs'), '--json'], { env: { ...process.env, MULTIPLANE_HOME: home } });
