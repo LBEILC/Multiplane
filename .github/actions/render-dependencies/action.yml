@@ -43,7 +43,26 @@ runs:
       shell: pwsh
       env:
         FFMPEG_VERSION: ${{ steps.choco.outputs.version }}
-      run: choco install ffmpeg --version=$env:FFMPEG_VERSION --yes --no-progress --cache-location="$env:RUNNER_TEMP/ffmpeg-downloads"
+      # The Chocolatey community feed sometimes rejects requests (for example HTTP 406).
+      # Retry it, then fall back to a public static build that includes libx264.
+      run: |
+        for ($i = 1; $i -le 3; $i++) {
+          choco install ffmpeg --version=$env:FFMPEG_VERSION --yes --no-progress --cache-location="$env:RUNNER_TEMP/ffmpeg-downloads"
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          Write-Host "Chocolatey attempt $i failed; retrying in 20 seconds."
+          Start-Sleep -Seconds 20
+        }
+        Write-Host 'Chocolatey is unavailable; downloading a static FFmpeg build instead.'
+        $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg-static.zip'
+        $dir = Join-Path $env:RUNNER_TEMP 'ffmpeg-static'
+        Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile $zip
+        Expand-Archive -Path $zip -DestinationPath $dir -Force
+        $bin = Get-ChildItem -Path $dir -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+        if (-not $bin) { throw 'ffmpeg.exe not found in the static build.' }
+        $x264 = & $bin.FullName -hide_banner -encoders | Select-String libx264
+        if (-not $x264) { throw 'The static FFmpeg build lacks libx264.' }
+        Add-Content -Path $env:GITHUB_PATH -Value $bin.DirectoryName
+        $global:LASTEXITCODE = 0
     - name: FFmpeg package identity (macOS)
       if: runner.os == 'macOS'
       id: brew

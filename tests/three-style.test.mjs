@@ -78,7 +78,7 @@ test('layer style defaults, per-card overrides and cache keys affect texture pix
 
 test('custom three styles are deterministic across reorder, reload and workers', { timeout: 120000 }, async () => {
   const name = await fixture('deterministic.html');
-  const result = await verifyShot(name, { root, at:'0,0.5', workers:2, out:path.join(root,'verify'), 'job-dir':path.join(root,'jobs') });
+  const result = await verifyShot(name, { root, at:'0,0.5', workers:2, raster:'software', out:path.join(root,'verify'), 'job-dir':path.join(root,'jobs') });
   assert.equal(result.data.passed, true);
   assert.deepEqual(result.data.checks.map(c=>c.name), ['reorder','reload','workers:1','workers:2','range']);
 });

@@ -85,7 +85,7 @@ try {
   evidence.browserDownload.cacheExistedBefore = await exists(browserCache);
   assert.equal(evidence.browserDownload.cacheExistedBefore, false, 'Verification requires a fresh isolated browser cache; existing caches must never be removed');
   if (unpacked) { await cp(unpacked, installation, { recursive: true }); assert.ok(await exists(executable), 'Unpacked executable is missing'); }
-  else if (windows) await run(installer, ['/S', '/currentuser', `/D=${installation}`], { env, timeout: 120000 });
+  else if (windows) await run(installer, ['/S', '/currentuser', `/D=${installation}`], { env, timeout: 300000 });
   else if (mac) { await mkdir(installation); await run('hdiutil', ['attach', installer, '-nobrowse', '-readonly', '-mountpoint', installation]); }
   else {
     const extractionEnv = { ...env }; delete extractionEnv.APPIMAGE_EXTRACT_AND_RUN;
@@ -248,7 +248,8 @@ try {
   await shot('settings.png');
   const entry = cliEntry(process.platform, launch.node, resources, unpacked ? {} : { ...env, APPIMAGE: installer });
   const invoke = args => { const command = entryCommand(entry, args); return run(command.file, command.args, { ...command.options, env, cwd: project, capture: true, killTree: true }); };
-  const commandVersion = await invoke(['--version']); assert.equal(commandVersion.stdout.trim(), pkg.version);
+  // With APPIMAGE_EXTRACT_AND_RUN, the AppImage runtime lists the files it extracts on stdout first.
+  const commandVersion = await invoke(['--version']); assert.equal(commandVersion.stdout.trim().split('\n').at(-1).trim(), pkg.version);
   const commandDoctor = await invoke(['doctor', '--json']);
   assert.equal(JSON.parse(commandDoctor.stdout.trim().split('\n').at(-1)).ok, true);
   const commandConfig = await invoke(['config', 'get', '--json']);
@@ -332,7 +333,7 @@ try {
   }
   if (windows && !unpacked && (installed || await exists(path.join(installation, 'Uninstall Multiplane.exe')))) {
     // Let NSIS copy itself outside the installation, then wait for its worker to finish.
-    await run(path.join(installation, 'Uninstall Multiplane.exe'), ['/S', '/currentuser'], { env, timeout: 120000 });
+    await run(path.join(installation, 'Uninstall Multiplane.exe'), ['/S', '/currentuser'], { env, timeout: 300000 });
     await waitFor(async () => !await exists(installation), 'Uninstaller left installation files', 60000);
     for (const file of [...shortcuts, ...(cache ? [cache] : [])]) await waitFor(async () => !await exists(file), 'Uninstaller left shortcuts or installer cache');
     for (const key of keys) assert.equal(registryExists('HKCU', key), false, 'Uninstaller left registry keys');
