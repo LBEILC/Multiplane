@@ -41,8 +41,10 @@ fullTest('render applies typed cached workers, reports provenance, and doctor ma
     assert.equal(events[0].workersSource, source);
     assert.equal(result.data.resources.workersSource, source);
     if (workers !== undefined) {
-      assert.equal(events[0].options.workers, workers);
-      assert.equal(result.data.resources.workers, Math.min(workers, 3));
+      const selected = events[0].options.workers;
+      if (source === 'benchmark') assert.ok(Number.isInteger(selected) && selected >= 1 && selected <= workers);
+      else assert.equal(selected, workers);
+      assert.equal(result.data.resources.workers, Math.min(selected, 3));
     }
     return result;
   };
@@ -79,5 +81,9 @@ test('stored typed recommendations retain provenance and stale records fall back
     assert.deepEqual(selectWorkers({ ...input, workers: 1, source: 'option' }), { workers: 1, source: 'option' });
     assert.equal(selectWorkers({ ...input, machine: { ...machine, version: 'older' } }).source, 'estimate');
     assert.equal(selectWorkers({ ...input, record: null }).source, 'estimate');
+    const smallMachine = { ...input, hardware: { ...hardware, cores: 3 } };
+    assert.deepEqual(selectWorkers({ ...smallMachine, record: null }), { workers: 1, source: 'estimate' });
+    assert.deepEqual(selectWorkers({ ...smallMachine, machine: { ...machine, version: 'older' } }), { workers: 1, source: 'estimate' });
+    assert.deepEqual(selectWorkers({ ...input, hardware: { ...hardware, free: 2.5 * 1024 ** 3 } }), { workers: 1, source: 'benchmark' });
   }
 });

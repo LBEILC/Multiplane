@@ -89,6 +89,35 @@ test('hosting defaults off, observes config changes and rejects invalid requests
   assert.deepEqual(f.launched, ['valid']); assert.equal((await json(path.join(f.home, 'hosted/invalid.rejected.json'))).reason, 'Invalid hosted request.');
 });
 
+test('POSIX identity uses Linux proc exe with args fallback and macOS full comm paths', async () => {
+  for (const platform of ['linux', 'darwin']) for (const procAvailable of [true, false]) {
+    const commands = [], links = [];
+    const executable = platform === 'linux' ? '/opt/node/bin/node' : '/Applications/Node Tools/node';
+    const identity = await processIdentity(42, {
+      platform,
+      readExecutable: async file => {
+        links.push(file);
+        if (!procAvailable) throw Error('proc unavailable');
+        return executable;
+      },
+      runCommand: async (file, args) => {
+        assert.equal(file, 'ps');
+        assert.deepEqual(args.slice(0, 3), ['-p', '42', '-o']);
+        commands.push(args[3]);
+        if (args[3] === 'lstart=') return 'Thu Jan  1 00:00:00 2026';
+        if (args[3] === 'args=') return executable + ' executor.mjs --job-dir /jobs/one';
+        assert.equal(args[3], 'comm=');
+        return executable;
+      },
+    });
+    assert.deepEqual(identity, { pid: 42, createdAt: '2026-01-01T00:00:00.000Z', executable });
+    assert.equal(matchesJob(identity, { pid: 42, startedAt: '2026-01-01T00:00:01.000Z' }), true);
+    assert.deepEqual(links, platform === 'linux' ? ['/proc/42/exe'] : []);
+    assert.deepEqual(commands, ['lstart=', ...(platform === 'darwin' ? ['comm='] : procAvailable ? [] : ['args='])]);
+  }
+  assert.equal(await processIdentity(42, { platform: 'linux', runCommand: async () => { throw Error('gone'); } }), null);
+});
+
 test('job identity rejects PID reuse and wrong executables, and force rechecks creation time', async () => {
   const identity = await processIdentity(process.pid); assert.ok(identity); assert.equal(identity.pid, process.pid);
   const job = { pid: process.pid, startedAt: new Date(Date.parse(identity.createdAt) + 1000).toISOString() };

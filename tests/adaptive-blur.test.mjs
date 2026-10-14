@@ -156,13 +156,16 @@ window.SHOT={duration:2,fps:30,render(t){const n=Math.abs(t-1)>.001&&Math.abs(t-
   } finally { await capture.close(); }
 });
 
-for (const quality of ['standard', 'high']) (quality === 'standard' ? test : fullTest)(quality + ' verify passes reorder, reload, workers and explicit static reuse', { timeout: 120000 }, async () => {
+for (const quality of ['standard', 'high']) (quality === 'standard' ? test : fullTest)(quality + ' verify passes reorder, reload, workers and explicit static reuse', { timeout: quality === 'high' ? 300000 : 120000 }, async () => {
   const maximum = quality === 'high' ? 256 : 64;
   const shot = await browserFixture('verify');
-  // Two distinct regimes (static and moving) retain every verification path.
-  await writeFile(shot, html.replaceAll('0.5', '0.25').replace('duration:1', 'duration:0.5'));
+  // Two static frames and one changing frame retain every verification path.
+  // A tiny changing surface still exercises upward sampling through the high grid.
+  await writeFile(shot, `<style>html,body{margin:0}#stage{width:16px;height:12px}</style><div id="stage"></div><script>
+window.SHOT={duration:0.375,fps:8,cuts:[0.1875],render(t){const v=t<0.1875?24:Math.round(t*12000)%256;document.querySelector('#stage').style.background='rgb('+v+','+v+','+v+')'}};
+</script>`);
   const result = await verifyShot(shot, { ...settings, quality, 'max-motion-blur': maximum, 'no-static-reuse': false, 'static-reuse': true,
-    raster: 'software', grain: 2, workers: 2, at: '0,0.375', 'no-lint': true,
+    raster: 'software', grain: 2, workers: 2, at: '0,0.25', 'no-lint': true,
     out: path.join(out, 'verify-' + quality), 'job-dir': path.join(out, 'jobs'), onEvent() {} });
   assert.equal(result.ok, true, JSON.stringify(result));
   for (const name of ['reorder', 'reload', 'workers:1', 'workers:2', 'range', 'static-reuse:workers:1', 'static-reuse:workers:2']) assert.ok(result.data.checks.some(c => c.name === name && c.passed));

@@ -55,7 +55,7 @@ export async function findCommand(name, env = process.env) {
   }
   return null;
 }
-export async function pathVersion(file, env = process.env) {
+export async function pathVersion(file, env = process.env, run = execute) {
   if (!file) return null;
   let result;
   if (/\.(cmd|bat)$/i.test(file)) {
@@ -64,8 +64,8 @@ export async function pathVersion(file, env = process.env) {
     const match = shim.match(/"%dp0%[\\/]([^"\r\n]+)"[ \t]+%\*/i);
     if (!match || /[\r\n%]/.test(match[1])) throw Error(t('wrapperVersionError'));
     const script = path.resolve(path.dirname(file), match[1]);
-    result = await execute(process.execPath, [script, '--version'], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 10000 });
-  } else result = await execute(file, ['--version'], { env, timeout: 10000 });
+    result = await run(process.execPath, [script, '--version'], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 10000 });
+  } else result = await run(file, ['--version'], { env, timeout: 10000 });
   if (result.code !== 0) throw Error(result.stderr || 'Version check failed');
   return result.stdout.trim();
 }

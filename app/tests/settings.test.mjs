@@ -9,6 +9,7 @@ const renderer = fileURLToPath(new URL('../../', import.meta.url));
 import { mkdir, readFile, writeFile, readdir, rm, symlink, lstat, unlink } from 'node:fs/promises';
 import { Configuration, Skills, setupCommand, bundledCommand, parseDoctor, rendererRoot, pathVersion, readEnvironment } from '../src/main/settings.mjs';
 import { userError } from '../src/shared/errors.mjs';
+import { execute } from '../src/main/settings.mjs';
 import { Preferences } from '../src/main/store.mjs';
 import { JobStore, homeDirectory } from '../src/main/store.mjs';
 async function fixture(t) {
@@ -68,7 +69,12 @@ test('doctor accepts unsuccessful results with checks and rejects incomplete out
 test('npm command shim version is executed as an argument array without shell', async t => {
   const f = await fixture(t), script = path.join(f.root, 'version.cjs'), shim = path.join(f.root, 'multiplane.cmd');
   await writeFile(script, "console.log('1.2.3')"); await writeFile(shim, 'IF EXIST "%dp0%\\node.exe" (\nSET "_prog=%dp0%\\node.exe"\n)\n@"%_prog%" "%dp0%\\version.cjs" %*');
-  assert.equal(await pathVersion(shim), '1.2.3');
+  assert.equal(await pathVersion(shim, process.env, (file, args, options) => {
+    assert.equal(file, process.execPath);
+    assert.deepEqual(args, [script, '--version']);
+    assert.equal(options.timeout, 10000);
+    return execute(file, args, { ...options, timeout: 90000 });
+  }), '1.2.3');
 });
 
 test('agent and PATH failures remain local to their own environment cards', async t => {

@@ -1,16 +1,22 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { readlink } from 'node:fs/promises';
 const run = (file, args) => new Promise((resolve, reject) => execFile(file, args, { windowsHide: true, timeout: 5000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }, (error, stdout) => error ? reject(error) : resolve(stdout.trim())));
 
-export async function processIdentity(pid) {
+export async function processIdentity(pid, { platform = process.platform, runCommand = run, readExecutable = readlink } = {}) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
-    if (process.platform === 'win32') {
-      const value = JSON.parse(await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${pid} -ErrorAction Stop; @{createdAt=$p.StartTime.ToUniversalTime().ToString('o'); executable=$p.Path} | ConvertTo-Json -Compress`]));
+    if (platform === 'win32') {
+      const value = JSON.parse(await runCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${pid} -ErrorAction Stop; @{createdAt=$p.StartTime.ToUniversalTime().ToString('o'); executable=$p.Path} | ConvertTo-Json -Compress`]));
       return { pid, createdAt: new Date(value.createdAt).toISOString(), executable: value.executable };
     }
-    const createdAt = new Date(await run('ps', ['-p', String(pid), '-o', 'lstart=']) + ' UTC').toISOString();
-    return { pid, createdAt, executable: await run('ps', ['-p', String(pid), '-o', 'comm=']) };
+    const createdAt = new Date(await runCommand('ps', ['-p', String(pid), '-o', 'lstart=']) + ' UTC').toISOString();
+    let executable;
+    if (platform === 'linux') {
+      try { executable = await readExecutable(`/proc/${pid}/exe`); }
+      catch { executable = (await runCommand('ps', ['-p', String(pid), '-o', 'args='])).trim().split(/\s+/)[0]; }
+    } else executable = await runCommand('ps', ['-p', String(pid), '-o', 'comm=']);
+    return { pid, createdAt, executable };
   } catch { return null; }
 }
 export function matchesJob(identity, job) {
