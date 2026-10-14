@@ -56,8 +56,15 @@ jobs:
           sudo apt-get install --yes ffmpeg xvfb openbox wmctrl
       - name: Cached renderer dependencies, Chromium and FFmpeg
         uses: ./.github/actions/render-dependencies
-      - name: Renderer tests (full)
+      # The full suite takes most of the release time on small hosted runners. Run it once,
+      # on Linux (the fastest runner); Windows and macOS run the daily suite before packaging.
+      # The release checklist also runs the full suite locally on Windows.
+      - name: Renderer tests (full, Linux)
+        if: runner.os == 'Linux'
         run: node tools/ci-run.mjs renderer-test . npm run test:full
+      - name: Renderer tests (daily, Windows and macOS)
+        if: runner.os != 'Linux'
+        run: node tools/ci-run.mjs renderer-test . npm test
       - name: Desktop dependencies and tests
         uses: ./.github/actions/desktop-test
       - name: Package for the native host architecture

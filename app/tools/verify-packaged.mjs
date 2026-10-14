@@ -173,7 +173,11 @@ try {
   }
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
   await waitFor(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()), 'Owner did not minimize');
-  const contender = await run(executable, launchArgs, { env, capture: true, timeout: 15000, killTree: true });
+  // Without FUSE, both AppImage copies would extract to the same /tmp directory, and the
+  // runtime deletes it when the second copy exits, taking the first copy's files with it.
+  const contenderEnv = env.APPIMAGE_EXTRACT_AND_RUN === '1' ? { ...env, TMPDIR: path.join(work, 'contender-tmp') } : env;
+  if (contenderEnv !== env) await mkdir(contenderEnv.TMPDIR, { recursive: true });
+  const contender = await run(executable, launchArgs, { env: contenderEnv, capture: true, timeout: 15000, killTree: true });
   assert.equal(contender.code, 0);
   await waitFor(() => application.evaluate(({ BrowserWindow }) => { const windows = BrowserWindow.getAllWindows(); return windows.length === 1 && !windows[0].isMinimized() && windows[0].isVisible(); }), 'Owner window was not restored');
   evidence.checks.push('Second packaged instance exited and restored the existing window');

@@ -283,7 +283,7 @@ Download an installer from the [Releases page](https://github.com/LBEILC/Multipl
 |---|---|---|
 | Windows | NSIS installer (`.exe`) | SmartScreen shows a warning: choose "More info", then "Run anyway". |
 | macOS | `.dmg`, one for Apple silicon and one for Intel | Gatekeeper blocks the first launch: right-click the app and choose "Open", or allow it under System Settings → Privacy & Security. |
-| Linux | AppImage | Make it executable (`chmod +x`), then run it. It needs FUSE; without FUSE, run it with `--appimage-extract-and-run`. On systems where unprivileged user namespaces are unavailable, the AppImage launcher starts the app with the Chromium sandbox turned off. |
+| Linux | AppImage | Make it executable (`chmod +x`), then run it. It needs FUSE. Without FUSE, extract it once with `--appimage-extract` and run `squashfs-root/AppRun` from then on (do not open two copies with `--appimage-extract-and-run`: the one that exits deletes the shared temporary directory and breaks the other). On systems where unprivileged user namespaces are unavailable, the AppImage launcher starts the app with the Chromium sandbox turned off. |
 
 To build a package for the system you are on, or to run the app during development:
 
