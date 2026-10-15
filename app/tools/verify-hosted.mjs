@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ensureLocalFfmpeg } from '../../tests/local-ffmpeg.mjs';
+import { entryCommand } from './entry-command.mjs';
+import { run } from '../../tools/process.mjs';
 
 // The hosted executor encodes video, so it needs FFmpeg like the tests do.
 ensureLocalFfmpeg();
@@ -17,7 +19,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const unpacked = path.resolve(process.argv[2] ?? path.join(root, 'app/release/win-unpacked'));
 const executable = process.platform === 'win32' ? path.join(unpacked, 'Multiplane.exe') : process.platform === 'darwin' ? path.join(unpacked, 'Multiplane.app/Contents/MacOS/Multiplane') : path.join(unpacked, 'multiplane-runtime');
 const resources = process.platform === 'darwin' ? path.join(unpacked, 'Multiplane.app/Contents/Resources') : path.join(unpacked, 'resources');
-const out = path.join(root, 'out/046'); await mkdir(out, { recursive: true });
+const out = path.join(root, 'out/070'); await mkdir(out, { recursive: true });
 const work = await mkdtemp(path.join(out, 'packaged-'));
 const home = path.join(work, 'renderer-home'), data = path.join(work, 'desktop-home');
 await mkdir(home); await mkdir(data);
@@ -34,7 +36,7 @@ async function until(fn, timeout = 90000) {
   throw Error('Hosted verification timed out.');
 }
 try {
-  desktop = await _electron.launch({ executablePath: executable, args: [], env });
+  desktop = await _electron.launch({ executablePath: executable, args: [], env, timeout: 30000 });
   desktopChild = desktop.process(); desktopIdentity = await processIdentity(desktopChild.pid);
   desktopChild.stderr.on('data', bytes => { desktopLog = (desktopLog + bytes).slice(-12000); });
   desktopChild.on('exit', (code, signal) => console.log('Packaged app exit:', code, signal, desktopLog));
@@ -47,26 +49,40 @@ try {
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: path.join(out, 'packaged-settings.png'), mask: privacyMasks(page), maskColor: '#e8e7e4' });
   const bin = path.join(resources, 'renderer/bin/multiplane');
-  // The terminal supervisor and waiter share an owned Job Object/process group.
+  const entry = process.platform === 'win32' ? { path: path.join(unpacked, 'multiplane.cmd'), args: [] }
+    : process.platform === 'darwin' ? { path: path.join(resources, 'bin/multiplane'), args: [] }
+      : { path: path.join(unpacked, 'multiplane-desktop'), args: ['--multiplane-cli'] };
+  const command = entryCommand(entry, ['render', shot, '--workers', '1', '--raster', 'software', '--no-lint', '--no-post', '--json']);
+  // The terminal and waiter share an owned Job Object/process group.
   // The app's executor must remain outside it.
-  const supervisor = path.join(work, 'terminal.cjs');
-  await writeFile(supervisor, 'const {spawn}=require("node:child_process");const child=spawn(process.execPath,process.argv.slice(2),{stdio:"inherit",shell:false});child.on("exit",code=>{process.exitCode=code;});');
   let stderr = '';
-  terminal = spawnOwned(process.execPath, [supervisor, bin, 'render', shot, '--workers', '1', '--raster', 'software', '--no-lint', '--no-post', '--json'], { cwd: work, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  terminal = spawnOwned(command.file, command.args, { ...command.options, cwd: work, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   terminal.stdout.on('data', () => {}); terminal.stderr.on('data', bytes => { stderr += bytes; });
-  await until(() => stderr.includes('has been handed to Multiplane'));
+  await until(() => {
+    if (stderr.includes('Rendering locally:') || terminal.exitCode !== null) throw Error('Bundled entry did not hand off: ' + stderr);
+    return stderr.includes('has been handed to Multiplane');
+  });
   evidence.handedOff = true;
   const request = await until(async () => { const name = (await readdir(path.join(home, 'hosted'))).find(name => name.endsWith('.running.json')); return name && json(path.join(home, 'hosted', name)); });
+  assert.equal(request.node, executable); assert.equal(request.bin, bin);
+  assert.equal(request.env.ELECTRON_RUN_AS_NODE, '1'); evidence.bundledEntry = true;
   await until(async () => (await json(path.join(request.jobDir, 'status.json')))?.phase === 'capture');
   const before = await json(path.join(request.jobDir, 'status.json'));
   const identity = await processIdentity(before.pid); assert.ok(identity);
   await stopOwned(terminal); evidence.terminalEnded = true; terminal = null;
   assert.equal((await processIdentity(before.pid))?.createdAt, identity.createdAt);
+  const waitCommand = entryCommand(entry, ['wait', request.jobDir, '--json', '--timeout', '120']);
+  const waited = run(waitCommand.file, waitCommand.args, { ...waitCommand.options, cwd: work, env, capture: true, timeout: 130000 });
+  // Attach immediately while UI evidence is captured.
+  waited.catch(() => {});
   await page.locator('[data-page=jobs]').click();
   await page.locator(`[data-job="${request.jobId}"]`).click();
   await page.screenshot({ path: path.join(out, 'packaged-job.png') });
   const result = await until(async () => (await json(path.join(request.jobDir, 'status.json')))?.result, 120000);
   assert.equal(result.ok, true, JSON.stringify(result)); evidence.completed = true;
+  const resumed = await waited;
+  const final = JSON.parse(resumed.stdout.trim().split('\n').at(-1));
+  assert.equal(final.ok, true); assert.equal(final.jobId, request.jobId); evidence.waitReconnected = true;
   evidence.artifacts = result.artifacts.map(a => ({ kind: a.kind, bytes: a.bytes }));
   await desktop.close(); desktop = null;
   assert.equal(await json(path.join(home, 'app.json')), null);

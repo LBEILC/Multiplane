@@ -149,7 +149,7 @@ export async function renderShot(shot, options = {}) {
       if (frameHashes) await writeFile(process.env.RENDER_FRAME_HASHES, JSON.stringify(frameHashes, null, 2));
       if (process.env.RENDER_PROFILE) await writeFile(process.env.RENDER_PROFILE, JSON.stringify({elapsed,frames:total,workers:actualWorkers,options,stats:pool.stats,encoderWriteMs,encoderDrainMs,outputCheckMs},null,2));
       events.artifact(out, 'video');
-      result = { staticReuse: pool.staticReuse, blurSamples: pool.blurSamples, output: out, frames: framesSent, fps, from, to, width: width * scale, height: height * scale, encoder: encoding.encoder, format: options.format, alpha: options.alpha, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, renderScale, scale, outputCheck };
+      result = { staticReuse: pool.staticReuse, blurSamples: pool.blurSamples, dofSamples: pool.dofSamples, output: out, frames: framesSent, fps, from, to, width: width * scale, height: height * scale, encoder: encoding.encoder, format: options.format, alpha: options.alpha, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, renderScale, scale, outputCheck };
     } finally { await cleanup(); }
 
     return options.draft ? { ...result, draft: true } : result;

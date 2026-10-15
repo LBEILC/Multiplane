@@ -10,6 +10,22 @@ import { decodePNG } from '../src/png.mjs';
 const out=createTempDirectory();
 const cli=args=>run(process.execPath,['bin/multiplane',...args,'--json','--job-dir',path.join(out,'jobs')]);
 const events=result=>{assert.equal(result.code,0,result.stdout+result.stderr);return result.stdout.trim().split('\n').map(JSON.parse);};
+
+test('draft stills publish relative output paths with and without atomic replacement', {timeout:60000}, async()=>{
+ const directory=createTempDirectory(path.resolve('out/tests/draft-small-'));
+ const shot=path.join(directory,'draft-small.html');
+ await writeFile(shot,'<style>html,body{margin:0}#stage{width:640px;height:360px;background:#789}</style><div id="stage"></div><script>window.SHOT={duration:1,render(t){}}</script>');
+ const target=path.join(directory,'draft-small');
+ for(const extra of [[],['--overwrite']]){
+  const list=events(await cli(['stills',shot,'--draft','--at','0','--out',path.relative(process.cwd(),target),...extra]));
+  const result=list.at(-1);
+  assert.equal(result.data.draft,true);
+  assert.equal(result.data.stills[0].path,path.join(target,'t-0.00.png'));
+  assert.deepEqual(result.artifacts.map(a=>a.path),[path.join(target,'t-0.00.png'),path.join(target,'_sheet.png')]);
+  const image=decodePNG(await readFile(result.data.stills[0].path));
+  assert.equal(image.width,640);assert.equal(image.height,360);
+ }
+});
 test('draft chooses the largest legal common scale and respects explicit values',async()=>{
  assert.equal(draftScale(1920,1080),.5);assert.equal(draftScale(642,366),1/3);assert.equal(draftScale(640,360,.25),.25);
  assert.throws(()=>draftScale(642,362),{code:'invalid_scale'});

@@ -61,7 +61,13 @@ export async function startServer(port = 0, root = process.cwd()) {
       }
       let target = path.resolve(resourceRoot, `.${resourcePath}`);
       if (!await isInsideResourceRoot(resourceRoot, target)) { res.writeHead(403); return res.end(); }
-      if ((await stat(target)).isDirectory()) target = path.join(target, 'index.html');
+      let targetInfo;
+      try { targetInfo = await stat(target); }
+      catch (error) {
+        if (pathname === '/favicon.ico' && error.code === 'ENOENT') { res.writeHead(204); return res.end(); }
+        throw error;
+      }
+      if (targetInfo.isDirectory()) target = path.join(target, 'index.html');
       target = await normalizeResourcePath(target);
       if (!await isInsideResourceRoot(resourceBase, target)) { res.writeHead(403); return res.end(); }
       const info = await stat(target);

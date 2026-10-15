@@ -142,7 +142,7 @@ Common `render` options:
 | `--draft` | Fast preview preset: capture at a scale of at most 0.5 and upscale, no motion blur, no grain. Lower quality by design; explicit options override it. Also available for `stills` |
 | `--render-scale`, `--upscale` | Capture at a lower scale, then upscale (`lanczos` / `neighbor`); the capture scale must not exceed `--scale` |
 | `--motion-blur`, `--shutter`, `--adaptive-blur` | Time samples per frame, shutter fraction, adaptive sampling |
-| `--quality` | Quality preset: `draft` (same as `--draft`), `standard` (default), `high` (rarely needed; see below). When the shot has motion blur, samples are added according to how far things move locally, up to 64 for `standard` and 256 for `high`; see below |
+| `--quality` | Quality preset: `draft` (same as `--draft`), `fast` (quicker), `standard` (default), `high` (rarely needed; see below). When the shot has motion blur, samples are added according to how far things move locally, up to 16 for `fast`, 32 for `standard` and 256 for `high`; see below |
 | `--max-motion-blur` | Custom limit for adding samples, overriding the preset; set it equal to `--motion-blur` for a fixed count |
 | `--grain` | Film grain intensity |
 | `--no-post` | Disable all post-processing |
@@ -212,9 +212,9 @@ The page background becomes transparent; anything the shot paints itself, includ
 
 Motion blur averages several captures taken during the shutter time of each frame. With too few samples, fast-moving things break into separate copies; with many samples everywhere, rendering is slow. Multiplane picks the number of samples for each frame from how far things move locally:
 
-- The shot decides **whether** there is motion blur: `post.motionBlur` above 1 turns it on and is the starting number of samples. The shot also sets `shutter` and grain.
-- `--quality` decides **how good** it is: frames are captured at the starting count, the image is compared block by block between adjacent samples, and wherever something moved more than about 2 pixels (`standard`) or 1 pixel (`high`), the count doubles, up to 64 or 256. Static frames use 1 sample and slow frames keep the starting count, so only fast frames take longer.
-- The default `standard` is enough for iterating and for final videos. `high` takes several times longer on real shots for a gain you only see when zooming in; use it for stills that will be viewed up close or for extremely fast, thin motion. Use `--draft` to check composition.
+- The shot decides **whether** there is motion blur: `post.motionBlur` above 1 turns it on and is the starting number of samples (at most 4 under `fast` and `standard`; an explicit `--motion-blur` still sets the start, and a limit no larger than the start keeps the shot's count fixed instead of dropping it to 4). The shot also sets `shutter` and grain.
+- `--quality` decides **how good** it is: frames are captured at the starting count, the image is compared block by block between adjacent samples, and wherever something moved more than about 2 pixels (`fast`, `standard`) or 1 pixel (`high`), the count doubles, up to 16 (`fast`), 32 (`standard`) or 256 (`high`). Static frames use 1 sample and slow frames keep the starting count, so only fast frames take longer.
+- The default `standard` is enough for iterating and for final videos. Use `fast` when speed matters more than the last bit of quality: it differs from `standard` only in its limit, so very fast frames show slightly more visible steps and render sooner. `high` takes several times longer on real shots for a gain you only see when zooming in; use it for stills that will be viewed up close or for extremely fast, thin motion. Use `--draft` to check composition.
 - For full control, `--max-motion-blur` changes the limit, and setting it equal to `--motion-blur` gives a fixed count. A shot with `blurAt(t)` uses its own counts and is never raised.
 - `blurSamples` in the result lists how many samples frames actually used.
 
@@ -224,7 +224,7 @@ Motion blur averages several captures taken during the shutter time of each fram
 
 - **Measure once on your machine**: `multiplane benchmark` (about 2–3 minutes) renders an ordinary web page, a Canvas shot and a 3D shot with 1, 2, 4, 6, 8, 12, 16 and 24 processes, and keeps, for each kind, the smallest count within 95% of the fastest. Renders then use that count for the kind of shot whenever `--workers` and the config leave it unset.
 - If memory runs out during the measurement, it stops at the largest count that fits and recommends from the counts measured; `doctor` notes the memory limit.
-- Without a measurement, the count is estimated from CPU cores, free memory and output size, at most 12; shots that use the 3D layer or WebGL get at most 2 (WebGL browsers share one graphics card, and too many of them can slow the whole computer down). If you render 3D shots often, measure once first.
+- Without a measurement, the count is estimated from CPU cores, free memory and output size, at most 12; shots that use the 3D layer or WebGL get at most 4 (WebGL browsers share one graphics card, and too many of them can slow the whole computer down). If you render 3D shots often, measure once first.
 - After a change of computer, graphics card, browser or Multiplane version, `doctor` reports the measurement as outdated; run it again. The result is stored as `benchmark.json` in the user directory.
 - `resources.workersSource` in the result says where the count came from: `option` (command line), `config`, `benchmark` or `estimate`.
 - The worker count changes speed only, never pixels: a shot renders identically with any number of processes.
@@ -251,6 +251,7 @@ npx multiplane stills shot.html --every 0.5
 - `--quality`, `--scale`, `--motion-blur`, `--max-motion-blur`, `--shutter`, `--grain` and `--alpha` work as they do for `render`, and so does depth of field in the 3D layer. Defaults the shot declares in `post` apply too.
 - For visible motion blur in a still, pick a time during motion; at static times the sample count drops to 1 automatically and the image is as sharp as without blur.
 - Add `--quality high` for stills that will be viewed up close; `--draft` is for checking composition only.
+- With `--scale 2` the browser's `devicePixelRatio` is 2, so DOM, SVG and text are laid out and drawn at twice the resolution, but a `<canvas>` with a fixed width and height is only enlarged and looks soft. Size canvases by `devicePixelRatio`: `canvas.width = 1920 * devicePixelRatio`, then `ctx.scale(devicePixelRatio, devicePixelRatio)`, keeping the CSS size at 1920×1080.
 
 ## 3D layer
 

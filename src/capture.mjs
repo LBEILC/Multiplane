@@ -119,10 +119,10 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     }
     if (alpha && cdp) await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
     const timings = { renderCallMs: 0, screenshotMs: 0 };
-    let closing, sampleContextUsed = false;
-    const draw = async (t, { motionBlur = 1, motionBlurBase = motionBlur } = {}) => {
+    let closing, sampleContextUsed = false, motionProbeUsed = false, dofSamples = 0;
+    const draw = async (t, { motionBlur = 1, motionBlurBase = motionBlur, motionProbeTime, dofMotionSamples } = {}) => {
         const renderStart = performance.now();
-        const changed = await page.evaluate(({ t, motionBlur, motionBlurBase, alpha }) => {
+        const changed = await page.evaluate(({ t, motionBlur, motionBlurBase, motionProbeTime, dofMotionSamples, alpha }) => {
           globalThis.__multiplaneStatic?.suspend();
           if (alpha) document.documentElement.style.setProperty('--multiplane-page-background', 'transparent');
           const stage = document.querySelector('#stage');
@@ -138,15 +138,20 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           // TODO(design): Document motionBlurBase, stable across nested refinements.
           SHOT.sampleContext = { time: t, motionBlurBase, get motionBlur() { contextUsed = true; return motionBlur; } };
           let failure;
+          // Private renderer/layer handshake; never part of the shot contract.
+          const probe = globalThis.__multiplaneMotionProbe = { time: motionProbeTime, used: false, motionSamples: dofMotionSamples, samples: 0 };
           try { SHOT.render(t); } catch (error) { failure = String(error?.message ?? error); } finally {
+            delete globalThis.__multiplaneMotionProbe;
             if (previous === undefined) delete SHOT.sampleContext;
             else SHOT.sampleContext = previous;
           }
           stage.getBoundingClientRect();
           const changed = globalThis.__multiplaneStatic?.read() ?? true;
-          return { failure, contextUsed, changed, reason: globalThis.__multiplaneStatic?.reason };
-        }, { t, motionBlur, motionBlurBase, alpha }).then(({ failure, changed, contextUsed, reason }) => {
+          return { failure, contextUsed, probeUsed: probe.used, dofSamples: probe.samples, changed, reason: globalThis.__multiplaneStatic?.reason };
+        }, { t, motionBlur, motionBlurBase, motionProbeTime, dofMotionSamples, alpha }).then(({ failure, changed, contextUsed, probeUsed, dofSamples: count, reason }) => {
           sampleContextUsed = contextUsed;
+          motionProbeUsed = probeUsed;
+          dofSamples = count;
           const index = observationReasons.indexOf(reason);
           if (index >= 0) Atomics.add(reuseState(options), index + 4, 1);
           if (failure !== undefined) throw new MultiplaneError('render_threw', undefined, { details: { t, reason: failure } });
@@ -172,6 +177,8 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     return {
       page, browser, server, ...metadata, alpha, beginFrame, timings,
       get sampleContextUsed() { return sampleContextUsed; },
+      get motionProbeUsed() { return motionProbeUsed; },
+      get dofSamples() { return dofSamples; },
       ...(reuseEnabled(options) ? { observe: draw } : {}),
       isCrash: error => browserClosed(error, browser, page, crashed),
       ...(metadata.hasBlurAt ? { blurAt: async t => {
@@ -213,6 +220,8 @@ export async function openShot(shot, scale = 1, options = {}) {
     get page() { return current.page; },
     get browser() { return current.browser; },
     get sampleContextUsed() { return current.sampleContextUsed; },
+    get motionProbeUsed() { return current.motionProbeUsed; },
+    get dofSamples() { return current.dofSamples; },
     ...(current.observe ? { observe: (...args) => current.observe(...args) } : {}),
     beginFrame: (...args) => current.beginFrame(...args),
     frame: (...args) => current.frame(...args),

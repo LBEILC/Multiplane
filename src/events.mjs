@@ -229,6 +229,9 @@ export async function runCommand(command, shot, options, action, job = true) {
           events.check();
         },
       }));
+      // Draft merges explicit options again; retain the absolute output path
+      // required by atomic directory publication and artifact relocation.
+      events.options.out = path.resolve(events.options.out);
     }
     events.start();
     for (const warning of user.warnings) events.warning(warning);

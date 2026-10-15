@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, writeFile, readFile, rename, utimes, stat } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, utimes, stat, symlink } from 'node:fs/promises';
 import { createTempDirectory } from './helpers.mjs';
 import { EventEmitter } from 'node:events';
 import { Hosted, json, atomic, validRequest, launchExecutor } from '../src/main/hosted.mjs';
@@ -104,6 +104,27 @@ test('hosting defaults off, observes config changes and rejects invalid requests
   for (const patch of [{ jobId: 'wrong' }, { jobDir: f.home }, { jobDir: 4 }, { node: 'node' }, { node: null }, { env: 'bad' }, { args: [1] }, { bin: path.join(f.home, 'missing') }]) assert.equal(await validRequest({ ...valid, ...patch }, 'valid'), false);
   await atomic(path.join(f.home, 'config.json'), { hosted: true }); await f.hosted.tick();
   assert.deepEqual(f.launched, ['valid']); assert.equal((await json(path.join(f.home, 'hosted/invalid.rejected.json'))).reason, 'Invalid hosted request.');
+});
+
+test('bundled runtime requires the app real path and explicit Node mode', async t => {
+  const f = await fixture(t), r = await f.request('bundled');
+  const directory = path.join(f.home, 'software'); await mkdir(directory);
+  const execPath = path.join(directory, 'Multiplane.exe'); await writeFile(execPath, '');
+  const other = path.join(f.home, 'OtherElectron.exe'); await writeFile(other, '');
+  const request = { ...r, node: execPath, env: { ...r.env, ELECTRON_RUN_AS_NODE: '1' } };
+  const valid = patch => validRequest({ ...request, ...patch }, r.jobId, { execPath });
+  assert.equal(await valid({}), true);
+  for (const env of [r.env, { ELECTRON_RUN_AS_NODE: '0' }, { ELECTRON_RUN_AS_NODE: 1 }, { ELECTRON_RUN_AS_NODE: '1', INVALID: 1 }]) assert.equal(await valid({ env }), false);
+  assert.equal(await valid({ node: other }), false);
+  assert.equal(await valid({ node: path.join(f.home, 'missing.exe') }), false);
+  assert.equal(await valid({ node: process.execPath, env: r.env }), true);
+  const alias = path.join(f.home, 'alias');
+  await symlink(directory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(await valid({ node: path.join(alias, 'Multiplane.exe') }), true);
+  if (process.platform === 'win32') assert.equal(await valid({ node: execPath.toUpperCase() }), true);
+  for (const patch of [{ command: 'doctor' }, { args: [1] }, { jobId: 'wrong' }]) assert.equal(await valid(patch), false);
+  await writeFile(path.resolve(r.bin, '../../package.json'), JSON.stringify({ name: 'other' }));
+  assert.equal(await valid({}), false);
 });
 
 test('POSIX identity uses Linux proc exe with args fallback and macOS full comm paths', async () => {

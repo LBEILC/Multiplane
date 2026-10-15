@@ -36,6 +36,6 @@ test('grain is seeded by global frame and preserves alpha', () => {
 });
 test('post options retain precedence and reject invalid sample counts', () => {
   assert.deepEqual(resolvePost({ 'no-post': true, grain: 8 }), { motionBlur: 1, maxMotionBlur: 1, grain: 0, shutter: 0.5 });
-  assert.deepEqual(resolvePost({ grain: 0 }, { grain: 8, motionBlur: 3 }), { motionBlur: 3, maxMotionBlur: 64, grain: 0, shutter: 0.5 });
+  assert.deepEqual(resolvePost({ grain: 0 }, { grain: 8, motionBlur: 3 }), { motionBlur: 3, maxMotionBlur: 32, grain: 0, shutter: 0.5 });
   for (const n of ['0', '1.5', 'NaN']) assert.throws(() => resolvePost({ 'motion-blur': n }));
 });

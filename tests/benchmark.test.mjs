@@ -202,7 +202,7 @@ test('option > config > matching benchmark > estimate, with memory clipping only
   assert.deepEqual(selectWorkers({ ...common, hardware: { ...hardware, free: 0 } }), { workers: 1, source: 'benchmark' });
   assert.deepEqual(selectWorkers({ ...common, machine: { ...machine, raster: 'software' } }), { workers: defaultWorkers(1, hardware), source: 'estimate' });
   assert.deepEqual(selectWorkers({ ...common, record: null, memoryScale: 4 }), { workers: defaultWorkers(1, hardware), source: 'estimate' });
-  assert.equal(selectWorkers({ ...common, record: null, type: 'three' }).workers, 2);
+  assert.equal(selectWorkers({ ...common, record: null, type: 'three' }).workers, 4);
   assert.equal(selectWorkers({ ...common, record: null, type: 'three', hardware: { ...hardware, free: 3 * 1024 ** 3 } }).workers, 1);
 });
 

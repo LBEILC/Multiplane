@@ -44,17 +44,18 @@ export async function stillsShot(shot, options = {}) {
       await mkdir(out, { recursive: true });
       for (const file of [...times.map(t => `t-${t.toFixed(2)}.png`), '_sheet.png']) await requireNewOutput(path.join(out, file));
       const frames = [];
-      const histogram = {};
+      const histogram = {}, dofHistogram = {};
       const source = async function* (first, end) {
         for (let index = first; index < end; index++) {
           const t = times[index];
           events.check();
           const png = await processed.frame(t, Math.round(t * fps), index === end - 1);
           events.progress('capture', index + 1, times.length);
-          yield { t, png, blurSamples: processed.lastBlurSamples };
+          yield { t, png, blurSamples: processed.lastBlurSamples, dofSamples: processed.lastDofSamples };
         }
       };
-      for await (const { t, png: buffer, blurSamples } of verifiedFrames(source, { ...options, check: events.check }, times.length)) {
+      for await (const { t, png: buffer, blurSamples, dofSamples } of verifiedFrames(source, { ...options, check: events.check }, times.length)) {
+        dofHistogram[dofSamples] = (dofHistogram[dofSamples] ?? 0) + 1;
         histogram[blurSamples] = (histogram[blurSamples] ?? 0) + 1;
         events.check();
         await writeArtifact(path.join(out, `t-${t.toFixed(2)}.png`), buffer);
@@ -73,7 +74,7 @@ export async function stillsShot(shot, options = {}) {
       await writeArtifact(path.join(out, '_sheet.png'), sheetPNG);
       await checkStill(path.join(out, '_sheet.png'), { width: 1920, height: Math.ceil(Math.ceil(frames.length / 4) * rowHeight) });
       events.artifact(path.join(out, '_sheet.png'), 'contact-sheet');
-      result = { staticReuse: processed.staticReuse, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, blurSamples: blurSampleReport(histogram), format: 'png', alpha: capture.alpha, stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
+      result = { staticReuse: processed.staticReuse, post: { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) }, blurSamples: blurSampleReport(histogram), dofSamples: blurSampleReport(dofHistogram), format: 'png', alpha: capture.alpha, stills: times.map(t => ({ t, frame: Math.round(t * fps), path: path.join(out, `t-${t.toFixed(2)}.png`) })), contactSheet: path.join(out, '_sheet.png') };
     } finally { await cleanup(); }
 
     return options.draft ? { ...result, draft: true } : result;

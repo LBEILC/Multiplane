@@ -11,6 +11,20 @@ import { serve } from '../src/serve.mjs';
 import { createTempDirectory, run } from './helpers.mjs';
 
 const root = createTempDirectory(), outside = createTempDirectory();
+test('missing root favicon is empty while real icons and other missing resources retain their behavior', async () => {
+  const directory = createTempDirectory();
+  const server = await startServer(0, directory);
+  try {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await fetch(server.url + '/favicon.ico?cache=1', { method });
+      assert.equal(response.status, 204); assert.equal(await response.text(), '');
+    }
+    for (const resource of ['/missing.png', '/sub/favicon.ico']) assert.equal((await fetch(server.url + resource)).status, 404);
+    await writeFile(path.join(directory, 'favicon.ico'), 'icon');
+    const response = await fetch(server.url + '/favicon.ico');
+    assert.equal(response.status, 200); assert.equal(await response.text(), 'icon');
+  } finally { await server.close(); }
+});
 test('image MIME types allow animated/static decoder inspection', async () => {
   const server = await startServer(0, root);
   try {

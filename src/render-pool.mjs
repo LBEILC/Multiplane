@@ -16,7 +16,7 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning, o
   options = { ...options, _browserRecovery: options._browserRecovery ?? recoveryBudget() };
   reuseState(options);
   const slots = [], stats = { frames: 0, samples: 0, staticFrames: 0 };
-  const histogram = {};
+  const histogram = {}, dofHistogram = {};
   const captured = new Set();
   let failure;
   for (let i = 0; i < workers; i++) {
@@ -52,6 +52,7 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning, o
   const api = {
     stats,
     get blurSamples() { return blurSampleReport(histogram); },
+    get dofSamples() { return blurSampleReport(dofHistogram); },
     get staticReuse() { return reuseReport(options); },
     progress: () => `Samples: ${stats.samples}; static: ${stats.staticFrames}; adaptive: ${stats.adaptiveFrames ?? 0}; hooks: ${stats.hookFrames ?? 0}`,
     async *frames(first, end) {
@@ -77,9 +78,10 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning, o
         if (options.transport === 'raw') schedule(slot);
         // Worker audits have already replaced invalid frames in this batch.
         for (const [i, png] of batch.frames.entries()) {
-          const count = batch.blurSamples[i];
+          const count = batch.blurSamples[i], dofCount = batch.dofSamples[i];
+          dofHistogram[dofCount] = (dofHistogram[dofCount] ?? 0) + 1;
           histogram[count] = (histogram[count] ?? 0) + 1;
-          yield { frame: batch.first + i, png, hash: batch.hashes?.[i], blurSamples: count };
+          yield { frame: batch.first + i, png, hash: batch.hashes?.[i], blurSamples: count, dofSamples: dofCount };
         }
         if (options.transport !== 'raw') schedule(slot);
       }

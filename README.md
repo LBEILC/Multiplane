@@ -142,7 +142,7 @@ Shot.define({
 | `--draft` | 快速预览的预设：以不超过 0.5 的倍率截图再放大，不做运动模糊、不加颗粒。画质有意降低；显式给出的参数会覆盖它。`stills` 也支持 |
 | `--render-scale`、`--upscale` | 以较低倍率截图再放大（`lanczos` / `neighbor`），不得高于 `--scale` |
 | `--motion-blur`、`--shutter`、`--adaptive-blur` | 每帧时间采样数、快门占比、自适应采样 |
-| `--quality` | 画质预设：`draft`（同 `--draft`）、`standard`（默认）、`high`（一般用不着，见下文）。镜头开了运动模糊时，按画面里局部移动的距离自动加采样，`standard` 最多 64、`high` 最多 256，见下文 |
+| `--quality` | 画质预设：`draft`（同 `--draft`）、`fast`（更快）、`standard`（默认）、`high`（一般用不着，见下文）。镜头开了运动模糊时，按画面里局部移动的距离自动加采样，`fast` 最多 16、`standard` 最多 32、`high` 最多 256，见下文 |
 | `--max-motion-blur` | 自定义自动加采样的上限，覆盖预设；设成和 `--motion-blur` 一样就是固定采样数 |
 | `--grain` | 胶片颗粒强度 |
 | `--no-post` | 关闭全部后期 |
@@ -212,9 +212,9 @@ npx multiplane stills examples/alpha.html --alpha --at 0,1
 
 运动模糊是每帧在快门时间内截多张图再平均。采样太少时，动得快的东西会变成一条条分开的残影；全片都用很多采样又太慢。Multiplane 按画面里局部移动的距离给每一帧定采样数：
 
-- 镜头决定**要不要**运动模糊：`post.motionBlur` 大于 1 就开启，它的值是起步采样数；快门 `shutter` 和颗粒也由镜头定。
-- `--quality` 决定**画质**：先按起步数截，把画面分成小块逐块比较相邻两个采样，哪一块移动超过约 2 像素（`standard`）或 1 像素（`high`）就把采样数加倍，最多到 64 或 256。静止的帧只用 1 个采样，慢的帧保持起步数，只有动得快的帧才多花时间。
-- 迭代和最终成片都用默认的 `standard` 就够了。`high` 在真实镜头上要多花几倍时间，提升要放大才看得出，只在静帧要放大看细节、或画面里有极快极细的运动时才用；只看构图用 `--draft`。
+- 镜头决定**要不要**运动模糊：`post.motionBlur` 大于 1 就开启，它的值是起步采样数（`fast` 和 `standard` 下起步最多 4；命令行显式给的 `--motion-blur` 照旧按给的数起步；上限不大于起步数时固定用镜头写的采样数，不降到 4）；快门 `shutter` 和颗粒也由镜头定。
+- `--quality` 决定**画质**：先按起步数截，把画面分成小块逐块比较相邻两个采样，哪一块移动超过约 2 像素（`fast`、`standard`）或 1 像素（`high`）就把采样数加倍，最多到 16（`fast`）、32（`standard`）或 256（`high`）。静止的帧只用 1 个采样，慢的帧保持起步数，只有动得快的帧才多花时间。
+- 迭代和最终成片都用默认的 `standard` 就够了。要速度、对画质没那么挑时用 `fast`：它和 `standard` 只差上限，动得很快的帧残影稍明显，渲染更快。`high` 在真实镜头上要多花几倍时间，提升要放大才看得出，只在静帧要放大看细节、或画面里有极快极细的运动时才用；只看构图用 `--draft`。
 - 想完全自己控制：`--max-motion-blur` 改上限，设成和 `--motion-blur` 一样就是固定采样数。镜头定义了 `blurAt(t)` 时按它的返回值来，不会自动加。
 - 结果里的 `blurSamples` 列出每帧实际用了多少采样。
 
@@ -224,7 +224,7 @@ npx multiplane stills examples/alpha.html --alpha --at 0,1
 
 - **在本机实测一次**：`multiplane benchmark`（约 2–3 分钟）用普通网页、Canvas、三维三类镜头，分别测 1、2、4、6、8、12、16、24 个进程的速度，每类记下最快速度 95% 以内的最小进程数。之后渲染时没给 `--workers`、配置里也没设，就按镜头类型自动用这个值。
 - 测的时候内存不够，就只测到能开的进程数为止，用已经测到的点给出推荐值，`doctor` 会注明“受内存限制”。
-- 没测过时用估算值：按 CPU 核数、空闲内存和输出分辨率算，最多 12 个；用了三维层或 WebGL 的镜头最多 2 个（多个 WebGL 浏览器抢同一块显卡，开多了反而拖垮整台电脑）。常渲三维镜头的话建议先实测一次。
+- 没测过时用估算值：按 CPU 核数、空闲内存和输出分辨率算，最多 12 个；用了三维层或 WebGL 的镜头最多 4 个（多个 WebGL 浏览器抢同一块显卡，开多了反而拖垮整台电脑）。常渲三维镜头的话建议先实测一次。
 - 换了电脑、显卡、浏览器或 Multiplane 版本后，`doctor` 会提示测试已过期，重跑一次即可。结果存在用户级目录的 `benchmark.json`。
 - 结果里的 `resources.workersSource` 说明这次的进程数从哪来：`option`（命令行）、`config`（用户配置）、`benchmark`（本机实测）或 `estimate`（估算）。
 - 进程数只影响速度，不影响画面：同一个镜头用几个进程渲染，像素都一样。
@@ -251,6 +251,7 @@ npx multiplane stills shot.html --every 0.5
 - `--quality`、`--scale`、`--motion-blur`、`--max-motion-blur`、`--shutter`、`--grain`、`--alpha` 都和 `render` 一样生效；三维层的景深也一样。镜头在 `post` 里声明的默认值同样适用。
 - 想要某一刻画面里有动态模糊，时刻要选在运动当中；静止的时刻采样数会自动降到 1，画面和不开模糊一样清晰。
 - 静帧要放大看细节时可以加 `--quality high`；`--draft` 只适合检查构图，不要用来出交付的图。
+- `--scale 2` 时浏览器的 `devicePixelRatio` 是 2，DOM、SVG 和文字会按 2 倍重新排版绘制；但宽高写死的 `<canvas>` 只会被放大，边缘发软。画 canvas 时按 `devicePixelRatio` 分配像素：`canvas.width = 1920 * devicePixelRatio`，再 `ctx.scale(devicePixelRatio, devicePixelRatio)`，CSS 尺寸保持 1920×1080。
 
 ## 三维层
 

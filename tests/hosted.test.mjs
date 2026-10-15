@@ -179,6 +179,15 @@ test('environment allows runtime variables but never named secrets or proxy cred
   { PATH: '/bin', MULTIPLANE_HOME: '/home', http_proxy: 'http://proxy:8080', LANG: 'C', LC_ALL: 'C' });
 });
 
+test('environment preserves the bundled Node mode without allowing other Electron variables', () => {
+  assert.deepEqual(hostedEnvironment({
+    ELECTRON_RUN_AS_NODE: '1', ELECTRON_ENABLE_LOGGING: '1', ELECTRON_EXTRA_LAUNCH_ARGS: '--inspect',
+    ELECTRON_RUN_AS_NODE_EXTRA: '1', NODE_OPTIONS: '--inspect',
+  }), { ELECTRON_RUN_AS_NODE: '1' });
+  assert.deepEqual(hostedEnvironment({ ELECTRON_RUN_AS_NODE: undefined }), {});
+  assert.deepEqual(hostedEnvironment({ ELECTRON_RUN_AS_NODE: '0' }), { ELECTRON_RUN_AS_NODE: '0' });
+});
+
 test('event follower preserves partial UTF-8 and completed failure exit information', async () => {
   const job = createTempDirectory('multiplane-follow-'), file = path.join(job, 'events.jsonl');
   await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid, state: 'queued' }));

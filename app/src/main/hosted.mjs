@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readFile, writeFile, rename, readdir, stat, unlink, appendFile, utimes } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, readdir, stat, unlink, appendFile, utimes, realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { processIdentity, jobAlive } from './process-identity.mjs';
 const schema = 'multiplane/1';
@@ -9,12 +9,20 @@ const exists = file => stat(file).then(() => true, () => false);
 function jobReference(r, id) {
   return r?.schema === schema && r.jobId === id && typeof r.jobDir === 'string' && path.isAbsolute(r.jobDir) && path.basename(r.jobDir) === id;
 }
-export async function validRequest(r, id) {
+export async function validRequest(r, id, { execPath = process.execPath } = {}) {
   if (!jobReference(r, id)
     || !['jobDir', 'node', 'bin', 'cwd'].every(key => typeof r[key] === 'string' && path.isAbsolute(r[key]))
-    || path.basename(r.jobDir) !== id || !/^node(\.exe)?$/i.test(path.basename(r.node))
+    || path.basename(r.jobDir) !== id
     || !['render', 'stills', 'verify'].includes(r.command) || !Array.isArray(r.args) || !r.args.every(a => typeof a === 'string')
     || !r.env || typeof r.env !== 'object' || Array.isArray(r.env) || Object.values(r.env).some(v => typeof v !== 'string')) return false;
+  if (!/^node(\.exe)?$/i.test(path.basename(r.node))) {
+    if (r.env.ELECTRON_RUN_AS_NODE !== '1') return false;
+    try {
+      const [requested, own] = await Promise.all([realpath(r.node), realpath(execPath)]);
+      const normalize = value => process.platform === 'win32' ? value.toLowerCase() : value;
+      if (normalize(requested) !== normalize(own)) return false;
+    } catch { return false; }
+  }
   const pkg = await json(path.resolve(r.bin, '../../package.json'));
   const s = await json(path.join(r.jobDir, 'status.json'));
   return pkg?.name === 'multiplane' && s?.jobId === id && s.schema === schema

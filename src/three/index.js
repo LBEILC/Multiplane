@@ -79,7 +79,6 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
   previewAperture = 0.008, maxBlur = 0.016, toneMapping = false, zIndex = 1, style = {} } = {}) {
   // TODO(design): Document the shared layer/card style fields and single-family font values.
   const layerStyle = { ...defaultStyle, ...style };
-  const layerBackground = style.textureBackground !== undefined;
   const renderer = new THREE.WebGLRenderer({ alpha: true, premultipliedAlpha: false, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(size.w, size.h);
@@ -226,19 +225,34 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
     textures.add(texture);
     return texture;
   }
+  /**
+   * @param {object} options
+   * @param {number} [options.lodBias=0] Texture mip LOD bias; negative values sharpen
+   * front-facing cards but can cause moire on dense textures at oblique angles.
+   */
   function card({ src, width, height, radius = 0, position = [0, 0, 0], rotation = [0, 0, 0],
-    border = null, shadow = false, annotations = [], browserFrame = false, textureWidth = 2048, style = {} }) {
+    border = null, shadow = false, annotations = [], browserFrame = false, textureWidth = 2048, style = {}, lodBias = 0 }) {
+    if (!Number.isFinite(lodBias)) throw Object.assign(new Error('lodBias must be a finite number.'), { code: 'shot_contract_invalid' });
     const textureStyle = { ...layerStyle, ...style };
-    const composeBackground = layerBackground || style.textureBackground !== undefined;
+    const composeBackground = annotations.length > 0 || browserFrame || style.textureBackground !== undefined;
     const group = new THREE.Group();
     group.position.fromArray(position); group.rotation.set(...rotation);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: !composeBackground });
+    if (lodBias !== 0) {
+      material.onBeforeCompile = shader => {
+        shader.uniforms.cardLodBias = { value: lodBias };
+        shader.fragmentShader = 'uniform float cardLodBias;\n' + shader.fragmentShader.replace('#include <map_fragment>',
+          THREE.ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, vMapUv, cardLodBias )'));
+      };
+      material.customProgramCacheKey = () => 'card-lod-bias';
+    }
     const mesh = new THREE.Mesh(roundedGeometry(width, height, radius), material);
     group.add(mesh);
     if (border) {
       const edge = new THREE.Mesh(roundedGeometry(width + 2 * border.width, height + 2 * border.width, radius + border.width),
-        new THREE.MeshBasicMaterial({ color: border.color, side: THREE.DoubleSide }));
-      edge.position.z = -0.002; group.add(edge);
+        new THREE.MeshBasicMaterial({ color: border.color, side: THREE.DoubleSide,
+          polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+      group.add(edge);
     }
     if (shadow) {
       const c = document.createElement('canvas'); c.width = c.height = 512;
@@ -321,10 +335,14 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
           }
         });
         const budget = adaptive ? Math.min(maximum, Math.max(count, Math.ceil((2 * maxRadius / spacing) ** 2))) : count;
-        // The guaranteed base grid is stable during upward temporal refinement.
-        // Retain a small spatial floor; temporal rotations fill the lens disk.
-        const actual = rotate && motionBlur > 1 ? Math.min(budget, Math.max(8, Math.ceil(budget / motionBlur))) : budget;
-        const phase = t * 997 * Math.sqrt(2);
+        const probe = globalThis.__multiplaneMotionProbe;
+        // Probes retain the stable base pattern; final captures share one frame budget.
+        const divisor = probe?.motionSamples ?? motionBlur;
+        const minimum = probe?.time === undefined ? 2 : 8;
+        const actual = rotate && motionBlur > 1 ? Math.min(budget, Math.max(minimum, Math.ceil(budget / divisor))) : budget;
+        if (probe) probe.samples += actual;
+        if (probe && rotate && motionBlur > 1) probe.used = true;
+        const phase = (probe?.time ?? t) * 997 * Math.sqrt(2);
         const rotation = rotate && motionBlur > 1 ? (phase - Math.floor(phase)) * Math.PI * 2 : 0;
         Object.assign(stats, { samples: actual, maxBlurRadius: maxRadius, rotation });
         renderAccumulation(focus, radius, actual, blur, rotation, budget);

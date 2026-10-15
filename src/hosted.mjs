@@ -28,7 +28,7 @@ export async function hostedAvailable(command, options, env = process.env) {
 }
 
 export function hostedEnvironment(env) {
-  const allowed = /^(PATH|MULTIPLANE_.*|HTTPS?_PROXY|ALL_PROXY|NO_PROXY|TEMP|TMP|TMPDIR|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|SystemRoot|ComSpec|PATHEXT|LANG|LC_.*)$/i;
+  const allowed = /^(PATH|MULTIPLANE_.*|ELECTRON_RUN_AS_NODE|HTTPS?_PROXY|ALL_PROXY|NO_PROXY|TEMP|TMP|TMPDIR|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|SystemRoot|ComSpec|PATHEXT|LANG|LC_.*)$/i;
   const secret = /TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|BEARER|COOKIE|SESSION|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY/i;
   return Object.fromEntries(Object.entries(env).filter(([key, value]) => {
     if (value === undefined || !allowed.test(key) || secret.test(key)) return false;

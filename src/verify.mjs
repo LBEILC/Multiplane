@@ -43,15 +43,17 @@ export async function verifyShot(shot, options = {}) {
       const references = new Map(), hashes = [], rangeReferences = new Map();
       if (compareReuse) referenceDirectory = await mkdtemp(path.join(tmpdir(), 'multiplane-verify-static-'));
       await mkdir(out, { recursive: true });
-      const histogram = {};
+      const histogram = {}, dofHistogram = {};
       const jitterChecks = new Set();
       let errors = 0, totalChangedPixels = 0;
       for (const t of times) {
         events.check(); references.set(t, decodePNG(await processed.frame(t)));
+        dofHistogram[processed.lastDofSamples] = (dofHistogram[processed.lastDofSamples] ?? 0) + 1;
         histogram[processed.lastBlurSamples] = (histogram[processed.lastBlurSamples] ?? 0) + 1;
       }
       data.post = { ...processed.post, adaptiveBlur: Number(options['adaptive-blur'] ?? 0.5) };
       data.blurSamples = blurSampleReport(histogram);
+      data.dofSamples = blurSampleReport(dofHistogram);
       const check = async (t, actual, name, reference = references.get(t)) => {
         events.check();
         if (reference.file) reference = { ...reference, data: await readFile(reference.file) };

@@ -25,13 +25,13 @@ try {
     if (closing) return;
     running = true;
     try {
-      const frames = [], hashes = [], blurSamples = [], before = { ...processed.stats };
+      const frames = [], hashes = [], blurSamples = [], dofSamples = [], before = { ...processed.stats };
       const source = async function* (first, end) {
         for (let index = first; index < end && !closing; index++) {
           const frame = message.first + index;
           const png = await processed.frame(frame / workerData.fps, frame, index === end - 1);
           parentPort.postMessage({ type: 'captured', frame });
-          yield { png, hash: processed.lastHash, blurSamples: processed.lastBlurSamples };
+          yield { png, hash: processed.lastHash, blurSamples: processed.lastBlurSamples, dofSamples: processed.lastDofSamples };
         }
       };
       // RAW post output already owns an independent buffer. Keep it until the
@@ -42,10 +42,11 @@ try {
           ? new Uint8Array(result.buffer) : Uint8Array.from(result);
         frames.push(png);
         blurSamples.push(item.blurSamples);
+        dofSamples.push(item.dofSamples);
         if (workerData.options.verify) hashes.push(item.hash);
       }
       const stats = Object.fromEntries(Object.entries(processed.stats).map(([key, value]) => [key, value - before[key]]));
-      if (!closing) parentPort.postMessage({ type: 'frames', first: message.first, frames, hashes, blurSamples, stats }, frames.map(f => f.buffer));
+      if (!closing) parentPort.postMessage({ type: 'frames', first: message.first, frames, hashes, blurSamples, dofSamples, stats }, frames.map(f => f.buffer));
     } catch (error) {
       sendFailure(error); closing = true;
     } finally {

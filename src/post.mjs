@@ -45,17 +45,19 @@ export async function resizeImage(image, width, height, upscale) {
 }
 export function resolveQuality(options = {}) {
   const quality = options.quality ?? (options.draft ? 'draft' : 'standard');
-  if (!['draft', 'standard', 'high'].includes(quality) || (options.draft && quality !== 'draft')) throw invalidOption('--quality', 'Quality must be draft, standard or high, and agree with --draft.');
+  if (!['draft', 'fast', 'standard', 'high'].includes(quality) || (options.draft && quality !== 'draft')) throw invalidOption('--quality', 'Quality must be draft, fast, standard or high, and agree with --draft.');
   return quality;
 }
 
 export function resolvePost(options = {}, post = {}) {
   const quality = resolveQuality(options);
   if (options['no-post']) return { motionBlur: 1, maxMotionBlur: 1, shutter: 0.5, grain: 0 };
-  const motionBlur = number(options['motion-blur'] ?? post.motionBlur ?? 1, 'motionBlur', { positive: true });
+  let motionBlur = number(options['motion-blur'] ?? post.motionBlur ?? 1, 'motionBlur', { positive: true });
   if (!Number.isSafeInteger(motionBlur)) throw invalidOption('motionBlur', 'motionBlur must be a positive integer.');
-  const maxMotionBlur = number(quality === 'draft' ? 1 : options['max-motion-blur'] ?? post.maxMotionBlur ?? (quality === 'high' ? 256 : 64), 'maxMotionBlur', { positive: true });
+  const maxMotionBlur = number(quality === 'draft' ? 1 : options['max-motion-blur'] ?? post.maxMotionBlur ?? (quality === 'high' ? 256 : quality === 'fast' ? 16 : 32), 'maxMotionBlur', { positive: true });
   if (!Number.isSafeInteger(maxMotionBlur)) throw invalidOption('maxMotionBlur', 'maxMotionBlur must be a positive integer.');
+  // Preserve explicit bases and fixed sampling before applying the preset cap.
+  if ((quality === 'standard' || quality === 'fast') && options['motion-blur'] == null && maxMotionBlur > motionBlur) motionBlur = Math.min(motionBlur, 4);
   // TODO(design): Document max <= base as disabling upward adaptation, including draft overrides.
   return { motionBlur, maxMotionBlur, shutter: number(options.shutter ?? post.shutter ?? 0.5, 'shutter'), grain: number(options.grain ?? post.grain ?? 0, 'grain') };
 }
@@ -274,17 +276,24 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       }
       const verifyReuse = candidate && (audit || previousRaw.run === 0 || frame % REUSE_INTERVAL === 0);
       const cache = new Map();
-      let contextUsed = false;
+      let contextUsed = false, motionProbeUsed = false;
+      let finalCapture = hooked || motionBlur === 1;
+      let selectedTimes = times;
+      let dofMotionSamples = new Set(times).size;
+      const context = observed => ({ motionBlur, motionBlurBase, observed,
+        motionProbeTime: finalCapture ? undefined : t,
+        dofMotionSamples: finalCapture ? dofMotionSamples : undefined });
       const sample = async (time, reuse = false) => {
         if (!cache.has(time)) {
           const start = performance.now();
-          const observed = time === observedTime;
+          const observed = time === observedTime && !(motionBlur > 1 && capture.motionProbeUsed);
           observedTime = undefined;
-          const png = await capture.frame(time, { motionBlur, motionBlurBase, observed });
+          const png = await capture.frame(time, context(observed));
           contextUsed ||= capture.sampleContextUsed === true;
+          motionProbeUsed ||= capture.motionProbeUsed === true;
           stats.captureMs += performance.now() - start;
           stats.samples++;
-          cache.set(time, { png, image: post.motionBlur > 1 || upward || post.grain > 0 ? await decode(png, reuse) : null });
+          cache.set(time, { png, dofSamples: capture.dofSamples ?? 0, probe: capture.motionProbeUsed === true && !finalCapture, image: post.motionBlur > 1 || upward || post.grain > 0 ? await decode(png, reuse) : null });
         }
         return cache.get(time);
       };
@@ -296,20 +305,22 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
           return;
         }
         const begin = async time => {
-          const start = performance.now(), observed = time === observedTime;
+          const start = performance.now(), observed = time === observedTime && !(motionBlur > 1 && capture.motionProbeUsed);
           observedTime = undefined;
-          const pending = await capture.beginFrame(time, { motionBlur, motionBlurBase, observed });
+          const pending = await capture.beginFrame(time, context(observed));
           contextUsed ||= capture.sampleContextUsed === true;
+          motionProbeUsed ||= capture.motionProbeUsed === true;
           const png = pending.png.then(buffer => { stats.captureMs += performance.now() - start; return buffer; });
           png.catch(() => {});
-          return { png };
+          return { png, dofSamples: capture.dofSamples ?? 0, probe: capture.motionProbeUsed === true && !finalCapture };
         };
         let pending = await begin(missing[0]);
         for (let i = 0; i < missing.length; i++) {
           const png = await pending.png;
+          const { dofSamples, probe } = pending;
           const next = i + 1 < missing.length ? await begin(missing[i + 1]) : null;
           stats.samples++;
-          cache.set(missing[i], { png, image: await decode(png, reuse) });
+          cache.set(missing[i], { png, dofSamples, probe, image: await decode(png, reuse) });
           pending = next;
         }
       };
@@ -317,7 +328,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       let png, result, usedSamples = motionBlur;
       if (candidate && !verifyReuse) { ({ png, image: result, usedSamples } = previousRaw); }
       else if (upward) {
-        // Calibrated in capture raster pixels: about 2px for standard, 1px for high.
+        // Calibrated in capture raster pixels: about 2px for fast/standard, 1px for high.
         const threshold = resolveQuality(options) === 'high' ? 1 : 2;
         await sampleMany([...endpoints, t], true);
         const centerProbe = cache.get(t);
@@ -325,7 +336,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         let legacy = contextUsed;
         let grid = legacy ? times : grids.get(motionBlur);
         if (still) {
-          png = centerProbe.png; result = centerProbe.image; usedSamples = 1;
+          png = centerProbe.png; result = centerProbe.image; usedSamples = 1; selectedTimes = [t];
           stats.staticFrames++; stats.adaptiveFrames++;
         } else {
           if (legacy) cache.clear();
@@ -340,13 +351,16 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
             const images = grid.map(time => cache.get(time).image), center = cache.get(t);
             const identical = images.every(image => image.data.equals(center.image.data));
             if (identical) {
-              png = center.png; result = center.image; usedSamples = 1;
+              png = center.png; result = center.image; usedSamples = 1; selectedTimes = [t];
               stats.staticFrames++; stats.adaptiveFrames++; break;
             }
             let difference = 0;
-            for (let i = 1; i < images.length && difference <= threshold; i++) difference = Math.max(difference, localMotionDifference(images[i - 1], images[i], alpha, threshold));
+            for (let i = 1; i < images.length && difference <= threshold; i++) {
+              // All decision images share the output frame's fixed lens phase.
+              difference = Math.max(difference, localMotionDifference(images[i - 1], images[i], alpha, threshold));
+            }
             if (difference <= threshold || motionBlur >= post.maxMotionBlur) {
-              usedSamples = motionBlur;
+              usedSamples = motionBlur; selectedTimes = grid;
               result = timed('averageMs', () => average(images)); break;
             }
             motionBlur = Math.min(post.maxMotionBlur, motionBlur * 2);
@@ -355,7 +369,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
             grid = legacy ? sampleTimes(t, fps, capture.duration, capture.cuts, { ...post, motionBlur }) : grids.get(motionBlur);
           }
         }
-      } else if (motionBlur === 1) ({ png, image: result } = await sample(t));
+      } else if (motionBlur === 1) { selectedTimes = [t]; ({ png, image: result } = await sample(t)); }
       else if (hooked) {
         await sampleMany(times);
         result = timed('averageMs', () => average(times.map(time => cache.get(time).image)));
@@ -364,7 +378,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         const first = cache.get(times[0]), last = cache.get(times.at(-1));
         const identical = first.image.data === last.image.data || first.image.data.equals(last.image.data);
         if (identical || (!alpha && imageDifference(first.image, last.image) < adaptive)) {
-          png = first.png; result = first.image; usedSamples = 1; stats.adaptiveFrames++;
+          png = first.png; result = first.image; usedSamples = 1; selectedTimes = [times[0]]; stats.adaptiveFrames++;
           if (identical) stats.staticFrames++;
         } else {
           await sampleMany(times);
@@ -374,12 +388,28 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         await sampleMany([times[0], times.at(-1), t]);
         const first = cache.get(times[0]), last = cache.get(times.at(-1)), center = cache.get(t);
         if (first.image.data.equals(last.image.data) && first.image.data.equals(center.image.data)) {
-          png = center.png; result = center.image; usedSamples = 1; stats.staticFrames++;
+          png = center.png; result = center.image; usedSamples = 1; selectedTimes = [t]; stats.staticFrames++;
         } else {
           await sampleMany(times);
           const images = times.map(time => cache.get(time).image);
           result = timed('averageMs', () => average(images));
         }
+      }
+      let usedDofSamples = previousRaw?.usedDofSamples ?? 0;
+      if (!(candidate && !verifyReuse)) {
+        // Only lens-dependent probe captures need replacing. DOM captures and
+        // final hook captures remain reusable at the same time and context.
+        if (motionProbeUsed && !finalCapture) {
+          finalCapture = true;
+          dofMotionSamples = new Set(selectedTimes).size;
+          for (const [time, item] of cache) if (item.probe) cache.delete(time);
+          observedTime = undefined;
+          await sampleMany(selectedTimes, true);
+          const images = selectedTimes.map(time => cache.get(time).image);
+          png = selectedTimes.length === 1 ? cache.get(selectedTimes[0]).png : undefined;
+          result = selectedTimes.length === 1 ? images[0] : timed('averageMs', () => average(images));
+        }
+        usedDofSamples = [...new Set(selectedTimes)].reduce((sum, time) => sum + (cache.get(time)?.dofSamples ?? 0), 0);
       }
       if (verifyReuse) {
         stats.auditMs += performance.now() - auditStart;
@@ -396,9 +426,10 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       if (candidate && !verifyReuse) Atomics.add(state, 1, 1);
       // Keep a decoded raw reference as well; never retain a transferable output buffer.
       if (enabled && options.transport === 'raw') result ??= await decode(png);
-      previousRaw = { t, frame, motionBlur, uniform, png, image: result, usedSamples, run: candidate ? previousRaw.run + 1 : 0 };
+      previousRaw = { t, frame, motionBlur, uniform, png, image: result, usedSamples, usedDofSamples, run: candidate ? previousRaw.run + 1 : 0 };
       // Contributing temporal samples, excluding probes and failed attempts.
       api.lastBlurSamples = usedSamples;
+      api.lastDofSamples = usedDofSamples;
       stats.frames++;
       if (sizes.renderScale !== sizes.scale) {
         result ??= await decode(png);

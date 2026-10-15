@@ -17,8 +17,29 @@ const solid = (value, alpha = 255) => ({ width: 2, height: 2, data: Buffer.from(
 const settings = { 'motion-blur': 8, 'max-motion-blur': 64, 'no-static-reuse': true };
 const fixture = (frame, extra = {}) => ({ width: 2, height: 2, duration: 2, fps: 30, cuts: [], frame: async (t, context) => encodePNG(frame(t, context)), ...extra });
 
+test('lens probes suppress rotation differences without entering the composite or hiding motion', async () => {
+  for (const moving of [false, true]) {
+    const calls = [];
+    const draw = (t, context) => solid(context.motionProbeTime === undefined
+      ? Math.round(t * 12000) % 256 : moving ? (t < 1 ? 0 : 255) : 120);
+    const processed = createPostCapture(fixture((t, context) => {
+      calls.push({ t, ...context }); return draw(t, context);
+    }, { motionProbeUsed: true }), settings);
+    const actual = decodePNG(await processed.frame(1));
+    const count = moving ? 64 : 1;
+    assert.equal(processed.lastBlurSamples, count);
+    const grid = moving ? nestedSampleGrids(1, 30, 2, [], { motionBlur: 8, maxMotionBlur: 64, shutter: 0.5 }).get(count) : [1];
+    assert.deepEqual(actual, averageLinear(grid.map(t => draw(t, {}))));
+    const probes = calls.filter(call => call.motionProbeTime !== undefined);
+    assert.ok(probes.length > 0);
+    assert.ok(probes.every(call => call.motionProbeTime === 1));
+    assert.equal(new Set(probes.map(call => call.t)).size, probes.length);
+    assert.deepEqual(calls.filter(call => call.motionProbeTime === undefined).map(call => call.dofMotionSamples), grid.map(() => count));
+  }
+});
+
 test('maximum precedence, validation, draft and no-post', () => {
-  assert.equal(resolvePost({ 'motion-blur': 8 }).maxMotionBlur, 64);
+  assert.equal(resolvePost({ 'motion-blur': 8 }).maxMotionBlur, 32);
   assert.equal(resolvePost({}, { motionBlur: 8, maxMotionBlur: 32 }).maxMotionBlur, 32);
   assert.equal(resolvePost({ 'max-motion-blur': 64 }, { motionBlur: 8, maxMotionBlur: 32 }).maxMotionBlur, 64);
   for (const options of [{ draft: true }, { 'no-post': true }]) assert.equal(resolvePost({ ...settings, ...options }, { maxMotionBlur: 32 }).maxMotionBlur, 1);
@@ -26,6 +47,31 @@ test('maximum precedence, validation, draft and no-post', () => {
     assert.throws(() => resolvePost({ 'max-motion-blur': value }), { code: 'invalid_option' });
   }
   assert.equal(resolvePost({ 'motion-blur': 8, 'max-motion-blur': 4 }).maxMotionBlur, 4);
+});
+
+test('refinement shares the final lens budget without recapturing decision images', async () => {
+  for (const maximum of [16, 32]) {
+    const calls = [];
+    let lensCount = 0;
+    const draw = (t, context) => solid(context.motionProbeTime === undefined
+      ? (t < 1 ? 0 : 200 - context.dofMotionSamples) : (t < 1 ? 0 : 255));
+    const capture = fixture((t, context) => {
+      calls.push({ t, ...context });
+      lensCount = context.motionProbeTime === undefined ? Math.max(2, Math.ceil(64 / context.dofMotionSamples)) : 16;
+      return draw(t, context);
+    }, { motionProbeUsed: true });
+    Object.defineProperty(capture, 'dofSamples', { get: () => lensCount });
+    const processed = createPostCapture(capture, { ...settings, 'motion-blur': 4, 'max-motion-blur': maximum });
+    const actual = decodePNG(await processed.frame(1));
+    assert.equal(processed.lastBlurSamples, maximum);
+    assert.equal(processed.lastDofSamples, 64);
+    const final = calls.filter(call => call.motionProbeTime === undefined);
+    const probes = calls.filter(call => call.motionProbeTime !== undefined);
+    assert.equal(final.length, maximum);
+    assert.equal(new Set(probes.map(call => call.t)).size, probes.length);
+    assert.ok(probes.every(call => call.motionBlurBase === 4));
+    assert.deepEqual(actual, averageLinear(final.map(call => draw(call.t, call))));
+  }
 });
 
 test('local metric detects sparse motion and ignores transparent hidden colors', () => {
@@ -156,15 +202,15 @@ window.SHOT={duration:2,fps:30,render(t){const n=Math.abs(t-1)>.001&&Math.abs(t-
   } finally { await capture.close(); }
 });
 
-for (const quality of ['standard', 'high']) (quality === 'standard' ? test : fullTest)(quality + ' verify passes reorder, reload, workers and explicit static reuse', { timeout: quality === 'high' ? 300000 : 120000 }, async () => {
-  const maximum = quality === 'high' ? 256 : 64;
+for (const quality of ['fast', 'standard', 'high']) (quality === 'standard' ? test : fullTest)(quality + ' verify passes reorder, reload, workers and explicit static reuse', { timeout: quality === 'high' ? 300000 : 120000 }, async () => {
+  const maximum = quality === 'high' ? 256 : quality === 'fast' ? 16 : 32;
   const shot = await browserFixture('verify');
   // Two static frames and one changing frame retain every verification path.
   // A tiny changing surface still exercises upward sampling through the high grid.
   await writeFile(shot, `<style>html,body{margin:0}#stage{width:16px;height:12px}</style><div id="stage"></div><script>
 window.SHOT={duration:0.375,fps:8,cuts:[0.1875],render(t){const v=t<0.1875?24:Math.round(t*12000)%256;document.querySelector('#stage').style.background='rgb('+v+','+v+','+v+')'}};
 </script>`);
-  const result = await verifyShot(shot, { ...settings, quality, 'max-motion-blur': maximum, 'no-static-reuse': false, 'static-reuse': true,
+  const result = await verifyShot(shot, { quality, 'motion-blur': 8, 'no-static-reuse': false, 'static-reuse': true,
     raster: 'software', grain: 2, workers: 2, at: '0,0.25', 'no-lint': true,
     out: path.join(out, 'verify-' + quality), 'job-dir': path.join(out, 'jobs'), onEvent() {} });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -172,7 +218,7 @@ window.SHOT={duration:0.375,fps:8,cuts:[0.1875],render(t){const v=t<0.1875?24:Ma
   assert.equal(result.data.post.maxMotionBlur, maximum);
   assert.equal(result.data.blurSamples.min, 1);
   assert.ok(result.data.blurSamples.max <= maximum);
-  assert.ok(result.data.blurSamples.max >= (quality === 'high' ? 128 : 64));
+  assert.ok(result.data.blurSamples.max >= (quality === 'high' ? 128 : 16));
   assert.equal(JSON.parse(await readFile(result.artifacts.at(-1).path)).changedPixels, 0);
 });
 
@@ -187,6 +233,7 @@ fullTest('worker histograms count only delivered frames, including audit repairs
       const counts = {};
       for await (const frame of pool.frames(0, 8)) counts[frame.blurSamples] = (counts[frame.blurSamples] ?? 0) + 1;
       assert.deepEqual(pool.blurSamples, blurSampleReport(counts));
+      assert.deepEqual(pool.dofSamples, { min: 0, max: 0, mean: 0, histogram: { 0: 8 } });
       assert.equal(Object.values(counts).reduce((a, b) => a + b), 8);
       assert.equal(pool.staticReuse.disabledReason, 'pixel_mismatch');
       histograms.push(pool.blurSamples);
@@ -200,6 +247,7 @@ fullTest('stills report effective post and contributing samples, and CLI accepts
   const result = await stillsShot(shot, { raster: 'software', at: '0,0.75', 'no-lint': true, onEvent() {}, 'job-dir': path.join(out, 'jobs'), out: path.join(out, 'stills') });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.data.post.maxMotionBlur, 64);
+  assert.deepEqual(result.data.dofSamples, { min: 0, max: 0, mean: 0, histogram: { 0: 2 } });
   assert.deepEqual(result.data.blurSamples, { min: 1, max: 64, mean: 32.5, histogram: { 1: 1, 64: 1 } });
   const cli = await run(process.execPath, ['bin/multiplane', 'stills', shot, '--max-motion-blur', '16', '--at', '0.75', '--no-lint', '--json', '--out', path.join(out, 'cli'), '--job-dir', path.join(out, 'jobs')]);
   assert.equal(cli.code, 0, cli.stdout + cli.stderr);
