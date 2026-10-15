@@ -53,8 +53,16 @@ test('About controls drive the real update controller through a local double in 
   assert.equal(await page.locator('.notes img').count(), 0); assert.match(await page.locator('.notes').innerText(), /<img/);
   await click('release'); assert.equal(opened, 1);
   await page.locator('[data-page=jobs]').click(); await page.locator('#update-hint').click(); await phase('available');
-  await click('download'); await phase('downloading'); fake.emit('download-progress', { percent: 44, transferred: 58.2e6, total: 131e6 });
+  await click('download'); await phase('downloading');
+  assert.match(await page.locator('.upd-head').innerText(), /Preparing to download/);
+  assert.equal(await page.locator('progress').getAttribute('value'), null);
+  fake.emit('download-progress', { percent: 44, transferred: 264000, total: 600000 });
   await page.waitForFunction(() => document.querySelector('progress')?.value === 44);
+  assert.match(await page.locator('.upd-head').innerText(), /0\.3 \/ 0\.6 MB/);
+  await page.evaluate(() => window.changeLanguage('zh-CN'));
+  await page.waitForFunction(() => document.querySelector('.upd-head').innerText.includes('正在下载'));
+  assert.match(await page.locator('.upd-head').innerText(), /0\.3 \/ 0\.6 MB/);
+  await page.evaluate(() => window.changeLanguage('en'));
   await click('cancel'); await phase('available');
   await click('download'); await phase('downloading'); fake.rejectDownload(Error('offline')); await phase('error');
   assert.match(await page.locator('.upd-head').innerText(), /Could not download/);

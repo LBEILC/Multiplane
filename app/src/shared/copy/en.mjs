@@ -35,6 +35,7 @@ export default {
   upManual: 'Installers for this platform are not signed and cannot be installed from inside the app. Download the new version and install it over this one.',
   openDownload: 'Open download page',
   upDownloading: 'Downloading {v} · {a} / {b} MB',
+  upPreparingDownload: 'Preparing to download {v}…',
   cancelDl: 'Cancel',
   upReady: '{v} is downloaded and installs when the app restarts',
   restartInstall: 'Restart and install',

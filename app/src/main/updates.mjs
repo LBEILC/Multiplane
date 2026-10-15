@@ -16,11 +16,15 @@ const releaseUrl = value => {
 
 // Electron is injected so every transition can be exercised without the network.
 export class Updates {
-  constructor({ platform, packaged, version, updater, fetcher = fetch, publish = (_state) => {}, log = (_scope, _error) => {}, now = () => new Date().toISOString(), timers = { setInterval, clearInterval } }) {
+  constructor({ platform, packaged, version, updater, installationDirectory, fetcher = fetch, publish = (_state) => {}, log = (_scope, _error) => {}, now = () => new Date().toISOString(), timers = { setInterval, clearInterval } }) {
     Object.assign(this, { updater, fetcher, publish, log, now, timers });
     this.state = { phase: packaged ? 'idle' : 'development', currentVersion: version, version: '', canInstall: packaged && platform === 'win32', checkedAt: '', publishedAt: '', notes: '', releaseUrl: releasePage, percent: 0, transferred: 0, total: 0, errorStage: '' };
     this.packaged = packaged;
     if (this.state.canInstall) {
+      // Preserve updater diagnostics, including blockmap URLs, fallback errors and spawn arguments.
+      updater.logger = Object.fromEntries(['info', 'warn', 'error', 'debug'].map(level => [level, (...args) => this.log(`updates:${level}`, args.map(value => value?.stack ?? String(value)).join(' '))]));
+      // Update the running installation even if the install registry has drifted.
+      if (installationDirectory) updater.installDirectory = installationDirectory;
       updater.autoDownload = false;
       updater.autoInstallOnAppQuit = false;
       updater.allowPrerelease = false;
@@ -30,6 +34,7 @@ export class Updates {
         if (this.state.phase !== 'downloading' || this.cancelling) return;
         const number = value => Number.isFinite(value) ? Math.max(0, value) : 0;
         this.set({ percent: Math.min(100, number(progress.percent)), transferred: number(progress.transferred), total: number(progress.total) });
+        this.log('updates:progress', JSON.stringify({ transferred: this.state.transferred, total: this.state.total, percent: this.state.percent }));
       });
       // check/download also reject; install can report failures only through this event.
       updater.on('error', error => { this.log('updates', error); if (this.installing) { this.installing = false; this.set({ phase: 'error', errorStage: 'install' }); } });

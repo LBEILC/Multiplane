@@ -35,6 +35,7 @@ export default {
   upManual: '这个平台的安装包没有签名，不能在软件里自动安装。下载新版本后覆盖安装即可。',
   openDownload: '前往下载页',
   upDownloading: '正在下载 {v} · {a} / {b} MB',
+  upPreparingDownload: '正在准备下载 {v}…',
   cancelDl: '取消',
   upReady: '{v} 已下载，重启后完成安装',
   restartInstall: '重启并安装',

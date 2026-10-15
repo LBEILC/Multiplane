@@ -18,6 +18,13 @@
 !macroend
 
 !macro customUnInstall
+  Push $R0
+  ${StdUtils.GetParentPath} $R0 "$LOCALAPPDATA\${APP_INSTALLER_STORE_FILE}"
   Delete "$LOCALAPPDATA\${APP_INSTALLER_STORE_FILE}"
-  RMDir "$LOCALAPPDATA\multiplane-desktop-updater"
+  ${IfNot} ${isUpdated}
+    Delete "$R0\blockmap-pair.json"
+    Delete "$R0\blockmap-pair.json.tmp"
+  ${EndIf}
+  RMDir "$R0"
+  Pop $R0
 !macroend

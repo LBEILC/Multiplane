@@ -17,7 +17,9 @@ import { applicationMenu } from './menu';
 import { configureDesktopPaths, migratePreferences, singleInstance } from './lifecycle.mjs';
 import { createLogger } from './log.mjs';
 import { Updates } from './updates.mjs';
-import { autoUpdater } from 'electron-updater';
+import { autoUpdater as platformUpdater } from 'electron-updater';
+import { WindowsUpdater } from './windows-updater.mjs';
+const autoUpdater = process.platform === 'win32' ? new WindowsUpdater() : platformUpdater;
 
 // Main-process verification uses the same functions as doctor, without adding IPC.
 export { bundledCommand, rendererRoot };
@@ -121,7 +123,7 @@ if (primary) app.whenReady().then(async () => {
   });
   const skills = new Skills(root, { ...process.env, MULTIPLANE_AGENT_HOME: process.env.MULTIPLANE_TEST_USER_HOME || process.env.MULTIPLANE_AGENT_HOME || os.homedir() });
   const settings = async () => ({ ...await config.read(), own: prefs.value, version, packaged: app.isPackaged });
-  const updates = new Updates({ platform: process.platform, packaged: app.isPackaged, version: app.getVersion(), updater: autoUpdater, fetcher: (input, init) => net.fetch(input instanceof URL ? input.href : input, init), log, publish: (state: unknown) => { if (!win.isDestroyed()) win.webContents.send('updates:state', state); } });
+  const updates = new Updates({ platform: process.platform, packaged: app.isPackaged, version: app.getVersion(), updater: autoUpdater, installationDirectory: path.dirname(app.getPath('exe')), fetcher: (input, init) => net.fetch(input instanceof URL ? input.href : input, init), log, publish: (state: unknown) => { if (!win.isDestroyed()) win.webContents.send('updates:state', state); } });
   handle('updates:state', () => updates.state);
   handle('updates:check', () => updates.check());
   handle('updates:download', () => updates.download());

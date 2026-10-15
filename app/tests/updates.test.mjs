@@ -9,6 +9,35 @@ import path from 'node:path';
 
 const make = (extra = {}) => new Updates({ platform: 'win32', packaged: true, version: '0.3.0', updater: new FakeUpdater(), ...extra });
 
+test('updater diagnostics and actual transferred bytes reach the persistent logger', async () => {
+  const rows = [], u = make({ log: (scope, message) => rows.push({ scope, message }) });
+  const f = u.updater;
+  f.logger.info('Download block maps (old: "https://example.invalid/v0.3.0/setup.blockmap")');
+  f.logger.debug('download range: bytes=0-99');
+  f.logger.warn('Cache miss');
+  f.logger.error(Error('Cannot download differentially, fallback to full download'));
+  await u.check(); const pending = u.download();
+  f.emit('download-progress', { percent: 50, transferred: 300000, total: 600000 });
+  assert.equal(u.state.total, 600000);
+  assert.equal(u.state.transferred, 300000);
+  f.emit('download-progress', { percent: 100, transferred: 600000, total: 600000 });
+  f.resolveDownload([]); await pending;
+  f.logger.info('Executing: setup.exe with args: --updated,--force-run');
+  assert.ok(rows.some(row => row.scope === 'updates:info' && row.message.includes('v0.3.0')));
+  assert.ok(rows.some(row => row.scope === 'updates:error' && row.message.includes('fallback to full download')));
+  assert.ok(rows.some(row => row.scope === 'updates:info' && row.message.includes('--force-run')));
+  assert.deepEqual(JSON.parse(rows.filter(row => row.scope === 'updates:progress').at(-1).message), { transferred: 600000, total: 600000, percent: 100 });
+});
+
+test('Windows updates explicitly target the running installation directory', () => {
+  const installationDirectory = 'D:\\Custom Programs\\Multiplane';
+  const u = make({ installationDirectory });
+  assert.equal(u.updater.installDirectory, installationDirectory);
+  for (const extra of [{ packaged: false }, { platform: 'darwin' }]) {
+    assert.equal(make({ installationDirectory, ...extra }).updater.installDirectory, undefined);
+  }
+});
+
 test('Windows explicit download, progress, cancel/retry, install and no background install', async () => {
   const updates = make(), fake = updates.updater, phases = [];
   updates.publish = state => phases.push(state.phase);
