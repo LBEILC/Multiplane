@@ -35,6 +35,10 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     relative = path.relative(root, await normalizeResourcePath(entry));
   }
   if (path.extname(relative).toLowerCase() !== '.html') throw invalidOption('shot', 'Shot must be an HTML file.');
+  if (relative.split(path.sep).includes('node_modules')) throw new MultiplaneError('shot_outside_root', undefined, {
+    details: { path: relative },
+    hint: 'Files under node_modules are not served. Use --root to point to the package directory (for example, --root node_modules/multiplane).',
+  });
   try { await access(entry); } catch { throw new MultiplaneError('shot_not_found'); }
   const server = await startServer(0, root);
   let browser, page, crashed = false;
@@ -42,7 +46,7 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     browser = await launchBrowser(options);
     await options.onBrowser?.(browser);
     page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: scale });
-    if (reuseEnabled(options)) await page.addInitScript(installStaticObserver);
+    if (reuseEnabled(options)) await page.addInitScript(installStaticObserver, { platform: process.platform });
     page.on('crash', () => { crashed = true; });
     const errors = [];
     const observerProbe = request => {
@@ -57,8 +61,12 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     page.on('response', response => { if (response.status() >= 400 && !observerProbe(response.request())) errors.push(new MultiplaneError(response.headers()['x-multiplane-error'] === 'three_not_installed' ? 'three_not_installed' : 'resource_failed', undefined, { details: { status: response.status(), url: response.url() } })); });
     page.on('requestfailed', request => { if (!observerProbe(request)) errors.push(new MultiplaneError('resource_failed', undefined, { details: { url: request.url() } })); });
     const url = `${server.url}/${relative.split(path.sep).map(encodeURIComponent).join('/')}?mode=render`;
-    const response = await page.goto(url).catch(cause => { throw new MultiplaneError('shot_load_failed', undefined, { cause }); });
-    if (!response.ok()) throw new MultiplaneError('shot_load_failed');
+    const response = await page.goto(url).catch(cause => {
+      const failedResponse = errors.find(error => error.details?.url === url && error.details.status);
+      throw new MultiplaneError('shot_load_failed', undefined, { cause,
+        details: { path: relative, url, status: failedResponse?.details.status ?? null, reason: cause.message } });
+    });
+    if (!response?.ok()) throw new MultiplaneError('shot_load_failed', undefined, { details: { path: relative, url, status: response?.status() ?? null } });
     if (errors.length) throw errors[0];
     if (!await page.evaluate(() => typeof window.SHOT?.render === 'function')) throw new MultiplaneError('shot_contract_invalid');
     const metadata = await page.evaluate(async () => {

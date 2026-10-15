@@ -1,11 +1,13 @@
 {
   "name": "multiplane-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/main.cjs",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "node tools/build.mjs",
     "start": "node tools/start.mjs",
@@ -30,5 +32,7 @@
     "electron-updater": "6.8.9",
     "remixicon": "4.9.1"
   },
-  "allowScripts": { "esbuild@0.27.3": true }
+  "allowScripts": {
+    "esbuild@0.27.3": true
+  }
 }

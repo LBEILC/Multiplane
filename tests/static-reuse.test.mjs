@@ -11,7 +11,7 @@ import { openShot } from '../src/capture.mjs';
 import { createPostCapture } from '../src/post.mjs';
 import { createRenderPool } from '../src/render-pool.mjs';
 import { verifyShot } from '../src/verify.mjs';
-import { reuseState, reuseReport, reuseEnabled, verifiedFrames } from '../src/static-reuse.mjs';
+import { reuseState, reuseReport, reuseEnabled, verifiedFrames, installStaticObserver } from '../src/static-reuse.mjs';
 import { encodePNG, decodePNG } from '../src/png.mjs';
 import { stillsShot } from '../src/stills.mjs';
 import { createTempDirectory, run } from './helpers.mjs';
@@ -37,6 +37,17 @@ async function pixels(shot, options, count = 24) {
 const change = `const x=t<1?0:24;box.style.left=x+'px';`;
 const imageURL = value => 'data:image/png;base64,' + encodePNG({ width: 2, height: 2, data: Buffer.from([value, 0, 0, 255, value, 0, 0, 255, value, 0, 0, 255, value, 0, 0, 255]) }).toString('base64');
 const gif = Buffer.from('47494638396101000100800000ff000000ff0021f90400ffff00002c000000000100010000020244010021f90400ffff00002c00000000010001000002024c01003b', 'hex');
+
+test('macOS observer excludes textarea even when added after initialization', async () => {
+  const shot = await fixture('mac-textarea', html());
+  const capture = await openShot(shot, 1, { 'no-static-reuse': true });
+  try {
+    await capture.page.evaluate(installStaticObserver, { platform: 'darwin' });
+    await capture.page.evaluate(() => document.querySelector('#stage').append(document.createElement('textarea')));
+    for (let i = 0; i < 3; i++) assert.equal(await capture.page.evaluate(() => __multiplaneStatic.read()), true);
+    assert.equal(await capture.page.evaluate(() => __multiplaneStatic.reason), 'unobservable_api');
+  } finally { await capture.close(); }
+});
 test('SVG JPEG resources become observable static frames without weakening image checks', async () => {
   const jpeg = path.join(directory, 'neutral.jpg');
   await sharp({ create: { width: 8, height: 8, channels: 3, background: '#456' } }).jpeg().toFile(jpeg);
@@ -84,7 +95,7 @@ for (const [name, body, render, extra, options, reuse] of [
   ['input', '<input value="A">', `document.querySelector('input').value=t<1?'A':'B';`, '', {}, true],
   ['checkbox', '<input type="checkbox">', `document.querySelector('input').checked=t>=1;`, '', {}, true],
   ['checkbox-click', '<input type="checkbox">', `const input=document.querySelector('input');if(input.checked!==(t>=1))input.click();`, '', {}, true],
-  ['textarea', '<textarea>A</textarea>', `document.querySelector('textarea').value=t<1?'A':'B';`, '', {}, true],
+  ['textarea', '<textarea>A</textarea>', `document.querySelector('textarea').value=t<1?'A':'B';`, '', {}, process.platform !== 'darwin'],
   ['select', '<select><option>A</option><option>B</option></select>', `document.querySelector('select').selectedIndex=t<1?0:1;`, '', {}, true],
   ['editable', '<div contenteditable>A</div>', `const target=document.querySelector('[contenteditable]');const text=t<1?'A':'B';if(target.textContent!==text)target.textContent=text;`, '', {}, true],
   ['timer-registration', '', '', 'requestAnimationFrame(()=>{});setInterval(()=>{},10000);', {}, true],

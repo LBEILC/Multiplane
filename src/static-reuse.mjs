@@ -47,7 +47,7 @@ export async function* verifiedFrames(source, options, count, { owned = false } 
 }
 
 // Runs before any shot script, so saved drawing functions are instrumented too.
-export function installStaticObserver() {
+export function installStaticObserver({ platform } = {}) {
   let dirty = true, suspended = false, unsafe = false, styleSignature, stylesDirty = true, stylesUnsafe = false, previousSheets = [], readingStyles = false;
   const exposedDeclarations = new Map();
   let reason = null;
@@ -248,6 +248,8 @@ export function installStaticObserver() {
     finally { readingStyles = false; }
   };
   const uncertain = () => unsafe ? 'unobservable_api' : !hooks.every(check => check()) ? 'hook_replaced'
+    // Native macOS textarea scrollbars can animate outside observable DOM/CSS state.
+    : platform === 'darwin' && document.querySelector('textarea') ? 'unobservable_api'
     : document.querySelector('video,iframe,object,embed,marquee,animate,animateTransform,animateMotion,set') ? 'dynamic_element'
     : document.activeElement?.matches('input,textarea,[contenteditable]:not([contenteditable="false"])') ? 'editable_focus'
     : document.getAnimations().some(animation => animation.playState === 'running' || (animation.pending && animation.playState !== 'paused')) || document.fonts.status !== 'loaded' ? 'animation_or_font'

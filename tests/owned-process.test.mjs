@@ -21,6 +21,15 @@ async function ready(child) {
   throw Error('Owned child did not become ready');
 }
 
+test('timeout diagnostics run before owned cleanup and failures do not prevent cleanup', async () => {
+  let called = false;
+  await assert.rejects(run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+    capture: true, timeout: 100,
+    onTimeout: async () => { called = true; throw Error('diagnostic fixture'); },
+  }), /timed out/);
+  assert.equal(called, true);
+});
+
 test('owned launch preserves argument boundaries, Unicode, stdout, stderr and exit status', async () => {
   const args = ['', 'a b', 'quote"here', 'trailing\\', '中文', '& $() ` ; %PATH%'];
   const result = await run(process.execPath, ['-e', 'console.log(JSON.stringify(process.argv.slice(1)));console.error("diagnostic")', ...args], { capture: true });

@@ -11,6 +11,35 @@ import { startServer } from '../src/server.mjs';
 import { run, createTempDirectory } from './helpers.mjs';
 
 const html = '<div id="stage" style="width:32px;height:32px;background:red"></div><script>window.SHOT={duration:1,fps:4,render(){}}</script>';
+test('node_modules shots fail before launching and work with the package as root', async t => {
+  const { root } = await fixture(t);
+  const pkg = path.join(root, 'node_modules/example');
+  await mkdir(pkg, { recursive: true });
+  const shot = path.join(pkg, 'shot.html');
+  await writeFile(shot, html);
+  let launched = false;
+  await assert.rejects(openShot(shot, 1, { root, onBrowser: () => { launched = true; } }), error => {
+    assert.equal(error.code, 'shot_outside_root');
+    assert.match(error.hint, /--root.*package directory/);
+    assert.equal(error.details.path, path.relative(root, shot));
+    return true;
+  });
+  assert.equal(launched, false);
+  const capture = await openShot(shot, 1, { root: pkg });
+  await capture.close();
+});
+
+test('HTTP shot failures retain status and resource path', async t => {
+  const { root } = await fixture(t);
+  await writeFile(path.join(root, '.blocked.html'), html);
+  await assert.rejects(openShot('.blocked.html', 1, { root }), error => {
+    assert.equal(error.code, 'shot_load_failed');
+    assert.equal(error.details.status, 403);
+    assert.equal(error.details.path, '.blocked.html');
+    assert.match(error.details.url, /\/\.blocked.html\?mode=render$/);
+    return true;
+  });
+});
 async function fixture(t) {
   const work = createTempDirectory('multiplane-path-test-');
   t.after(() => rm(work, { recursive: true, force: true }));

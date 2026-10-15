@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 // All tool launches own their cleanup scope; killTree remains accepted for callers.
-export function run(file, args, { cwd, env = process.env, capture = false, timeout = 600000, onOutput, killTree = false, windowsVerbatimArguments = false, timeoutMessage } = {}) {
+export function run(file, args, { cwd, env = process.env, capture = false, timeout = 600000, onOutput, onTimeout, killTree = false, windowsVerbatimArguments = false, timeoutMessage } = {}) {
   return new Promise((resolve, reject) => {
     const started = performance.now();
     const child = spawnOwned(file, args, { cwd, env, shell: false, windowsVerbatimArguments, windowsHide: true, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit' });
@@ -13,7 +13,9 @@ export function run(file, args, { cwd, env = process.env, capture = false, timeo
     const timer = setTimeout(() => {
       timedOut = true;
       // Attach a rejection handler immediately; close also waits for cleanup.
-      cleanup = stopOwned(child).then(() => null, error => {
+      cleanup = Promise.resolve().then(() => onTimeout?.()).catch(error => {
+        console.warn(`Timeout diagnostics failed: ${error.message}`);
+      }).then(() => stopOwned(child)).then(() => null, error => {
         // If the OS refuses tree termination, report it instead of waiting on
         // inherited pipes forever. Still wait for the direct child's exit.
         child.stdout?.destroy(); child.stderr?.destroy();

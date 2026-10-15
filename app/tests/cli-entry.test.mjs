@@ -8,6 +8,7 @@ import { launcherText, writeLauncher } from '../tools/cli-launcher.mjs';
 import { entryCommand } from '../tools/entry-command.mjs';
 import { createTempDirectory } from './helpers.mjs';
 import { findCommand } from '../src/main/settings.mjs';
+import { generateAppRunScript } from 'app-builder-lib/out/targets/appimage/appImageUtil.js';
 
 test('bundled entry paths and copyable commands cover all three platforms', () => {
   assert.deepEqual(cliEntry('win32','C:\\Install space\\Multiplane.exe','unused',{}), { path: 'C:\\Install space\\multiplane.cmd', args: [] });
@@ -43,18 +44,25 @@ test('Unix entry scripts use exec and preserve argument boundaries; Linux forwar
   assert.match(linux,/fi\nexec "\$base\/multiplane-runtime" --no-sandbox "\$@"/);
 });
 
-for (const platform of ['darwin', 'linux']) test(`${platform} shell entry forwards real argv, stdin and exit status through a runtime fixture`, async t => {
-  const shell = process.platform === 'win32' ? await findCommand('bash') : '/bin/sh';
+for (const platform of ['darwin', 'linux', 'linux-AppRun']) test(`${platform} shell entry forwards real argv, stdin and exit status through a runtime fixture`, async t => {
+  const shell = process.platform === 'win32' || platform === 'linux-AppRun' ? await findCommand('bash') : '/bin/sh';
   if (!shell) { t.skip('No POSIX shell available'); return; }
   const root = createTempDirectory('multiplane-shell-'); t.after(() => rm(root, { recursive: true, force: true }));
   const install = path.join(root, 'install space'), resources = platform === 'darwin' ? path.join(install, 'Multiplane.app/Contents/Resources') : path.join(install, 'resources');
   const runtime = platform === 'darwin' ? path.join(resources, '../MacOS/Multiplane') : path.join(install, 'multiplane-desktop');
   await mkdir(path.dirname(runtime), { recursive: true });
   await writeFile(runtime, '#!/bin/sh\nprintf \'%s\\0\' "${ELECTRON_RUN_AS_NODE-}" "$@"\ncat\nexit 7\n', { mode: 0o755 });
-  await writeLauncher(platform, install, resources);
-  const entry = platform === 'darwin' ? path.join(resources, 'bin/multiplane') : path.join(install, 'multiplane-desktop');
+  await writeLauncher(platform === 'darwin' ? platform : 'linux', install, resources);
+  let entry = platform === 'darwin' ? path.join(resources, 'bin/multiplane') : path.join(install, 'multiplane-desktop');
+  if (platform === 'linux-AppRun') {
+    entry = path.join(install, 'AppRun');
+    await writeFile(entry, generateAppRunScript({ ExecutableName: 'multiplane-desktop' }), { mode: 0o755 });
+    // Force AppRun's real fallback branch on every test host.
+    await writeFile(path.join(install, 'unshare'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  }
   const args = ['two words', 'embedded"quote', '路径/镜头', ''];
-  const child = spawn(shell, [entry.replaceAll('\\', '/'), ...(platform === 'linux' ? ['--multiplane-cli'] : []), ...args], { windowsHide: true });
+  const child = spawn(shell, [entry.replaceAll('\\', '/'), ...(platform.startsWith('linux') ? ['--multiplane-cli'] : []), ...args], { windowsHide: true,
+    env: { ...process.env, APPDIR: install.replaceAll('\\', '/'), APPIMAGE_EXTRACT_AND_RUN: '1', APPIMAGE_EXIT_AFTER_INSTALL: '' } });
   let stdout = '', stderr = ''; child.stdout.on('data', b => stdout += b); child.stderr.on('data', b => stderr += b);
   const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
   child.stdin.end('stdin payload'); assert.equal(await done, 7, stderr);

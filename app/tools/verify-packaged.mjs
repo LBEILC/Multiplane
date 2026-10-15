@@ -24,6 +24,7 @@ import { cliEntry } from '../src/main/cli-entry.mjs';
 import { entryCommand } from './entry-command.mjs';
 import { doctorCopy } from '../src/shared/doctor-copy.mjs';
 import { t } from '../src/shared/i18n.mjs';
+import { runInstaller } from './installer-run.mjs';
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(appRoot, '..');
 const windows = process.platform === 'win32', mac = process.platform === 'darwin';
@@ -85,7 +86,7 @@ try {
   evidence.browserDownload.cacheExistedBefore = await exists(browserCache);
   assert.equal(evidence.browserDownload.cacheExistedBefore, false, 'Verification requires a fresh isolated browser cache; existing caches must never be removed');
   if (unpacked) { await cp(unpacked, installation, { recursive: true }); assert.ok(await exists(executable), 'Unpacked executable is missing'); }
-  else if (windows) await run(installer, ['/S', '/currentuser', `/D=${installation}`], { env, timeout: 300000 });
+  else if (windows) await runInstaller(installer, ['/S', '/currentuser', `/D=${installation}`], { ...env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data });
   else if (mac) { await mkdir(installation); await run('hdiutil', ['attach', installer, '-nobrowse', '-readonly', '-mountpoint', installation]); }
   else {
     const extractionEnv = { ...env }; delete extractionEnv.APPIMAGE_EXTRACT_AND_RUN;
@@ -333,7 +334,7 @@ try {
   }
   if (windows && !unpacked && (installed || await exists(path.join(installation, 'Uninstall Multiplane.exe')))) {
     // Let NSIS copy itself outside the installation, then wait for its worker to finish.
-    await run(path.join(installation, 'Uninstall Multiplane.exe'), ['/S', '/currentuser'], { env, timeout: 300000 });
+    await runInstaller(path.join(installation, 'Uninstall Multiplane.exe'), ['/S', '/currentuser'], { ...env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data });
     await waitFor(async () => !await exists(installation), 'Uninstaller left installation files', 60000);
     for (const file of [...shortcuts, ...(cache ? [cache] : [])]) await waitFor(async () => !await exists(file), 'Uninstaller left shortcuts or installer cache');
     for (const key of keys) assert.equal(registryExists('HKCU', key), false, 'Uninstaller left registry keys');
