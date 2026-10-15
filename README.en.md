@@ -48,8 +48,10 @@ Requires Node.js 24 or later and FFmpeg with libx264 support.
 npm install multiplane
 npx playwright install chromium
 npx multiplane doctor
-npx multiplane render node_modules/multiplane/examples/animation.html
+npx multiplane render examples/animation.html --root node_modules/multiplane
 ```
+
+The examples live inside the installed package, so `--root` points the resource root at the package; for safety, renders never serve files from under `node_modules`.
 
 Recent npm versions do not run install scripts of dependencies, so the second command downloads the Chromium build that Playwright uses. To work from a clone of this repository instead, run `npm install` in it and render `examples/animation.html` directly.
 

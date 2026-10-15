@@ -48,8 +48,10 @@
 npm install multiplane
 npx playwright install chromium
 npx multiplane doctor
-npx multiplane render node_modules/multiplane/examples/animation.html
+npx multiplane render examples/animation.html --root node_modules/multiplane
 ```
+
+示例在安装好的包里，所以用 `--root` 把资源根指向包目录；出于安全，渲染时不会提供 `node_modules` 下的文件。
 
 新版 npm 默认不运行依赖包的安装脚本，所以第二条命令用来下载 Playwright 使用的 Chromium。如果是克隆了本仓库，在仓库里运行 `npm install`，直接渲染 `examples/animation.html` 即可。
 
