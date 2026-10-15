@@ -3,9 +3,21 @@ import { createTempDirectory } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { packagedLaunch, packagedNodeCommand } from '../tools/packaged-launch.mjs';
+import { packagedLaunch, packagedNodeCommand, appImageInvocationEnvironment } from '../tools/packaged-launch.mjs';
 import { bundledInvocation } from '../src/main/settings.mjs';
 import os from 'node:os';
+
+test('extract-and-run invocations cannot reuse the live GUI extraction directory', () => {
+  const owner = { APPIMAGE_EXTRACT_AND_RUN: '1', TMPDIR: '/tmp/gui', MULTIPLANE_HOME: '/home/render' };
+  const cli = appImageInvocationEnvironment(owner, '/tmp/cli');
+  const contender = appImageInvocationEnvironment(owner, '/tmp/contender');
+  assert.equal(owner.TMPDIR, '/tmp/gui');
+  assert.equal(cli.TMPDIR, '/tmp/cli');
+  assert.equal(contender.TMPDIR, '/tmp/contender');
+  assert.equal(cli.MULTIPLANE_HOME, owner.MULTIPLANE_HOME);
+  const mounted = { TMPDIR: '/tmp/gui' };
+  assert.equal(appImageInvocationEnvironment(mounted, '/tmp/cli'), mounted);
+});
 
 test('Linux probes bypass AppImage and AppRun while GUI retains its sandbox flags', () => {
   for (const noSandbox of [true, false]) {

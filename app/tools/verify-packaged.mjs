@@ -16,7 +16,7 @@ import { run } from '../../tools/process.mjs';
 import { fontHash } from './fonts.mjs';
 import { verifyNotices } from './notices.mjs';
 import { findInstaller } from './installer-file.mjs';
-import { packagedLaunch, packagedNodeCommand } from './packaged-launch.mjs';
+import { packagedLaunch, packagedNodeCommand, appImageInvocationEnvironment } from './packaged-launch.mjs';
 import { fileSnapshot } from './file-snapshot.mjs';
 import { privacyMasks } from './smoke-diagnostics.mjs';
 import { seedMixedJobs } from './mixed-jobs.mjs';
@@ -26,6 +26,7 @@ import { doctorCopy } from '../src/shared/doctor-copy.mjs';
 import { t } from '../src/shared/i18n.mjs';
 import { runInstaller } from './installer-run.mjs';
 import { verifyThreeRender, verifyUnpackedThree } from './verify-three.mjs';
+import { cliJsonResult } from './cli-json-result.mjs';
 
 if (process.argv.includes('--three-only')) {
   const index = process.argv.indexOf('--unpacked');
@@ -184,7 +185,7 @@ try {
   await waitFor(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()), 'Owner did not minimize');
   // Without FUSE, both AppImage copies would extract to the same /tmp directory, and the
   // runtime deletes it when the second copy exits, taking the first copy's files with it.
-  const contenderEnv = env.APPIMAGE_EXTRACT_AND_RUN === '1' ? { ...env, TMPDIR: path.join(work, 'contender-tmp') } : env;
+  const contenderEnv = appImageInvocationEnvironment(env, path.join(work, 'contender-tmp'));
   if (contenderEnv !== env) await mkdir(contenderEnv.TMPDIR, { recursive: true });
   const contender = await run(executable, launchArgs, { env: contenderEnv, capture: true, timeout: 15000, killTree: true });
   assert.equal(contender.code, 0);
@@ -256,18 +257,20 @@ try {
   evidence.checks.push('Settings page persisted workers=2 in the isolated renderer home');
   await shot('settings.png');
   const entry = cliEntry(process.platform, launch.node, resources, unpacked ? {} : { ...env, APPIMAGE: installer });
-  const invoke = args => { const command = entryCommand(entry, args); return run(command.file, command.args, { ...command.options, env, cwd: project, capture: true, killTree: true }); };
-  // With APPIMAGE_EXTRACT_AND_RUN, the AppImage runtime lists the files it extracts on stdout first.
-  const commandVersion = await invoke(['--version']); assert.equal(commandVersion.stdout.trim().split('\n').at(-1).trim(), pkg.version);
+  const cliEnv = appImageInvocationEnvironment(env, path.join(work, 'cli-tmp'));
+  if (cliEnv !== env) await mkdir(cliEnv.TMPDIR, { recursive: true });
+  const invoke = args => { const command = entryCommand(entry, args); return run(command.file, command.args, { ...command.options, env: cliEnv, cwd: project, capture: true, killTree: true }); };
+  // Runtime diagnostics must never be mistaken for command output.
+  const commandVersion = await invoke(['--version']); assert.equal(commandVersion.stdout.trim(), pkg.version);
   const commandDoctor = await invoke(['doctor', '--json']);
-  assert.equal(JSON.parse(commandDoctor.stdout.trim().split('\n').at(-1)).ok, true);
+  assert.equal(cliJsonResult(commandDoctor.stdout).ok, true);
   const commandConfig = await invoke(['config', 'get', '--json']);
-  assert.equal(JSON.parse(commandConfig.stdout.trim().split('\n').at(-1)).data.file, path.join(home, 'config.json'));
+  assert.equal(cliJsonResult(commandConfig.stdout).data.file, path.join(home, 'config.json'));
   evidence.cliEntry = { version: true, doctor: true, config: true, spacePath: true };
   evidence.threeRender = await verifyThreeRender(invoke, project, root);
   const rendered = await invoke(['render', path.join(project, 'animation.html'), '--root', project, '--job-dir', path.join(project, 'out/jobs'), '--workers', '1', '--to', '0.5', '--json']);
   assert.equal(rendered.code, 0, rendered.stderr || rendered.stdout);
-  const events = rendered.stdout.trim().split('\n').map(JSON.parse), result = events.at(-1);
+  const result = cliJsonResult(rendered.stdout);
   assert.equal(result.ok, true); assert.equal(result.data.frames, 6);
   for (const artifact of result.artifacts) assert.ok(artifact.path.startsWith(project + path.sep), 'Render artifacts must stay in the temporary project');
   assert.ok(await exists(path.join(project, 'out/jobs', result.jobId, 'status.json')));
@@ -342,10 +345,14 @@ try {
     } catch (error) { snapshotError = error; evidence.installationUnchanged = false; evidence.failure ??= error.message; }
   }
   if (windows && !unpacked && (installed || await exists(path.join(installation, 'Uninstall Multiplane.exe')))) {
-    // Let NSIS copy itself outside the installation, then wait for its worker to finish.
-    await runInstaller(path.join(installation, 'Uninstall Multiplane.exe'), ['/S', '/currentuser'], { ...env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data });
+    // The owned job closes when its direct process exits. NSIS's default
+    // self-copy would leave a worker that the job then kills mid-uninstall.
+    // Run our own external copy synchronously; _?= disables NSIS's self-copy.
+    const uninstaller = path.join(work, 'Uninstall Multiplane.exe');
+    await cp(path.join(installation, 'Uninstall Multiplane.exe'), uninstaller);
+    await runInstaller(uninstaller, ['/S', '/currentuser', `_?=${installation}`], { ...env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data });
     await waitFor(async () => !await exists(installation), 'Uninstaller left installation files', 60000);
-    for (const file of [...shortcuts, ...(cache ? [cache] : [])]) await waitFor(async () => !await exists(file), 'Uninstaller left shortcuts or installer cache');
+    for (const file of [...shortcuts, ...(cache ? [cache] : [])]) await waitFor(async () => !await exists(file), `Uninstaller left ${file}`);
     for (const key of keys) assert.equal(registryExists('HKCU', key), false, 'Uninstaller left registry keys');
     evidence.uninstall = true;
     console.log('Uninstall verified: files, shortcuts, installer cache and registry keys removed.');

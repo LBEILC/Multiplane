@@ -120,9 +120,9 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     if (alpha && cdp) await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
     const timings = { renderCallMs: 0, screenshotMs: 0 };
     let closing, sampleContextUsed = false, motionProbeUsed = false, dofSamples = 0;
-    const draw = async (t, { motionBlur = 1, motionBlurBase = motionBlur, motionProbeTime, dofMotionSamples } = {}) => {
+    const draw = async (t, { motionBlur = 1, motionBlurBase = motionBlur, motionProbeTime, dofMotionSamples, dofMotionIndex } = {}) => {
         const renderStart = performance.now();
-        const changed = await page.evaluate(({ t, motionBlur, motionBlurBase, motionProbeTime, dofMotionSamples, alpha }) => {
+        const changed = await page.evaluate(({ t, motionBlur, motionBlurBase, motionProbeTime, dofMotionSamples, dofMotionIndex, alpha }) => {
           globalThis.__multiplaneStatic?.suspend();
           if (alpha) document.documentElement.style.setProperty('--multiplane-page-background', 'transparent');
           const stage = document.querySelector('#stage');
@@ -139,7 +139,7 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           SHOT.sampleContext = { time: t, motionBlurBase, get motionBlur() { contextUsed = true; return motionBlur; } };
           let failure;
           // Private renderer/layer handshake; never part of the shot contract.
-          const probe = globalThis.__multiplaneMotionProbe = { time: motionProbeTime, used: false, motionSamples: dofMotionSamples, samples: 0 };
+          const probe = globalThis.__multiplaneMotionProbe = { time: motionProbeTime, used: false, motionSamples: dofMotionSamples, motionIndex: dofMotionIndex, samples: 0 };
           try { SHOT.render(t); } catch (error) { failure = String(error?.message ?? error); } finally {
             delete globalThis.__multiplaneMotionProbe;
             if (previous === undefined) delete SHOT.sampleContext;
@@ -148,7 +148,7 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           stage.getBoundingClientRect();
           const changed = globalThis.__multiplaneStatic?.read() ?? true;
           return { failure, contextUsed, probeUsed: probe.used, dofSamples: probe.samples, changed, reason: globalThis.__multiplaneStatic?.reason };
-        }, { t, motionBlur, motionBlurBase, motionProbeTime, dofMotionSamples, alpha }).then(({ failure, changed, contextUsed, probeUsed, dofSamples: count, reason }) => {
+        }, { t, motionBlur, motionBlurBase, motionProbeTime, dofMotionSamples, dofMotionIndex, alpha }).then(({ failure, changed, contextUsed, probeUsed, dofSamples: count, reason }) => {
           sampleContextUsed = contextUsed;
           motionProbeUsed = probeUsed;
           dofSamples = count;

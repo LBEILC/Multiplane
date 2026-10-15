@@ -44,6 +44,8 @@ export default {
   upError: '检查更新失败，请重试。',
   retry: '重试',
   newVersion: '新版本 {v}',
+  upFullMissing: '当前版本 {v} 没有在 GitHub 上公开发布，这次需要下载完整安装包。之后的更新只下载变化的部分。',
+  upFullOther: '这次没法只下载变化的部分，需要下载完整安装包。',
   upSkills: '更新后到“环境”页更新 agent skill，让 agent 用上新版本的说明。',
   upDevelopment: '开发模式不检查更新。',
   upDownloadError: '下载更新失败，请重试。',

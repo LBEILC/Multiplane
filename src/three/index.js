@@ -176,7 +176,7 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
     }
     return patterns.get(count);
   }
-  function renderAccumulation(focus, radius, count, blur, rotation, budget = count) {
+  function renderAccumulation(focus, radius, count, blur, rotation, budget = count, stride = 1, offset = 0) {
     const position = camera.position.clone(), projection = camera.projectionMatrix.clone();
     const projectionInverse = camera.projectionMatrixInverse.clone();
     const autoClear = renderer.autoClear, oldTarget = renderer.getRenderTarget();
@@ -195,7 +195,9 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
       sumMaterial.uniforms.cameraNear.value = camera.near;
       sumMaterial.uniforms.cameraFar.value = camera.far;
       sumMaterial.uniforms.blurScale.value = radius * height * projection.elements[5] * 0.5 * blur / Math.sqrt(budget);
-      for (const [x, y, jx, jy] of pattern(count)) {
+      const points = pattern(count * stride);
+      for (let i = offset; i < points.length; i += stride) {
+        const [x, y, jx, jy] = points[i];
         const dx = (x * Math.cos(rotation) - y * Math.sin(rotation)) * radius;
         const dy = (x * Math.sin(rotation) + y * Math.cos(rotation)) * radius;
         camera.position.copy(position).addScaledVector(right, dx).addScaledVector(up, dy);
@@ -343,9 +345,15 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
         if (probe) probe.samples += actual;
         if (probe && rotate && motionBlur > 1) probe.used = true;
         const phase = (probe?.time ?? t) * 997 * Math.sqrt(2);
-        const rotation = rotate && motionBlur > 1 ? (phase - Math.floor(phase)) * Math.PI * 2 : 0;
+        // Final temporal samples partition one lens pattern, including its jitter.
+        // Fixed-phase probes and direct layer calls retain their existing pattern.
+        const interleaved = rotate && motionBlur > 1 && probe?.time === undefined
+          && Number.isInteger(probe?.motionIndex) && probe.motionIndex >= 0;
+        const stride = interleaved ? divisor : 1;
+        const rotation = !interleaved && rotate && motionBlur > 1 ? (phase - Math.floor(phase)) * Math.PI * 2 : 0;
         Object.assign(stats, { samples: actual, maxBlurRadius: maxRadius, rotation });
-        renderAccumulation(focus, radius, actual, blur, rotation, budget);
+        renderAccumulation(focus, radius, actual, blur, rotation, interleaved ? actual * stride : budget,
+          stride, interleaved ? probe.motionIndex : 0);
       }
     },
     gpuInfo() {

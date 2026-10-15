@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FakeUpdater } from './updates-fake.mjs';
+import { FakeUpdater, reportFallback } from './updates-fake.mjs';
 import { Updates, newerVersion, releasePage } from '../src/main/updates.mjs';
 import { Preferences } from '../src/main/store.mjs';
 import { createTempDirectory } from './helpers.mjs';
@@ -41,7 +41,7 @@ test('Windows updates explicitly target the running installation directory', () 
 test('Windows explicit download, progress, cancel/retry, install and no background install', async () => {
   const updates = make(), fake = updates.updater, phases = [];
   updates.publish = state => phases.push(state.phase);
-  assert.equal(fake.autoDownload, false); assert.equal(fake.autoInstallOnAppQuit, false); assert.equal(fake.allowPrerelease, false); assert.equal(fake.allowDowngrade, false);
+  assert.equal(fake.disableWebInstaller, true); assert.equal(fake.autoDownload, false); assert.equal(fake.autoInstallOnAppQuit, false); assert.equal(fake.allowPrerelease, false); assert.equal(fake.allowDowngrade, false);
   assert.equal(fake.feed.repo, 'Multiplane');
   updates.install(); await updates.download(); assert.equal(fake.installs + fake.downloads, 0);
   await updates.check(); assert.equal(updates.state.phase, 'available'); assert.equal(fake.downloads, 0);
@@ -109,4 +109,27 @@ test('auto-check preference migrates to true and persists false independently of
   await writeFile(path.join(dir, 'preferences.json'), JSON.stringify({ theme: 'dark' }));
   const prefs = new Preferences(dir); await prefs.load(); assert.equal(prefs.value.autoCheckUpdates, true);
   await prefs.save({ autoCheckUpdates: false }); const next = new Preferences(dir); await next.load(); assert.equal(next.value.autoCheckUpdates, false); assert.equal(next.value.theme, 'dark');
+});
+
+test('full download reasons follow fallback diagnostics and reset on cancellation/retry', async () => {
+  for (const [failure, reason] of [['old-404', 'old-blockmap-missing'], ['other', 'other'], ['new-404', 'other']]) {
+    const published = [], u = make({ publish: state => published.push(state) }), f = u.updater;
+    reportFallback(f, failure);
+    assert.equal(u.state.fullDownloadReason, undefined);
+    await u.check(); const pending = u.download();
+    f.emit('download-progress', { percent: 40, total: 134400000, transferred: 53760000 });
+    assert.equal(u.state.fullDownloadReason, '');
+    reportFallback(f, failure);
+    assert.equal(u.state.fullDownloadReason, reason);
+    assert.equal(published.at(-1).fullDownloadReason, reason);
+    u.cancel(); reportFallback(f); await pending;
+    assert.equal(u.state.fullDownloadReason, '');
+    const retry = u.download(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(u.state.fullDownloadReason, '');
+    f.resolveDownload([]); await retry;
+    assert.equal(u.state.phase, 'downloaded');
+    assert.equal(u.state.fullDownloadReason, '');
+    u.close(); reportFallback(f);
+    assert.equal(u.state.fullDownloadReason, '');
+  }
 });

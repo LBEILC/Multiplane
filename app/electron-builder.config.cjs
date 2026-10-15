@@ -25,6 +25,9 @@ module.exports = {
   dmg: { sign: false },
   linux: { target: ['AppImage'], icon: 'build/icons/app-512.png', category: 'AudioVideo', artifactName: 'Multiplane-${version}-${arch}.${ext}', maintainer: 'Multiplane contributors' },
   appImage: { executableArgs: [] },
+  // The legacy 2019 runtime prints extraction paths to stdout before AppRun.
+  // Pin the supported static runtime, whose extraction is quiet by default.
+  toolsets: { appimage: '1.0.3' },
   nsis: {
     installerLanguages: ['en_US', 'zh_CN'], displayLanguageSelector: false,
     include: 'tools/installer.nsh',

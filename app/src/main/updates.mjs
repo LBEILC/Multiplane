@@ -22,9 +22,14 @@ export class Updates {
     this.packaged = packaged;
     if (this.state.canInstall) {
       // Preserve updater diagnostics, including blockmap URLs, fallback errors and spawn arguments.
-      updater.logger = Object.fromEntries(['info', 'warn', 'error', 'debug'].map(level => [level, (...args) => this.log(`updates:${level}`, args.map(value => value?.stack ?? String(value)).join(' '))]));
+      updater.logger = Object.fromEntries(['info', 'warn', 'error', 'debug'].map(level => [level, (...args) => {
+        const message = args.map(value => value?.stack ?? String(value)).join(' ');
+        this.log(`updates:${level}`, message);
+        this.observeDownloadLog(message);
+      }]));
       // Update the running installation even if the install registry has drifted.
       if (installationDirectory) updater.installDirectory = installationDirectory;
+      updater.disableWebInstaller = true;
       updater.autoDownload = false;
       updater.autoInstallOnAppQuit = false;
       updater.allowPrerelease = false;
@@ -40,6 +45,15 @@ export class Updates {
       updater.on('error', error => { this.log('updates', error); if (this.installing) { this.installing = false; this.set({ phase: 'error', errorStage: 'install' }); } });
     }
   }
+  observeDownloadLog(message) {
+    if (this.state.phase !== 'downloading' || this.cancelling || this.closed) return;
+    // electron-updater 6.8.9 reports differential fallback through its logger.
+    const maps = /^Download block maps \(old: "([^"]+)", new: /.exec(message);
+    if (maps) this.oldBlockmapUrl = maps[1];
+    if (!message.startsWith('Cannot download differentially, fallback to full download:')) return;
+    const missing = /Cannot download "([^"]+)", status 404\b/.exec(message);
+    this.set({ fullDownloadReason: missing && missing[1] === this.oldBlockmapUrl ? 'old-blockmap-missing' : 'other' });
+  }
   set(patch) { this.state = { ...this.state, ...patch }; this.publish(this.state); return this.state; }
   configureAutomatic(enabled) {
     if (this.timer) this.timers.clearInterval(this.timer);
@@ -52,7 +66,8 @@ export class Updates {
   async check() {
     if (!this.packaged || this.closed || this.operation || ['downloading', 'downloaded'].includes(this.state.phase)) return this.state;
     this.operation = 'check';
-    this.set({ phase: 'checking', errorStage: '' });
+    this.oldBlockmapUrl = undefined;
+    this.set({ phase: 'checking', errorStage: '', fullDownloadReason: '' });
     try {
       let info, allowed = true;
       if (this.state.canInstall) {
@@ -83,7 +98,8 @@ export class Updates {
     if (!this.token || this.token.cancelled) await this.check();
     if (this.state.phase !== 'available' || this.operation || this.closed || !this.token) return this.state;
     this.operation = 'download'; this.cancelling = false;
-    this.set({ phase: 'downloading', percent: 0, transferred: 0, total: 0, errorStage: '' });
+    this.oldBlockmapUrl = undefined;
+    this.set({ phase: 'downloading', percent: 0, transferred: 0, total: 0, errorStage: '', fullDownloadReason: '' });
     try {
       await this.updater.downloadUpdate(this.token);
       if (!this.cancelling && !this.closed) this.set({ phase: 'downloaded', percent: 100 });
@@ -91,7 +107,7 @@ export class Updates {
       if (!this.cancelling && !this.closed) { this.log('updates', error); this.set({ phase: 'error', errorStage: 'download' }); }
     } finally {
       this.operation = undefined;
-      if (this.cancelling && !this.closed) this.set({ phase: 'available', percent: 0, transferred: 0, total: 0 });
+      if (this.cancelling && !this.closed) this.set({ phase: 'available', percent: 0, transferred: 0, total: 0, fullDownloadReason: '' });
       this.cancelling = false;
     }
     return this.state;

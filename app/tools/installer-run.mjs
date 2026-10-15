@@ -13,7 +13,12 @@ export function installerEnvironment(isolated, system = process.env) {
 
 export function runInstaller(file, args, isolated, { system = process.env, execute = run, timeout = 300000, log = console.error } = {}) {
   const env = installerEnvironment(isolated, system);
-  return execute(file, args, { env, timeout, onTimeout: async () => {
+  // NSIS parses the raw command line: even quoting /S disables silent mode.
+  // /D= and _?= must be last and unquoted, including paths containing spaces.
+  if (args.some(arg => /["\r\n\0]/.test(arg))) throw Error('Invalid NSIS argument');
+  const directory = args.findIndex(arg => arg.startsWith('/D=') || arg.startsWith('_?='));
+  if (directory >= 0 && directory !== args.length - 1) throw Error('NSIS directory argument must be last');
+  return execute(file, args, { env, timeout, windowsVerbatimArguments: true, onTimeout: async () => {
     // Read only: capture diagnostics before the owned installer job is stopped.
     const result = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CreationDate,Name | ConvertTo-Json -Compress'],

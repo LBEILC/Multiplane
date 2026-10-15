@@ -44,6 +44,8 @@ export default {
   upError: 'Could not check for updates. Please try again.',
   retry: 'Retry',
   newVersion: 'Version {v}',
+  upFullMissing: 'Version {v} was not published on GitHub, so this update downloads the full installer. Later updates download only the changed parts.',
+  upFullOther: 'This update cannot download only the changed parts, so it downloads the full installer.',
   upSkills: 'After updating, update the agent skill on the Environment page so agents get the new instructions.',
   upDevelopment: 'Updates are disabled in development mode.',
   upDownloadError: 'Could not download the update. Please try again.',

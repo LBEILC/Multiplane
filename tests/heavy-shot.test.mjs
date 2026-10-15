@@ -122,3 +122,47 @@ for (const quality of ['fast', 'standard', 'high']) fullTest(`three ${quality} v
   for (const name of ['reorder', 'reload', 'workers:1', 'workers:2']) assert.ok(result.data.checks.some(c => c.name === name && c.passed), name);
 });
 
+
+// Inspect actual camera/projection samples in a small, original scene.
+test('final lens samples partition the full pattern and jitter regardless of capture order', async () => {
+  const capture = await openShot(await threeShot(), 1, { raster: 'software' });
+  try {
+    await capture.page.evaluate(async () => {
+      SHOT.render = () => layer.render();
+      const draw = layer.renderer.render.bind(layer.renderer);
+      window.lensPoints = [];
+      layer.renderer.render = (scene, camera) => {
+        if (scene === layer.scene) lensPoints.push([...camera.position.toArray(), ...camera.projectionMatrix.elements]);
+        return draw(scene, camera);
+      };
+      const { FullScreenQuad } = await import('/multiplane/vendor/three/examples/jsm/postprocessing/Pass.js');
+      const sum = FullScreenQuad.prototype.render;
+      window.blurScales = [];
+      FullScreenQuad.prototype.render = function(renderer) {
+        if (this.material.uniforms?.blurScale) blurScales.push(this.material.uniforms.blurScale.value);
+        return sum.call(this, renderer);
+      };
+    });
+    for (const n of [4, 6, 16]) {
+      const actual = Math.max(2, Math.ceil(16 / n)), total = actual * n;
+      await capture.page.evaluate(total => { layer.sampling.samples = layer.sampling.maxSamples = total; lensPoints = []; blurScales = []; }, total);
+      await capture.frame(.25, { motionBlur: 1 });
+      const full = await capture.page.evaluate(() => ({ points: lensPoints, scales: blurScales }));
+      await capture.page.evaluate(() => { layer.sampling.samples = layer.sampling.maxSamples = 16; });
+      const images = new Map(), union = [];
+      for (const k of Array.from({ length: n }, (_, k) => k)) {
+        await capture.page.evaluate(() => { lensPoints = []; blurScales = []; });
+        images.set(k, decodePNG(await capture.frame(.25, { motionBlur: n, dofMotionSamples: n, dofMotionIndex: k })).data);
+        const part = await capture.page.evaluate(() => ({ points: lensPoints, scales: blurScales, rotation: layer.stats.rotation }));
+        assert.equal(part.rotation, 0);
+        assert.deepEqual(part.points, full.points.filter((_, i) => i % n === k));
+        assert.deepEqual(part.scales, Array(actual).fill(full.scales[0]));
+        union.push(...part.points.map(point => JSON.stringify(point)));
+      }
+      assert.equal(new Set(union).size, total);
+      for (let k = n - 1; k >= 0; k--) {
+        assert.deepEqual(decodePNG(await capture.frame(.25, { motionBlur: n, dofMotionSamples: n, dofMotionIndex: k })).data, images.get(k));
+      }
+    }
+  } finally { await capture.close(); }
+});

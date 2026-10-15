@@ -26,7 +26,20 @@ test('install and uninstall timeouts collect a read-only process list with the r
     assert.match(calls[1].args.at(-1), /Get-CimInstance Win32_Process/);
     assert.equal(calls[1].options.timeout, 10000);
     assert.equal(calls[0].options.env.USERPROFILE, 'real');
+    assert.equal(calls[0].options.windowsVerbatimArguments, true);
     assert.equal(calls[0].options.env.MULTIPLANE_HOME, 'isolated-home');
     assert.match(logs[0], /ProcessId.*123/);
   }
+});
+
+test('NSIS directory tails remain unquoted and last, including spaces', async () => {
+  for (const tail of ['/D=C:\\test space\\installed', '_?=C:\\test space\\installed']) {
+    const args = ['/S', '/currentuser', tail];
+    await runInstaller('setup.exe', args, {}, { execute: async (_file, actual, options) => {
+      assert.deepEqual(actual, args);
+      assert.equal(options.windowsVerbatimArguments, true);
+    } });
+  }
+  assert.throws(() => runInstaller('setup.exe', ['/D=C:\\test', '/S'], {}), /must be last/);
+  assert.throws(() => runInstaller('setup.exe', ['"/S"'], {}), /Invalid NSIS/);
 });

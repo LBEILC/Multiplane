@@ -12,3 +12,10 @@ export function packagedLaunch(platform, installation, installer, noSandbox = fa
 export function packagedNodeCommand(executable, args, env) {
   return { file: executable, args: [...args], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
 }
+
+// Concurrent extract-and-run processes share the hash-named extraction tree.
+// Give short-lived invocations a different TMPDIR so their cleanup cannot
+// remove the running GUI's files. Mounted AppImages need no override.
+export function appImageInvocationEnvironment(env, temporaryDirectory) {
+  return env.APPIMAGE_EXTRACT_AND_RUN === '1' ? { ...env, TMPDIR: temporaryDirectory } : env;
+}

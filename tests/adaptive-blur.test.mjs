@@ -68,9 +68,38 @@ test('refinement shares the final lens budget without recapturing decision image
     const final = calls.filter(call => call.motionProbeTime === undefined);
     const probes = calls.filter(call => call.motionProbeTime !== undefined);
     assert.equal(final.length, maximum);
+    const sorted = [...final].sort((a, b) => a.t - b.t);
+    assert.deepEqual(sorted.map(call => call.dofMotionIndex), Array.from({ length: maximum }, (_, k) => k));
+    assert.ok(probes.every(call => call.dofMotionIndex === undefined));
     assert.equal(new Set(probes.map(call => call.t)).size, probes.length);
     assert.ok(probes.every(call => call.motionBlurBase === 4));
     assert.deepEqual(actual, averageLinear(final.map(call => draw(call.t, call))));
+  }
+});
+
+test('lens indices follow unique final times across clipped shutters and reversed frame order', async () => {
+  for (const maximum of [8, 32]) for (const shutter of [0, 0.75]) {
+    const records = new Map();
+    for (const order of [[0, 0.999, 1, 2], [2, 1, 0.999, 0]]) {
+      const calls = [];
+      const capture = fixture((t, context) => {
+        calls.push({ t, ...context });
+        return solid(Math.round(t * 12000) % 256);
+      }, { motionProbeUsed: true, cuts: [1] });
+      const processed = createPostCapture(capture, { ...settings, 'max-motion-blur': maximum, shutter });
+      for (const t of order) {
+        calls.length = 0;
+        await processed.frame(t);
+        const final = calls.filter(call => call.motionProbeTime === undefined).sort((a, b) => a.t - b.t);
+        assert.ok(final.length > 0);
+        assert.equal(new Set(final.map(call => call.t)).size, final.length);
+        assert.deepEqual(final.map(call => call.dofMotionIndex), final.map((_, k) => k));
+        assert.ok(final.every(call => call.dofMotionSamples === final.length));
+        const indices = final.map(({ t, dofMotionSamples, dofMotionIndex }) => [t, dofMotionSamples, dofMotionIndex]);
+        if (records.has(t)) assert.deepEqual(indices, records.get(t));
+        else records.set(t, indices);
+      }
+    }
   }
 });
 

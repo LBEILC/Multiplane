@@ -9,6 +9,46 @@ import { entryCommand } from '../tools/entry-command.mjs';
 import { createTempDirectory } from './helpers.mjs';
 import { findCommand } from '../src/main/settings.mjs';
 import { generateAppRunScript } from 'app-builder-lib/out/targets/appimage/appImageUtil.js';
+import { createRequire } from 'node:module';
+
+test('packaging pins the quiet static AppImage runtime instead of the noisy legacy default', () => {
+  const require = createRequire(import.meta.url);
+  const config = require('../electron-builder.config.cjs');
+  const { appimageChecksums } = require('app-builder-lib/out/toolsets/linux.js');
+  assert.equal(config.toolsets.appimage, '1.0.3');
+  assert.equal(appimageChecksums[config.toolsets.appimage]['appimage-tools-runtime-20251108.tar.gz'], '84021a78ee214ae6fd33a2d62a92ba25542dd10bc86bf117a9b2d0bba44e7665');
+});
+
+test('AppRun CLI emits only version or NDJSON in mounted and extracted environments', async t => {
+  const shell = await findCommand('bash');
+  assert.ok(shell, 'Bash is required to verify the Linux launcher');
+  const root = createTempDirectory('multiplane-stdout-');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, 'multiplane-desktop'), `#!/bin/sh
+shift
+case "$1" in
+  --version) printf '0.3.6\\n';;
+  config) printf '%s\\n' '{"type":"result","ok":true,"data":{}}';;
+  *) exit 9;;
+esac
+`, { mode: 0o755 });
+  await writeLauncher('linux', root, path.join(root, 'resources'));
+  await writeFile(path.join(root, 'AppRun'), generateAppRunScript({ ExecutableName: 'multiplane-desktop' }), { mode: 0o755 });
+  await writeFile(path.join(root, 'unshare'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  for (const extracted of [false, true]) for (const args of [['--version'], ['config', 'get', '--json']]) {
+    const env = { ...process.env, APPDIR: root.replaceAll('\\', '/'), APPIMAGE: '/download/Multiplane.AppImage', APPIMAGE_EXIT_AFTER_INSTALL: '' };
+    delete env.APPIMAGE_EXTRACT_AND_RUN;
+    if (extracted) env.APPIMAGE_EXTRACT_AND_RUN = '1';
+    const child = spawn(shell, [path.join(root, 'AppRun').replaceAll('\\', '/'), '--multiplane-cli', ...args], { env, windowsHide: true });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', bytes => stdout += bytes); child.stderr.on('data', bytes => stderr += bytes);
+    const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+    child.stdin.end();
+    assert.equal(await done, 0, stderr);
+    assert.equal(stdout, args[0] === '--version' ? '0.3.6\n' : '{"type":"result","ok":true,"data":{}}\n');
+  }
+});
 
 test('bundled entry paths and copyable commands cover all three platforms', () => {
   assert.deepEqual(cliEntry('win32','C:\\Install space\\Multiplane.exe','unused',{}), { path: 'C:\\Install space\\multiplane.cmd', args: [] });

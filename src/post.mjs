@@ -280,15 +280,16 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       let finalCapture = hooked || motionBlur === 1;
       let selectedTimes = times;
       let dofMotionSamples = new Set(times).size;
-      const context = observed => ({ motionBlur, motionBlurBase, observed,
+      const context = (observed, time) => ({ motionBlur, motionBlurBase, observed,
         motionProbeTime: finalCapture ? undefined : t,
-        dofMotionSamples: finalCapture ? dofMotionSamples : undefined });
+        dofMotionSamples: finalCapture ? dofMotionSamples : undefined,
+        dofMotionIndex: finalCapture ? [...new Set(selectedTimes)].sort((a, b) => a - b).indexOf(time) : undefined });
       const sample = async (time, reuse = false) => {
         if (!cache.has(time)) {
           const start = performance.now();
           const observed = time === observedTime && !(motionBlur > 1 && capture.motionProbeUsed);
           observedTime = undefined;
-          const png = await capture.frame(time, context(observed));
+          const png = await capture.frame(time, context(observed, time));
           contextUsed ||= capture.sampleContextUsed === true;
           motionProbeUsed ||= capture.motionProbeUsed === true;
           stats.captureMs += performance.now() - start;
@@ -307,7 +308,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         const begin = async time => {
           const start = performance.now(), observed = time === observedTime && !(motionBlur > 1 && capture.motionProbeUsed);
           observedTime = undefined;
-          const pending = await capture.beginFrame(time, context(observed));
+          const pending = await capture.beginFrame(time, context(observed, time));
           contextUsed ||= capture.sampleContextUsed === true;
           motionProbeUsed ||= capture.motionProbeUsed === true;
           const png = pending.png.then(buffer => { stats.captureMs += performance.now() - start; return buffer; });

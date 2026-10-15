@@ -16,3 +16,12 @@ export class FakeUpdater extends EventEmitter {
   }
   quitAndInstall(...args) { this.installs++; this.installArgs = args; if (this.installError) this.emit('error', Error('install failed')); }
 }
+
+// Match electron-updater 6.8.9's installer diagnostics without network access.
+export function reportFallback(fake, failure = 'old-404') {
+  const old = 'https://github.com/LBEILC/Multiplane/releases/download/v0.3.0/Multiplane-Setup-0.3.0-x64.exe.blockmap';
+  const next = old.replaceAll('0.3.0', '0.3.1');
+  fake.logger.info(`Download block maps (old: "${old}", new: ${next})`);
+  const error = failure === 'other' ? 'Error: checksum mismatch' : `Error: Cannot download "${failure === 'new-404' ? next : old}", status 404`;
+  fake.logger.error(`Cannot download differentially, fallback to full download: ${error}`);
+}

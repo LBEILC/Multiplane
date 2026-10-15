@@ -8,6 +8,7 @@ import { ensureLocalFfmpeg } from '../../tests/local-ffmpeg.mjs';
 import { entryCommand } from './entry-command.mjs';
 import { verifyNotices } from './notices.mjs';
 import { launchOwned } from './owned-electron.mjs';
+import { cliJsonResult } from './cli-json-result.mjs';
 
 export async function verifyThreeRender(invoke, project, root) {
   await cp(path.join(root, 'examples/three-cards.html'), path.join(project, 'three-cards.html'));
@@ -15,7 +16,7 @@ export async function verifyThreeRender(invoke, project, root) {
   await assert.rejects(readFile(path.join(project, 'node_modules/three/package.json')), { code: 'ENOENT' });
   const rendered = await invoke(['render', path.join(project, 'three-cards.html'), '--root', project, '--workers', '1', '--to', '0.16666666666666666', '--json']);
   assert.equal(rendered.code, 0, rendered.stderr || rendered.stdout);
-  const result = JSON.parse(rendered.stdout.trim().split('\n').at(-1));
+  const result = cliJsonResult(rendered.stdout);
   assert.equal(result.ok, true); assert.equal(result.data.frames, 2);
   return { ok: true, frames: result.data.frames, projectHasThree: false };
 }
@@ -41,7 +42,7 @@ export async function verifyUnpackedThree(unpacked) {
     };
     const doctor = await invoke(['doctor', '--json']);
     assert.equal(doctor.code, 0, doctor.stderr || doctor.stdout);
-    const check = JSON.parse(doctor.stdout.trim().split('\n').at(-1)).data.checks.find(c => c.name === 'three');
+    const check = cliJsonResult(doctor.stdout).data.checks.find(c => c.name === 'three');
     assert.deepEqual(check, { name: 'three', ok: true, detail: `three.js ${pkg.version} is available (bundled with software).` });
     console.log('Isolated packaged doctor passed.');
     const render = await verifyThreeRender(invoke, project, root);
