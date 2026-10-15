@@ -19,7 +19,7 @@ export class JobStopper {
   async escalate(id) {
     if (this.closed) return;
     await this.store.refresh(); const job = this.store.job(id);
-    if (job.state !== 'running' || !await this.alive(job.pid, job) || !await this.confirmForce(job) || this.closed) return;
+    if (job.state !== 'running' || await this.alive(job.pid, job) !== true || !await this.confirmForce(job) || this.closed) return;
     await this.store.refresh(); const latest = this.store.job(id);
     if (latest.state === 'running' && await this.force(latest)) { this.store.forced.add(id); await this.store.refresh(); }
   }

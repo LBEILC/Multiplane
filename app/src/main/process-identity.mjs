@@ -23,7 +23,30 @@ export function matchesJob(identity, job) {
   const age = Date.parse(job.startedAt) - Date.parse(identity?.createdAt);
   return identity?.pid === job.pid && /^(node|electron|multiplane|multiplane-runtime)(\.exe)?$/i.test(path.basename(identity.executable ?? '')) && age >= 0 && age <= 60000;
 }
-export async function jobAlive(pid, job) { return matchesJob(await processIdentity(pid), job); }
+// Unknown is deliberately distinct from a confirmed exit.
+export function processPresence(pid, kill = process.kill) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  try { kill(pid, 0); return true; }
+  catch (error) { return error.code === 'ESRCH' ? false : null; }
+}
+export function createJobAlive({ inspect = processIdentity, presence = processPresence } = {}) {
+  const identities = new Map();
+  return async (pid, job) => {
+    let present;
+    try { present = presence(pid); } catch { return null; }
+    if (present === false) { identities.delete(pid); return false; }
+    if (present !== true) return null;
+    let entry = identities.get(pid);
+    if (!entry || entry.startedAt !== job.startedAt) {
+      entry = { startedAt: job.startedAt, identity: Promise.resolve().then(() => inspect(pid)).catch(() => null) };
+      identities.set(pid, entry);
+    }
+    const identity = await entry.identity;
+    // A failed identity query or a mismatch cannot establish that the PID exited.
+    return matchesJob(identity, job) ? true : null;
+  };
+}
+export const jobAlive = createJobAlive();
 export async function forceJob(job, inspect = processIdentity, kill = process.kill) {
   const identity = await inspect(job.pid);
   if (!matchesJob(identity, job)) return false;

@@ -75,6 +75,7 @@ export class Preferences {
 export class JobStore extends EventEmitter {
   jobs = []; tails = new Map(); watchers = new Map(); timer; debounce; pending; again = false; closed = false; initialized = false;
   forced = new Set();
+  progressActivity = new Map();
   seen = new Set(); notified = new Set(); startedAt = Date.now();
   constructor(home, { alive = jobAlive, pollMs = 2000 } = {}) { super(); this.home = home; this.alive = alive; this.pollMs = pollMs; }
   async start() { await this.refresh(); this.timer = setInterval(() => this.schedule(), this.pollMs); }
@@ -110,7 +111,14 @@ export class JobStore extends EventEmitter {
         if (!job) continue;
         job.hosted = await stat(path.join(this.home, 'hosted', id + '.claimed.json')).then(() => true, () => false) || await stat(path.join(this.home, 'hosted', id + '.running.json')).then(() => true, () => false);
         const alive = job.state === 'running' && await this.alive(s.pid, s);
-        job.stuck = alive && Date.now() - Date.parse(s.updatedAt) > 60000;
+        const previousProgress = this.progressActivity.get(id);
+        if (!previousProgress || previousProgress.state !== job.state || previousProgress.phase !== s.phase || s.done > previousProgress.done) {
+          const event = events.findLast(e => e.type === 'progress');
+          const at = event && event.phase === s.phase && event.done === s.done ? event.ts : s.updatedAt;
+          this.progressActivity.set(id, { state: job.state, phase: s.phase, done: s.done, at: Date.parse(at) });
+        }
+        // Memory samples and preview publication are not capture progress.
+        job.stuck = job.state === 'running' && alive !== false && Date.now() - this.progressActivity.get(id).at > 60000;
         job.forced = this.forced.has(id);
         if (job.forced) {
           const options = events.find(e => e.type === 'start')?.options;
@@ -120,7 +128,7 @@ export class JobStore extends EventEmitter {
           const outputPath = output && (path.isAbsolute(output) ? output : request?.cwd ? path.resolve(request.cwd, output) : output);
           job.temporaryDirectories = [...new Set([job.jobDir, ...(outputPath ? [job.command === 'render' ? path.dirname(outputPath) : outputPath] : [])])];
         }
-        if (job.state === 'running' && !alive) {
+        if (job.state === 'running' && alive === false) {
           job.state = 'failed'; job.lost = true;
           job.result = { schema: s.schema, type: 'result', command: s.command, ts: s.updatedAt, ok: false, code: 'internal_error', message: copy.processLost, artifacts: events.filter(e => e.type === 'artifact').map(({ path, kind, bytes }) => ({ path, kind, bytes })), data: {}, elapsedMs: Math.max(0, Date.parse(s.updatedAt) - Date.parse(s.startedAt)) };
         }
@@ -133,6 +141,7 @@ export class JobStore extends EventEmitter {
     }
     this.jobs = jobs;
     for (const id of this.tails.keys()) if (!records.has(id)) this.tails.delete(id);
+    for (const id of this.progressActivity.keys()) if (!records.has(id)) this.progressActivity.delete(id);
     this.syncWatchers();
     if (this.initialized) for (const job of jobs) {
       const finishedSinceStartup = !this.seen.has(job.jobId) && Date.parse(job.result?.ts ?? job.updatedAt) >= this.startedAt;

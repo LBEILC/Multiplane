@@ -30,6 +30,7 @@ try {
         for (let index = first; index < end && !closing; index++) {
           const frame = message.first + index;
           const png = await processed.frame(frame / workerData.fps, frame, index === end - 1);
+          parentPort.postMessage({ type: 'captured', frame });
           yield { png, hash: processed.lastHash, blurSamples: processed.lastBlurSamples };
         }
       };

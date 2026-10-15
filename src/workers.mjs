@@ -41,7 +41,11 @@ export function selectWorkers({ workers, source, record, machine, type, scale = 
   if (validBenchmark(record, machine) && shotTypes.includes(type)) {
     return { workers: Math.max(1, Math.min(record.shots[type].workers, memoryWorkers(memoryScale, hardware))), source: 'benchmark' };
   }
-  return { workers: defaultWorkers(scale, hardware), source: 'estimate' };
+  const estimate = defaultWorkers(scale, hardware);
+  // Unbenchmarked WebGL contexts share one GPU and retain large render targets.
+  const free = Math.min(hardware.free ?? freemem(), hardware.total ?? totalmem());
+  const threeLimit = Math.max(1, Math.floor((free - 2 * 1024 ** 3) / ((0.5 + 0.5 * memoryScale ** 2) * 1024 ** 3)));
+  return { workers: type === 'three' ? Math.min(2, estimate, threeLimit) : estimate, source: 'estimate' };
 }
 
 // Inspect the loaded probe only; its context is discarded before real rendering.

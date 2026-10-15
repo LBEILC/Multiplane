@@ -1,4 +1,4 @@
-import { readBenchmark, validBenchmark, benchmarkMachine, selectWorkers, classifyShot } from './workers.mjs';
+import { readBenchmark, benchmarkMachine, selectWorkers, classifyShot } from './workers.mjs';
 import { recoveryBudget } from './browser-recovery.mjs';
 import path from 'node:path';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -59,10 +59,10 @@ export async function renderShot(shot, options = {}) {
       capture = await openShot(shot, renderScale, { ...options, onWarning: events.warning, check: events.check, onBrowser: observeBrowser(events, ffmpegInfo) });
       const record = ['option', 'config'].includes(events.workersSource) ? null : readBenchmark();
       let machine, type;
+      if (!['option', 'config'].includes(events.workersSource)) type = await classifyShot(capture);
       if (record) {
         try {
           machine = benchmarkMachine(await environment(capture.browser), options.raster);
-          if (validBenchmark(record, machine)) type = await classifyShot(capture);
         } catch { /* Optional tuning must not prevent an otherwise valid render. */ }
       }
       const selection = selectWorkers({ workers: options.workers, source: events.workersSource, record, machine, type,
@@ -94,7 +94,8 @@ export async function renderShot(shot, options = {}) {
       events.resources.setWorkers(actualWorkers);
       const started = performance.now();
       const frameHashes = process.env.RENDER_FRAME_HASHES ? [] : null;
-      pool = createRenderPool(shot, options, fps, actualWorkers, { width, height }, events.warning);
+      pool = createRenderPool(shot, options, fps, actualWorkers, { width, height }, events.warning,
+        done => events.progress('capture', done, total));
       events.onCancel(() => pool?.cancel());
       await mkdir(path.dirname(out), { recursive: true });
       events.check();
@@ -122,7 +123,6 @@ export async function renderShot(shot, options = {}) {
       for await (const { frame, png } of pool.frames(first, end, async ({ frame, png }) => {
         events.check();
         await preview(png, frame);
-        events.progress('capture', frame - first + 1, total);
       })) {
         events.check();
         if (failure) throw new MultiplaneError('encode_failed', undefined, { cause: failure });

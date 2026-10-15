@@ -12,11 +12,12 @@ export function defaultWorkers(scale = 1, hardware = {}) {
   return Math.max(1, Math.min(12, Math.floor(cores / 2), Math.floor((free - 2 * 1024 ** 3) / workerBytes)));
 }
 
-export function createRenderPool(shot, options, fps, workers, size, onWarning) {
+export function createRenderPool(shot, options, fps, workers, size, onWarning, onCaptured) {
   options = { ...options, _browserRecovery: options._browserRecovery ?? recoveryBudget() };
   reuseState(options);
   const slots = [], stats = { frames: 0, samples: 0, staticFrames: 0 };
   const histogram = {};
+  const captured = new Set();
   let failure;
   for (let i = 0; i < workers; i++) {
     const worker = new Worker(new URL('./render-worker.mjs', import.meta.url), { workerData: { shot, options, fps, size } });
@@ -28,6 +29,13 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning) {
     slot.ready = new Promise((resolve, reject) => { slot.pending = { resolve, reject }; });
     slot.ready.catch(() => {});
     worker.on('message', message => {
+      if (message.type === 'captured') {
+        if (!captured.has(message.frame)) {
+          captured.add(message.frame);
+          try { onCaptured?.(captured.size); } catch (error) { fail(error); }
+        }
+        return;
+      }
       if (message.type === 'warning') { onWarning?.(message.warning); return; }
       if (message.type === 'failure') { fail(new MultiplaneError(message.code ?? 'worker_crashed', message.error, { details: message.details, hint: message.hint })); return; }
       const pending = slot.pending; slot.pending = null;
@@ -86,8 +94,8 @@ export function createRenderPool(shot, options, fps, workers, size, onWarning) {
     },
   };
   const frames = api.frames.bind(api);
-  api.frames = async function* (first, end, onCaptured) {
-    for await (const item of frames(first, end)) { await onCaptured?.(item); yield item; }
+  api.frames = async function* (first, end, onDelivered) {
+    for await (const item of frames(first, end)) { await onDelivered?.(item); yield item; }
   };
   return api;
 }

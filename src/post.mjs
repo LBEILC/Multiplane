@@ -254,13 +254,15 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       const grids = upward ? nestedSampleGrids(t, fps, capture.duration, capture.cuts, post) : null;
       const endpoints = sampleTimes(t, fps, capture.duration, capture.cuts, { motionBlur: 2, shutter: post.shutter * 2 });
       const times = sampleTimes(t, fps, capture.duration, capture.cuts, { ...post, motionBlur: upward ? Math.max(2, motionBlur) : motionBlur });
+      // Clipped or zero-width shutters may contain fewer unique temporal samples.
+      const motionBlurBase = new Set(upward ? grids.get(motionBlur) : times).size;
       let candidate = false, uniform = motionBlur === 1, observedTime;
       if (enabled && !Atomics.load(state, 0)) {
         const probes = [...new Set(motionBlur === 1 && !upward ? [t] : [...endpoints, ...times, t])].sort((a, b) => a - b);
         const changes = [];
         const observeStart = performance.now();
         for (const time of probes) {
-          changes.push(await capture.observe(time, { motionBlur }));
+          changes.push(await capture.observe(time, { motionBlur, motionBlurBase }));
           observedTime = time;
           if (changes.at(-1)) break;
         }
@@ -278,7 +280,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
           const start = performance.now();
           const observed = time === observedTime;
           observedTime = undefined;
-          const png = await capture.frame(time, { motionBlur, observed });
+          const png = await capture.frame(time, { motionBlur, motionBlurBase, observed });
           contextUsed ||= capture.sampleContextUsed === true;
           stats.captureMs += performance.now() - start;
           stats.samples++;
@@ -296,7 +298,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         const begin = async time => {
           const start = performance.now(), observed = time === observedTime;
           observedTime = undefined;
-          const pending = await capture.beginFrame(time, { motionBlur, observed });
+          const pending = await capture.beginFrame(time, { motionBlur, motionBlurBase, observed });
           contextUsed ||= capture.sampleContextUsed === true;
           const png = pending.png.then(buffer => { stats.captureMs += performance.now() - start; return buffer; });
           png.catch(() => {});

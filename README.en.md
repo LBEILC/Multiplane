@@ -224,7 +224,7 @@ Motion blur averages several captures taken during the shutter time of each fram
 
 - **Measure once on your machine**: `multiplane benchmark` (about 2–3 minutes) renders an ordinary web page, a Canvas shot and a 3D shot with 1, 2, 4, 6, 8, 12, 16 and 24 processes, and keeps, for each kind, the smallest count within 95% of the fastest. Renders then use that count for the kind of shot whenever `--workers` and the config leave it unset.
 - If memory runs out during the measurement, it stops at the largest count that fits and recommends from the counts measured; `doctor` notes the memory limit.
-- Without a measurement, the count is estimated from CPU cores, free memory and output size, at most 12.
+- Without a measurement, the count is estimated from CPU cores, free memory and output size, at most 12; shots that use the 3D layer or WebGL get at most 2 (WebGL browsers share one graphics card, and too many of them can slow the whole computer down). If you render 3D shots often, measure once first.
 - After a change of computer, graphics card, browser or Multiplane version, `doctor` reports the measurement as outdated; run it again. The result is stored as `benchmark.json` in the user directory.
 - `resources.workersSource` in the result says where the count came from: `option` (command line), `config`, `benchmark` or `estimate`.
 - The worker count changes speed only, never pixels: a shot renders identically with any number of processes.

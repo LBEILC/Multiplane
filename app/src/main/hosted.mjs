@@ -55,7 +55,7 @@ export class Hosted {
       if (s?.schema !== schema || s.jobId !== id) { if (running) busy = true; continue; }
       if (s.result || ['cancelled', 'succeeded', 'failed'].includes(s.state)) { this.launching.delete(r.jobId); continue; }
       if (running) {
-        if ((s.state === 'queued' && Date.now() - (this.launching.get(r.jobId) ?? (await stat(file)).ctimeMs) < 15000) || (s.state !== 'queued' && await this.alive(s.pid, s))) busy = true;
+        if ((s.state === 'queued' && Date.now() - (this.launching.get(r.jobId) ?? (await stat(file)).ctimeMs) < 15000) || (s.state !== 'queued' && await this.alive(s.pid, s) !== false)) busy = true;
         continue;
       }
       if (this.launching.has(r.jobId)) { if (Date.now() - this.launching.get(r.jobId) < 15000) { busy = true; continue; } this.launching.delete(r.jobId); }

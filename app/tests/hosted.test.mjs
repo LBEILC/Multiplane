@@ -5,11 +5,28 @@ import { mkdir, writeFile, readFile, rename, utimes, stat } from 'node:fs/promis
 import { createTempDirectory } from './helpers.mjs';
 import { EventEmitter } from 'node:events';
 import { Hosted, json, atomic, validRequest, launchExecutor } from '../src/main/hosted.mjs';
-import { processIdentity, matchesJob, forceJob } from '../src/main/process-identity.mjs';
+import { processIdentity, matchesJob, forceJob, createJobAlive, processPresence } from '../src/main/process-identity.mjs';
 import { JobStore } from '../src/main/store.mjs';
 import { JobStopper } from '../src/main/stop.mjs';
 import { trayTemplate, hideOnClose } from '../src/main/tray.mjs';
 const schema = 'multiplane/1';
+
+test('liveness caches identity failures and only ESRCH establishes an exit', async () => {
+  const job = { pid: 42, startedAt: '2026-01-01T00:00:01.000Z' };
+  for (const code of ['ETIMEDOUT', 'EACCES']) {
+    let queries = 0, present = true;
+    const alive = createJobAlive({ presence: () => present, inspect: async () => { queries++; throw Object.assign(Error(code), { code }); } });
+    assert.equal(await alive(42, job), null);
+    assert.equal(await alive(42, job), null);
+    assert.equal(queries, 1);
+    present = false; assert.equal(await alive(42, job), false);
+    assert.equal(processPresence(42, () => { throw Object.assign(Error(code), { code }); }), null);
+  }
+  assert.equal(processPresence(42, () => { throw Object.assign(Error('gone'), { code: 'ESRCH' }); }), false);
+  let queries = 0;
+  const alive = createJobAlive({ presence: () => true, inspect: async () => { queries++; return { pid: 42, executable: 'node.exe', createdAt: '2026-01-01T00:00:00.000Z' }; } });
+  assert.equal(await alive(42, job), true); assert.equal(await alive(42, job), true); assert.equal(queries, 1);
+});
 
 test('executor uses the requesting renderer, detached with no inherited stdio or shell', async () => {
   const r = { node: '/tools/node', bin: '/renderer/bin/multiplane', command: 'render', args: ['shot with spaces.html', '--workers', '1'], jobDir: '/jobs/one', cwd: '/project', env: { PATH: '/tools' } };
@@ -135,8 +152,13 @@ test('store recognizes queued and stuck hosted jobs, without queued completion n
   let live = true; const store = new JobStore(f.home, { alive: async () => live }); t.after(() => store.close());
   let notifications = 0; store.on('finished', () => notifications++);
   await store.refresh(); await store.refresh(); assert.equal(store.job('job').hosted, true); assert.equal(store.job('job').state, 'queued'); assert.equal(notifications, 0);
-  await atomic(file, { ...await f.status('job'), state: 'running', updatedAt: new Date(Date.now() - 61000).toISOString() });
+  await atomic(file, { ...await f.status('job'), state: 'running', phase: 'capture', done: 0, updatedAt: new Date(Date.now() - 61000).toISOString() });
   await store.refresh(); assert.equal(store.job('job').stuck, true);
+  await atomic(file, { ...await f.status('job'), memoryBytes: 1000, updatedAt: new Date().toISOString() });
+  await store.refresh(); assert.equal(store.job('job').stuck, true);
+  await atomic(file, { ...await f.status('job'), done: 1, updatedAt: new Date().toISOString() });
+  await store.refresh(); assert.equal(store.job('job').stuck, false);
+  live = null; await store.refresh(); assert.equal(store.job('job').state, 'running'); assert.equal(notifications, 0);
   live = false; await store.refresh(); assert.equal(store.job('job').lost, true); assert.equal(store.job('job').stuck, false);
   live = true; await atomic(file, { ...await f.status('job'), state: 'future-state' });
   await store.refresh(); assert.equal(store.job('job').state, 'running');

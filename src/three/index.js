@@ -177,7 +177,7 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
     }
     return patterns.get(count);
   }
-  function renderAccumulation(focus, radius, count, blur, rotation) {
+  function renderAccumulation(focus, radius, count, blur, rotation, budget = count) {
     const position = camera.position.clone(), projection = camera.projectionMatrix.clone();
     const projectionInverse = camera.projectionMatrixInverse.clone();
     const autoClear = renderer.autoClear, oldTarget = renderer.getRenderTarget();
@@ -195,7 +195,7 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
       sumMaterial.uniforms.focus.value = focus;
       sumMaterial.uniforms.cameraNear.value = camera.near;
       sumMaterial.uniforms.cameraFar.value = camera.far;
-      sumMaterial.uniforms.blurScale.value = radius * height * projection.elements[5] * 0.5 * blur / Math.sqrt(count);
+      sumMaterial.uniforms.blurScale.value = radius * height * projection.elements[5] * 0.5 * blur / Math.sqrt(budget);
       for (const [x, y, jx, jy] of pattern(count)) {
         const dx = (x * Math.cos(rotation) - y * Math.sin(rotation)) * radius;
         const dy = (x * Math.sin(rotation) + y * Math.cos(rotation)) * radius;
@@ -288,7 +288,8 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
       adaptiveSamples: adaptive = sampling.adaptiveSamples, maxSamples: maximum = sampling.maxSamples,
       sampleSpacing: spacing = sampling.sampleSpacing, sampleBlur: blur = sampling.sampleBlur,
       rotateSamples: rotate = sampling.rotateSamples,
-      t = window.SHOT?.sampleContext?.time ?? 0, motionBlur = window.SHOT?.sampleContext?.motionBlur ?? 1,
+      t = window.SHOT?.sampleContext?.time ?? 0,
+      motionBlur = window.SHOT?.sampleContext?.motionBlurBase ?? window.SHOT?.sampleContext?.motionBlur ?? 1,
       previewAperture: previewRadius = previewAperture, maxBlur: previewMax = maxBlur } = {}) {
       if (!Number.isFinite(focus) || focus <= 0 || !Number.isFinite(radius) || radius < 0
         || !Number.isInteger(count) || count < 1 || !['preview', 'final'].includes(mode)
@@ -319,11 +320,14 @@ export function createThreeLayer({ stage = document.querySelector('#stage'), siz
             maxRadius = Math.max(maxRadius, radius * height * camera.projectionMatrix.elements[5] * 0.5 * Math.abs(1 / z - 1 / focus));
           }
         });
-        const actual = adaptive ? Math.min(maximum, Math.max(count, Math.ceil((2 * maxRadius / spacing) ** 2))) : count;
+        const budget = adaptive ? Math.min(maximum, Math.max(count, Math.ceil((2 * maxRadius / spacing) ** 2))) : count;
+        // The guaranteed base grid is stable during upward temporal refinement.
+        // Retain a small spatial floor; temporal rotations fill the lens disk.
+        const actual = rotate && motionBlur > 1 ? Math.min(budget, Math.max(8, Math.ceil(budget / motionBlur))) : budget;
         const phase = t * 997 * Math.sqrt(2);
         const rotation = rotate && motionBlur > 1 ? (phase - Math.floor(phase)) * Math.PI * 2 : 0;
         Object.assign(stats, { samples: actual, maxBlurRadius: maxRadius, rotation });
-        renderAccumulation(focus, radius, actual, blur, rotation);
+        renderAccumulation(focus, radius, actual, blur, rotation, budget);
       }
     },
     gpuInfo() {

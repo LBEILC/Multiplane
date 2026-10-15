@@ -120,9 +120,9 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     if (alpha && cdp) await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
     const timings = { renderCallMs: 0, screenshotMs: 0 };
     let closing, sampleContextUsed = false;
-    const draw = async (t, { motionBlur = 1 } = {}) => {
+    const draw = async (t, { motionBlur = 1, motionBlurBase = motionBlur } = {}) => {
         const renderStart = performance.now();
-        const changed = await page.evaluate(({ t, motionBlur, alpha }) => {
+        const changed = await page.evaluate(({ t, motionBlur, motionBlurBase, alpha }) => {
           globalThis.__multiplaneStatic?.suspend();
           if (alpha) document.documentElement.style.setProperty('--multiplane-page-background', 'transparent');
           const stage = document.querySelector('#stage');
@@ -135,7 +135,8 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           globalThis.__multiplaneStatic?.resume();
           const previous = SHOT.sampleContext;
           let contextUsed = false;
-          SHOT.sampleContext = { time: t, get motionBlur() { contextUsed = true; return motionBlur; } };
+          // TODO(design): Document motionBlurBase, stable across nested refinements.
+          SHOT.sampleContext = { time: t, motionBlurBase, get motionBlur() { contextUsed = true; return motionBlur; } };
           let failure;
           try { SHOT.render(t); } catch (error) { failure = String(error?.message ?? error); } finally {
             if (previous === undefined) delete SHOT.sampleContext;
@@ -144,7 +145,7 @@ async function openShotOnce(shot, scale = 1, options = {}) {
           stage.getBoundingClientRect();
           const changed = globalThis.__multiplaneStatic?.read() ?? true;
           return { failure, contextUsed, changed, reason: globalThis.__multiplaneStatic?.reason };
-        }, { t, motionBlur, alpha }).then(({ failure, changed, contextUsed, reason }) => {
+        }, { t, motionBlur, motionBlurBase, alpha }).then(({ failure, changed, contextUsed, reason }) => {
           sampleContextUsed = contextUsed;
           const index = observationReasons.indexOf(reason);
           if (index >= 0) Atomics.add(reuseState(options), index + 4, 1);
