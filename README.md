@@ -254,6 +254,8 @@ npx multiplane stills shot.html --every 0.5
 
 ## 三维层
 
+用桌面软件或它自带的命令行渲染时，三维层要用的 three.js（固定 0.180.0）已经带在软件里，不用另装。通过 npm 使用时，three.js 是可选依赖，用三维层的项目自己装：
+
 ```sh
 npm install three@0.180.0
 ```

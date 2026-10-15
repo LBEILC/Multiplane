@@ -5,6 +5,7 @@ import { stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MultiplaneError, invalidOption } from './errors.mjs';
+import { resolveThree } from './three-package.mjs';
 
 export const root = process.cwd();
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -52,7 +53,7 @@ export async function startServer(port = 0, root = process.cwd()) {
         if (pathname.startsWith('/multiplane/runtime/')) { resourceRoot = path.join(packageRoot, 'src/runtime'); resourcePath = pathname.slice('/multiplane/runtime'.length); }
         else if (pathname === '/multiplane/three.js') { resourceRoot = path.join(packageRoot, 'src/three'); resourcePath = '/index.js'; }
         else if (pathname.startsWith('/multiplane/vendor/three/')) {
-          resourceRoot = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('three'))));
+          resourceRoot = (await resolveThree()).root;
           resourcePath = pathname.slice('/multiplane/vendor/three'.length);
           if (!/^\/(build|examples\/jsm)\/.*\.js$/.test(resourcePath)) { res.writeHead(403); return res.end(); }
         } else { res.writeHead(404); return res.end(); }

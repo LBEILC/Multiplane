@@ -25,6 +25,14 @@ import { entryCommand } from './entry-command.mjs';
 import { doctorCopy } from '../src/shared/doctor-copy.mjs';
 import { t } from '../src/shared/i18n.mjs';
 import { runInstaller } from './installer-run.mjs';
+import { verifyThreeRender, verifyUnpackedThree } from './verify-three.mjs';
+
+if (process.argv.includes('--three-only')) {
+  const index = process.argv.indexOf('--unpacked');
+  if (index < 0 || !process.argv[index + 1]) throw Error('--three-only requires --unpacked <directory>');
+  await verifyUnpackedThree(path.resolve(process.argv[index + 1]));
+  process.exit(0);
+}
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(appRoot, '..');
 const windows = process.platform === 'win32', mac = process.platform === 'darwin';
@@ -187,18 +195,18 @@ try {
     // These rows only exist after the environment page's real IPC doctor completes.
     const requiredChecks = ['browser', 'ffmpeg', 'gpu', 'libx264', 'node', 'three'];
     await page.waitForFunction(names => names.every(name => document.querySelector(`[data-check="${name}"]`)), requiredChecks);
-    assert.equal(await page.locator('[data-check=three] .check-status').innerText(), copy.projectInstalled);
     const doctor = await page.evaluate(() => window.multiplane.doctor());
     const checkNames = doctor.data.checks.map(c => c.name).sort();
     for (const name of requiredChecks) assert.ok(checkNames.includes(name), `Missing required doctor check: ${name}`);
     assert.deepEqual(await page.locator('[data-check]').evaluateAll(rows => rows.map(row => row.dataset.check).sort()), checkNames);
     for (const name of ['node', 'ffmpeg', 'libx264']) assert.equal(doctor.data.checks.find(c => c.name === name).ok, true, name);
     assert.equal(doctor.data.checks.find(c => c.name === 'browser').ok, browserAvailable);
-    assert.equal(doctor.data.checks.find(c => c.name === 'three').ok, false);
+    assert.equal(doctor.data.checks.find(c => c.name === 'three').ok, true);
+    assert.match(doctor.data.checks.find(c => c.name === 'three').detail, /bundled with software/);
     const gpu = doctor.data.checks.find(c => c.name === 'gpu');
     assert.equal(typeof gpu.ok, 'boolean');
     if (!browserAvailable) assert.equal(gpu.ok, false);
-    for (const c of doctor.data.checks.filter(c => c.name !== 'three')) {
+    for (const c of doctor.data.checks) {
       const content = doctorCopy(c, { ffmpeg: doctor.data.checks.find(c => c.name === 'ffmpeg').ok, packaged: true });
       assert.equal(await page.locator(`[data-check="${c.name}"] .check-status`).textContent(), 'raw' in content ? content.raw : t(content.status, content.values));
     }
@@ -256,6 +264,7 @@ try {
   const commandConfig = await invoke(['config', 'get', '--json']);
   assert.equal(JSON.parse(commandConfig.stdout.trim().split('\n').at(-1)).data.file, path.join(home, 'config.json'));
   evidence.cliEntry = { version: true, doctor: true, config: true, spacePath: true };
+  evidence.threeRender = await verifyThreeRender(invoke, project, root);
   const rendered = await invoke(['render', path.join(project, 'animation.html'), '--root', project, '--job-dir', path.join(project, 'out/jobs'), '--workers', '1', '--to', '0.5', '--json']);
   assert.equal(rendered.code, 0, rendered.stderr || rendered.stdout);
   const events = rendered.stdout.trim().split('\n').map(JSON.parse), result = events.at(-1);

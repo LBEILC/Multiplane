@@ -117,7 +117,7 @@ Use `/* multiplane-disable-next-line css_animation */` in CSS and `<!-- multipla
 
 ## 3D layer (optional)
 
-Use `multiplane/three` when you need 3D cards or depth of field. Install `three@0.180.0` in the project (`npm install three@0.180.0`).
+Use `multiplane/three` when you need 3D cards or depth of field. When the renderer is the desktop app's bundled command, three.js 0.180.0 is already included. With the npm package, install `three@0.180.0` in the project (`npm install three@0.180.0`). `multiplane doctor` reports whether three.js is available, its version and where it comes from.
 
 ```html
 <script type="importmap">{"imports":{

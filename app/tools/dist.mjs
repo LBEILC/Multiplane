@@ -6,6 +6,7 @@ import { checkFont, prepareFont } from './fonts.mjs';
 import { generateNotices } from './notices.mjs';
 import { npm, run } from '../../tools/process.mjs';
 import { ensureElectron } from './electron.mjs';
+import { bundleThree } from './bundle-three.mjs';
 
 const app = fileURLToPath(new URL('../', import.meta.url)), root = path.resolve(app, '..');
 process.chdir(app);
@@ -28,6 +29,7 @@ for (const name of ['bin', 'src', 'skills', 'package.json', 'package-lock.json',
 }
 await npm(['ci', '--omit=dev'], { cwd: stage, env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
 try { await stat(path.join(stage, 'node_modules/three')); throw Error('three unexpectedly installed'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+await bundleThree(root, stage);
 const require = createRequire(path.join(stage, 'package.json'));
 await require('sharp')({ create: { width: 1, height: 1, channels: 4, background: '#fff' } }).png().toBuffer();
 const manifest = await generateNotices(root, app, stage, path.join(app, 'dist'));

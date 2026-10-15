@@ -79,7 +79,7 @@ export class SettingsView {
     const checks = this.doctor?.data?.checks ?? [];
     const ffmpeg = checks.find((c: any) => c.name === 'ffmpeg')?.ok;
     return checks.map((c: any) => {
-      const neutral = (c.name === 'libx264' && !ffmpeg) || (c.name === 'three' && (!c.ok || this.settings?.packaged));
+      const neutral = (c.name === 'libx264' && !ffmpeg) || (c.name === 'three' && !c.ok);
       const tone = neutral ? 'muted' : c.ok ? 'succeeded' : 'cancelled';
       const action = !c.ok && c.name === 'ffmpeg' ? this.button(t('chooseFfmpeg'), 'ffmpeg') : c.name === 'browser' && (!c.ok || this.browserInstall.text) ? `${!c.ok ? this.browserInstall.running ? this.button(t('cancelInstall'), 'cancel-browser') : this.button(t('installBrowser'), 'install-browser') : ''}${this.browserInstall.text ? `<pre class="browser-progress selectable" role="status">${esc(this.browserInstall.text)}</pre>` : ''}` : '';
       return `<div class="check-row" data-check="${esc(c.name)}"><span class="${tone}"><i aria-hidden="true" class="ri-${neutral ? 'subtract' : c.ok ? 'checkbox-circle' : 'error-warning'}-line"></i> ${esc(names()[c.name] ?? c.name)}</span><div>${this.checkMarkup(c, { ffmpeg, packaged: this.settings?.packaged, environment: this.doctor?.environment })}</div>${action ? `<div class="check-action">${action}</div>` : ''}</div>`;

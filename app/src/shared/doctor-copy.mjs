@@ -15,7 +15,10 @@ export function doctorCopy(check, { ffmpeg = true, packaged = false, environment
     case 'libx264': return { ...common, status: !ffmpeg ? 'dependsFfmpeg' : common.status, explanation: t(!ffmpeg ? 'doctorEncoderUnchecked' : ok ? 'doctorX264Ready' : 'doctorX264Missing') };
     case 'libvpx-vp9':
     case 'prores_ks': return { ...common, status: !ffmpeg ? 'dependsFfmpeg' : common.status, explanation: t(!ffmpeg ? 'doctorEncoderUnchecked' : 'doctorOptionalEncoder', { encoder: name }), data: '' };
-    case 'three': return { ...common, status: packaged ? 'projectInstalled' : ok ? 'available' : 'threeMissing', explanation: t('doctorThree') };
+    case 'three': {
+      const version = raw.match(/^three\.js (\d+\.\d+\.\d+) is available/)?.[1];
+      return { ...common, status: ok && version ? 'availableVersion' : ok ? 'available' : 'threeMissing', values: { version }, explanation: t('doctorThree'), data: ok && version ? t(raw.includes('(bundled with software)') ? 'threeBundled' : 'projectInstalled') : '' };
+    }
     default: return fallback();
   }
 }

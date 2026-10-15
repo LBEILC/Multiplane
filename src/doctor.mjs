@@ -3,6 +3,7 @@ import { runCommand } from './events.mjs';
 import { launchBrowser, environment, warnGpuFallback } from './environment.mjs';
 import { inspectFFmpeg, ffmpegOutput } from './ffmpeg.mjs';
 import { MultiplaneError } from './errors.mjs';
+import { threeCheck } from './three-package.mjs';
 
 export function benchmarkCheck(record, machine) {
   const current = validBenchmark(record, machine);
@@ -48,8 +49,7 @@ export const doctor = (options = {}) => runCommand('doctor', null, options, asyn
     for (const name of ['libvpx-vp9', 'prores_ks']) checks.push({ name, ok: false, detail: `${name} is optional; encoder availability could not be inspected.` });
   }
   if (info) events.emit('environment', { ...info, ffmpeg: ffmpeg ?? null });
-  try { await import('three'); checks.push({ name: 'three', ok: true, detail: 'Optional three.js is available.' }); }
-  catch { checks.push({ name: 'three', ok: false, detail: 'Optional three.js is not installed.' }); }
+  checks.push(await threeCheck());
   if (failure && checks.some(c => ['ffmpeg', 'libx264'].includes(c.name) && !c.ok)) failure.hint = (failure.hint ? failure.hint + ' ' : '') + 'Run multiplane config set ffmpeg <path> to save an FFmpeg executable.';
   if (failure) { failure.result = { data: { checks, config: events.config } }; throw failure; }
   return { checks, config: events.config };

@@ -254,6 +254,8 @@ npx multiplane stills shot.html --every 0.5
 
 ## 3D layer
 
+The desktop app and its bundled command already include three.js (pinned at 0.180.0) for the 3D layer; nothing else to install. With the npm package, three.js is an optional dependency that projects using the 3D layer install themselves:
+
 ```sh
 npm install three@0.180.0
 ```

@@ -57,9 +57,8 @@ export async function generateNotices(root, app, renderer, output) {
     if (!bytes.length) throw Error(`Empty license: ${name}`);
     entries.push({ name, bytes }); return { file: name, sha256: digest(bytes) };
   };
-  for (const directory of await packageRoots(path.join(renderer, 'node_modules'))) {
+  for (const directory of [...await packageRoots(path.join(renderer, 'node_modules')), path.join(renderer, 'vendor/three')]) {
     const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
-    if (pkg.name === 'three') throw Error('three must not be bundled');
     const files = await licenseFiles(directory);
     // libvips binary packages publish their attribution table in README.md;
     // exact upstream texts are verified and copied from the native inventory below.
@@ -68,7 +67,7 @@ export async function generateNotices(root, app, renderer, output) {
     if (libvips) files.push('README.md');
     const licenses = [];
     // Keep copied notices outside directories that packagers treat as runtime dependencies.
-    const location = path.relative(path.join(renderer, 'node_modules'), directory).replaceAll('\\', '/').replaceAll('/node_modules/', '/nested/');
+    const location = pkg.name === 'three' ? 'three' : path.relative(path.join(renderer, 'node_modules'), directory).replaceAll('\\', '/').replaceAll('/node_modules/', '/nested/');
     for (const file of files) licenses.push(await add(path.join(directory, file), `licenses/dependencies/${location}/${file}`));
     if (libvips) licenses.push(await add(path.join(root, 'licenses/native/vips-COPYING'), `licenses/dependencies/${location}/COPYING`));
     inventory.push({ name: pkg.name, version: pkg.version, license: pkg.license, licenses });
@@ -114,7 +113,7 @@ export async function generateNotices(root, app, renderer, output) {
   await add(path.join(root, 'examples/assets/OFL.txt'), 'licenses/Roboto-OFL.txt');
   const software = (await readFile(path.join(app, 'THIRD_PARTY_NOTICES.md'), 'utf8')).replaceAll('`REFERENCE_LICENSE`', '[REFERENCE_LICENSE](licenses/REFERENCE_LICENSE)');
   const rendering = (await readFile(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8')).replaceAll('](licenses/', '](licenses/renderer/').replaceAll('](examples/assets/OFL.txt)', '](licenses/Roboto-OFL.txt)');
-  const text = '# Third-party notices\n\nGenerated from the exact installed production dependency tree. Development tools are not bundled. three.js and the standalone Playwright browser are not included. Electron includes its own Chromium runtime; its complete third-party license texts are linked below.\n\n'
+  const text = '# Third-party notices\n\nGenerated from the exact bundled dependency tree. Development tools and the standalone Playwright browser are not included. three.js build/ and examples/jsm/ are bundled. Electron includes its own Chromium runtime; its complete third-party license texts are linked below.\n\n'
     + software + '\n\n' + rendering + '\n\n## Bundled dependency inventory\n\n'
     + inventory.map(pkg => `### ${pkg.name} ${pkg.version}\n\nLicense: ${pkg.license}\n\n${pkg.licenses.map(l => `- [${l.file}](${l.file})`).join('\n')}\n`).join('\n')
     + '\n## Native components in sharp / libvips\n\nThis software is based in part on the work of the Independent JPEG Group.\n\n'
