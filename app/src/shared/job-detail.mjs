@@ -9,7 +9,7 @@ export function failureCopy(job) {
   if (job.result?.code === 'render_threw') return ['failT', 'failH'];
   if (job.result?.code === 'nondeterministic_output') return ['verifyT', 'verifyH'];
   if (job.state === 'cancelled') return ['cancelT', 'cancelH'];
-  return [job.command === 'verify' ? 'checkFailed' : 'failT', null];
+  return [job.command === 'verify' ? 'jobCheckFailed' : 'failT', null];
 }
 export const warningCopy = {
   browser_restarted: ['w_browser_restarted', 'w_browser_restartedH'],

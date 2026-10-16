@@ -33,6 +33,18 @@ test('copy has identical keys and placeholders, no unused entries, and source ha
   for (const key of Object.keys(en)) assert.ok(references.has(key), `Unused copy key: ${key}`);
 });
 
+test('environment check errors retain their details beside job verification failures', () => {
+  for (const [locale, expected, job] of [
+    ['en', 'Cannot run checks: browser_launch_failed', 'Check failed'],
+    ['zh-CN', '\u65e0\u6cd5\u8fd0\u884c\u68c0\u67e5\uff1abrowser_launch_failed', '\u68c0\u67e5\u5931\u8d25'],
+  ]) {
+    setLanguage(locale);
+    assert.equal(t('checkFailed', { error: 'browser_launch_failed' }), expected);
+    assert.equal(t('jobCheckFailed'), job);
+  }
+  setLanguage('en');
+});
+
 test('system locale resolution, explicit overrides and persisted language preferences', async ctx => {
   for (const system of ['zh', 'zh-CN', 'zh-TW', 'zh-HK', 'zh-Hans', 'zh-Hant-TW', 'ZH-cn']) assert.equal(resolveLanguage('system', system), 'zh-CN', system);
   for (const system of ['', 'en', 'en-US', 'fr-FR', 'ja-JP', 'de', 'und']) assert.equal(resolveLanguage('system', system), 'en', system);

@@ -60,7 +60,11 @@ test('live jobs retain rollers, update values, navigate media, and disable motio
   await page.locator('[data-tab=options]').click();assert.doesNotMatch(await page.locator('#tab-content').innerText(),/hosted-executor|job-dir-exact/);
   await page.locator('[data-job=verify]').click();await page.locator('[data-tab=preview]').click();await page.locator('.triptych img').first().click();
   await page.waitForFunction(()=>document.querySelector('.lb-img img')?.naturalWidth===640);
+  // Replay an old image load after navigation to cover cached-image callback races.
+  await page.evaluate(()=>{window.staleImageLoad=document.querySelector('.lb-img img').onload;});
   await page.keyboard.press('3');assert.equal(await page.locator('.lb-title b').innerText(), zh.difference ?? '差异图');await page.locator('.lb .bbox').waitFor();assert.equal(await page.locator('.lb .bbox').count(),1);
+  await page.evaluate(()=>window.staleImageLoad());
+  assert.equal(await page.locator('.lb .bbox').count(),1);
   await page.locator('[data-v=box]').click();assert.equal(await page.locator('.lb .bbox').count(),0);
   await page.locator('[data-v=one]').click();assert.equal(await page.locator('.lb-zoom').innerText(),'100%');
   await page.keyboard.press('Escape');assert.equal(await page.locator('.lb').count(),0);

@@ -9,7 +9,7 @@ export default {
   cancelH: '已完成的产物保留，未完成的没有写出。',
   started: '开始于 {t}',
   yesterday: '昨天',
-  checkFailed: '检查失败', blurMax: '每帧最多 {max} 次采样', cutsV: '{n} 个 · {list}', framesUnit: '帧', fpsUnit: '帧/秒', swAccel: '软件渲染',
+  jobCheckFailed: '检查失败', blurMax: '每帧最多 {max} 次采样', cutsV: '{n} 个 · {list}', framesUnit: '帧', fpsUnit: '帧/秒', swAccel: '软件渲染',
   q_fast: '快速',
   secondsValue: '{n} 秒', fpsValue: '{n} 帧/秒', copied: '已复制',
   more: '更多', etaLabel: '预计完成', remainingLabel: '剩余', speedLabel: '速度',

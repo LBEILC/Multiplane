@@ -9,7 +9,7 @@ export default {
   cancelH: 'Finished output is kept; unfinished output was not written.',
   started: 'Started {t}',
   yesterday: 'Yesterday',
-  checkFailed: 'Check failed', blurMax: 'Up to {max} samples per frame', cutsV: '{n} · {list}', framesUnit: 'frames', fpsUnit: 'fps', swAccel: 'Software rendering',
+  jobCheckFailed: 'Check failed', blurMax: 'Up to {max} samples per frame', cutsV: '{n} · {list}', framesUnit: 'frames', fpsUnit: 'fps', swAccel: 'Software rendering',
   q_fast: 'Fast',
   copied: 'Copied',
 "secondsValue": "{n} s",

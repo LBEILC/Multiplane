@@ -19,7 +19,7 @@ test('job display formats sizes, codecs, local calendar dates and known failures
   assert.equal(jobStarted(new Date(2026, 9, 15, 14, 31), now), '开始于 昨天 14:31');
   assert.match(jobStarted(new Date(2026, 9, 14, 14, 31), now), /2026/);
   assert.deepEqual(failureCopy({lost:true}), ['lostT','lostH']);
-  assert.deepEqual(failureCopy({command:'verify', result:{code:'future'}}), ['checkFailed',null]);
+  assert.deepEqual(failureCopy({command:'verify', result:{code:'future'}}), ['jobCheckFailed',null]);
   assert.equal(new Set(Object.values(phaseIcons)).size, 6);
   setLanguage('en');
 });
