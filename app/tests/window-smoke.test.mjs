@@ -17,7 +17,7 @@ test('native capture validation rejects blank and truncated screenshots but acce
 
 test('unavailable native capture records a reason without claiming a screenshot', async () => {
   const evidence = { screenshots: [] };
-  await captureWindow({ evaluate: async () => { throw Error('Native capture denied'); } }, '.', evidence);
+  await captureWindow({ evaluate: async () => { throw Error('Native capture denied'); } }, '.', evidence, { url: () => 'file:///application/index.html' });
   assert.equal(evidence.wholeWindow.status, 'unavailable');
   assert.match(evidence.wholeWindow.reason, /Native capture denied/);
   assert.deepEqual(evidence.screenshots, []);
