@@ -183,9 +183,13 @@ try {
   }
   // The tray popover is also a BrowserWindow; identify the owner by its page.
   const ownerUrl = page.url();
-  const ownerId = await application.evaluate(({ BrowserWindow }, url) => {
+  const ownerId = await application.evaluate(({ app, BrowserWindow }, url) => {
     const owners = BrowserWindow.getAllWindows().filter(win => win.webContents.getURL() === url);
     if (owners.length !== 1) throw Error('Expected exactly one owner window');
+    globalThis.packagedRestoreEvents = [];
+    const record = event => globalThis.packagedRestoreEvents.push({ event, minimized: owners[0].isMinimized(), visible: owners[0].isVisible() });
+    app.on('second-instance', () => record('second-instance'));
+    for (const event of ['minimize', 'restore', 'show', 'hide', 'focus', 'blur']) owners[0].on(event, () => record(event));
     owners[0].minimize();
     return owners[0].id;
   }, ownerUrl);
@@ -200,6 +204,7 @@ try {
     const owners = BrowserWindow.getAllWindows().filter(win => win.webContents.getURL() === url);
     return owners.length === 1 && owners[0].id === id && !owners[0].isMinimized() && owners[0].isVisible();
   }, { id: ownerId, url: ownerUrl }), 'Owner window was not restored');
+  evidence.windowRestore = await application.evaluate(() => globalThis.packagedRestoreEvents);
   evidence.checks.push('Second packaged instance exited and restored the existing window');
   await page.locator('[data-page="environment"]').click();
   const checkDoctor = async browserAvailable => {
@@ -332,6 +337,13 @@ try {
   evidence.checks.push('Isolated skill directories remained empty');
 } catch (error) {
   evidence.failure = error.message;
+  if (application) {
+    evidence.windowRestoreFailure = await application.evaluate(({ BrowserWindow }) => ({
+      events: globalThis.packagedRestoreEvents,
+      windows: BrowserWindow.getAllWindows().map(win => ({ id: win.id, page: win.webContents.getURL().split('/').at(-1), minimized: win.isMinimized(), visible: win.isVisible(), focused: win.isFocused() }))
+    })).catch(() => null);
+    console.error('Window restore diagnostics:', JSON.stringify(evidence.windowRestoreFailure));
+  }
   if (application) {
     const page = await application.firstWindow();
     evidence.failureView = await page.locator('#placeholder').innerText().catch(() => 'unavailable');

@@ -58,7 +58,7 @@ try {
   assert.ok(evidence.desktop.startsWith(work + path.sep), 'Desktop preferences must stay isolated');
   if (mode === 'lock') {
     await run(path.resolve(executable), [], { env, capture: true, timeout: 15000, killTree: true });
-    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    assert.equal(await app.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().filter(win => win.webContents.getURL() === url).length, page.url()), 1);
     evidence.lock = true;
   }
   await app.evaluate(({ Notification, BrowserWindow }) => {
