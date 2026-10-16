@@ -11,7 +11,7 @@ A local, headless HTML video renderer for AI agents. **A shot is an ordinary web
 
 <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/hero.webp" width="720" alt="3D cards rendered by Multiplane, with depth of field and motion blur">
 
-> Version `0.3.0`. The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
+> Version `0.3.8` (the latest version is on the [Releases page](https://github.com/LBEILC/Multiplane/releases)). The full test suite passes in CI on Windows, macOS and Linux; Windows has also been verified on a real machine. Interfaces may still change before 1.0.
 
 The name comes from Disney's multiplane camera: flat artwork placed at different depths, photographed frame by frame with real depth of field. Here, this corresponds to layered web content, a 3D card layer, and accumulated depth of field.
 
@@ -133,7 +133,9 @@ For the full contract, patterns that break determinism, and 3D layer usage, see 
 
 Shot paths are relative to the resource root `--root` (the current directory by default). Each run has its own job directory, `out/jobs/<jobId>/`. Without `--out`, artifacts are written there (video, `stills/`, `verify/`), so runs do not overwrite each other. See `artifacts` in the result for the final paths. `--out` sets the output location. An existing target is rejected unless `--overwrite` is given. `render`, `stills`, and `verify` automatically run `lint` before starting and stop on errors. Use `--no-lint` to skip it. `npx multiplane <command> --help` lists all options for that command.
 
-`render` encodes in segments of about 10 seconds and keeps each one on disk as soon as it is done. If a render stops part way (the process is killed, the machine crashes or loses power, the browser keeps crashing, or you stop it), `multiplane resume <job>` skips the segments already encoded, renders the rest and joins them without re-encoding; the frames are identical to an uninterrupted render. A resume keeps all of the original job's options. It is refused (`resume_unavailable`) when a file the shot loaded has changed or the Multiplane, Chromium or FFmpeg version differs, so a film is never joined from mismatched parts. See section 6.1 of the protocol.
+`render` encodes in segments of about 10 seconds and keeps each one on disk as soon as it is done. If a render stops part way (the process is killed, the machine crashes or loses power, the browser keeps crashing, or you stop it), `multiplane resume <job>` skips the segments already encoded, renders the rest and joins them without re-encoding; the frames are identical to an uninterrupted render. A resume keeps all of the original job's options. It is refused (`resume_unavailable`, with the reason) when a file the shot loaded or the audio file has changed, or the Multiplane, Chromium or FFmpeg version, the raster mode or the encoder differs, so a film is never joined from mismatched parts; a different GPU or driver only produces a warning (`resume_renderer_changed`). `multiplane status` reports whether a job can be resumed and how many frames are done. See section 6.1 of the protocol.
+
+A stuck browser does not stall a render forever. If a worker holds frames but delivers none for `max(120 seconds, 10 × the slowest frame so far)`, its browser is closed and relaunched, the frame is rendered again from scratch (with the same pixels), and a `worker_stalled` warning is reported. Each frame is retried at most twice; a third stall ends the job with `browser_crashed`. Segments already encoded are kept, so the job can be resumed.
 
 Common `render` options:
 
@@ -272,20 +274,26 @@ npm install three@0.180.0
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/app-jobs-en-dark.png">
-  <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/app-jobs-en-light.png" width="800" alt="The Jobs page of the Multiplane desktop app: a running job, a queued job and a live preview frame">
+  <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/app-jobs-en-light.png" width="800" alt="The Jobs page of the Multiplane desktop app: running, queued and resumable jobs on the left, and the Timeline tab of the selected job on the right, listing how long each phase took and the events">
 </picture>
 
 
-- **Jobs**: list render, stills, and check jobs across projects, show progress and preview frames in real time, view finished videos, contact sheets, and diff images from failed checks, and stop running jobs.
-- **Environment**: check whether the browser, GPU rasterization, FFmpeg, and other requirements are ready. Install and update the Multiplane skill for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), without directly overwriting user modifications.
+- **Jobs**: list render, stills, and check jobs across projects, show progress and preview frames in real time, and stop running jobs. Opening a job shows four tabs:
+  - **Preview**: finished videos play in a frame-accurate player: step one frame at a time, jump between cuts, and read the exact frame number and timecode. Any frame opens in a viewer that zooms to actual pixels, and when a determinism check fails, the reference, actual and difference images can be compared side by side or by flickering between them.
+  - **Summary**: the output, whether it was verified, and the picture, post-processing, performance and environment at a glance.
+  - **Timeline**: how long each phase took, with the events and warnings along the way.
+  - **Options**: the settings the job actually used, in plain words, which can be copied as a command.
+- **Resume**: a failed or stopped render that can continue shows **Resume** with the frames already done, and the new job links back to the original. When resuming is refused, the app explains why, for example which files changed. With hosting on, the app also takes over an agent's `resume` requests.
+- **Tray popover**: on Windows and macOS, clicking the tray icon opens a small panel with running, queued and recently finished jobs. The tray icon and the taskbar button show render progress. Linux keeps the system menu.
+- **Environment**: check whether the browser, GPU rasterization, FFmpeg, and other requirements are ready; on first use, **Install browser** here downloads Chromium. Install and update the Multiplane skill for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), without directly overwriting user modifications.
 - **Settings**: write the user config `config.json` described above.
 - **Hosted renders** (off by default): when turned on in Settings, renders started by an agent are run by the app instead of the agent's session, so they keep going when the session ends. One hosted render runs at a time and the rest wait in a queue. The agent's command and output stay the same, and `multiplane wait <job>` picks a job up again after a session restarts. With hosting on, closing the window keeps the app in the system tray. See section 11 of the protocol.
-- **Updates**: the app checks GitHub for a new release at startup and once a day (can be turned off). On Windows it downloads and installs the update in the app; on macOS and Linux it links to the download page.
+- **Updates**: the app checks GitHub for a new release at startup and once a day (can be turned off). On Windows it downloads and installs the update in the app; on macOS and Linux it links to the download page. The About page lists what changed in each version since the one installed, in the interface language.
 - The interface is in English and Simplified Chinese. It follows the system language and can be switched in Settings.
 
 It communicates with the renderer only through the files and commands in [`docs/protocol.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.md). It is not required for rendering: agents can render from the command line without it.
 
-Download an installer from the [Releases page](https://github.com/LBEILC/Multiplane/releases). The installers bundle a renderer of the same version, so the app works without a separate Node.js install. That renderer is also available as a command: `multiplane.cmd` in the install directory on Windows, `Multiplane.app/Contents/Resources/bin/multiplane` on macOS, and `Multiplane-<version>-x86_64.AppImage --multiplane-cli` on Linux. The Environment page shows the exact path when `multiplane` is not on PATH. FFmpeg is not bundled (see above), and Chromium is downloaded on first use from the Environment page.
+Download an installer from the [Releases page](https://github.com/LBEILC/Multiplane/releases). The installers bundle a renderer of the same version, so the app works without a separate Node.js install. That renderer is also available as a command: `multiplane.cmd` in the install directory on Windows, `Multiplane.app/Contents/Resources/bin/multiplane` on macOS, and `Multiplane-<version>-x86_64.AppImage --multiplane-cli` on Linux. The Environment page shows the exact path when `multiplane` is not on PATH. FFmpeg is not bundled (see above; install one with libx264 support), and Chromium is downloaded on first use with **Install browser** on the Environment page.
 
 | System | Package | First launch (the packages are not code-signed) |
 |---|---|---|

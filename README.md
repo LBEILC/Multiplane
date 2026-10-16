@@ -11,7 +11,7 @@
 
 <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/hero.webp" width="720" alt="Multiplane 渲染的三维卡片：景深虚化与运动模糊">
 
-> 当前版本 `0.3.0`。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
+> 当前版本 `0.3.8`（最新版本见 [Releases 页面](https://github.com/LBEILC/Multiplane/releases)）。完整测试在 Windows、macOS、Linux 三个平台的 CI 上全部通过；Windows 另在真机上验证过。1.0 之前接口仍可能调整。
 
 名字来自迪士尼的多层摄影台（multiplane camera）：一层层平面画稿放在不同深度、逐帧拍摄、带真实景深。对应这里的多层网页画面、三维卡片层和累积景深。
 
@@ -133,7 +133,9 @@ Shot.define({
 
 镜头路径相对资源根 `--root`（默认当前目录）。每次运行都有自己的作业目录 `out/jobs/<jobId>/`，不给 `--out` 时产物就写在里面（视频、`stills/`、`verify/`），多次运行互不覆盖；最终路径见结果里的 `artifacts`。`--out` 指定输出位置，目标已存在时会拒绝覆盖，加 `--overwrite` 才替换。`render`、`stills`、`verify` 启动前自动跑 `lint`，有 error 就停下，`--no-lint` 跳过。`npx multiplane <command> --help` 列出该命令的全部参数。
 
-`render` 按约 10 秒一段编码，每段编完就落盘。渲染中途停下（进程被杀、死机、断电、浏览器反复崩溃、手动停止）后，`multiplane resume <job>` 会跳过已经编好的段、只渲剩下的，最后不重新编码地拼成成片，画面与一次渲完的逐帧相同。续传沿用原作业的全部参数；镜头加载过的文件改了，或 Multiplane、Chromium、FFmpeg 版本变了，会拒绝续传（`resume_unavailable`），以免拼出前后不一致的片子。见协议第 6.1 节。
+`render` 按约 10 秒一段编码，每段编完就落盘。渲染中途停下（进程被杀、死机、断电、浏览器反复崩溃、手动停止）后，`multiplane resume <job>` 会跳过已经编好的段、只渲剩下的，最后不重新编码地拼成成片，画面与一次渲完的逐帧相同。续传沿用原作业的全部参数；镜头加载过的文件或音频文件改了，或 Multiplane、Chromium、FFmpeg 的版本、光栅模式、编码器变了，会拒绝续传（`resume_unavailable`，并说明是哪一项），以免拼出前后不一致的片子；只是显卡或驱动不同，则只给出警告（`resume_renderer_changed`）。`multiplane status` 会告诉你一个作业能不能续传、已经渲完多少帧。见协议第 6.1 节。
+
+浏览器卡住时，渲染也不会一直挂着：某个进程拿着帧、却在 `max(120 秒, 此前最慢一帧耗时的 10 倍)` 内一帧都交不出来时，会关掉它的浏览器、重新启动，并把那一帧从头重渲（像素相同），同时报 `worker_stalled` 警告。每一帧最多重试两次，第三次再卡住，作业以 `browser_crashed` 结束；已经编好的段会保留，之后可以用 `resume` 接着渲。
 
 `render` 的常用参数：
 
@@ -272,20 +274,26 @@ npm install three@0.180.0
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/app-jobs-zh-dark.png">
-  <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/app-jobs-zh-light.png" width="800" alt="Multiplane 桌面软件的作业页：进行中的作业、排队中的作业和实时预览帧">
+  <img src="https://raw.githubusercontent.com/LBEILC/Multiplane/main/docs/images/app-jobs-zh-light.png" width="800" alt="Multiplane 桌面软件的作业页：左边是进行中、排队中和可继续渲染的作业，右边是所选作业的“过程”标签，列出各阶段用时和事件">
 </picture>
 
 
-- **作业**：列出各项目里的渲染、抽帧、检查作业，实时显示进度和预览帧，查看成片、联系表和检查不通过时的差异图，可以停止进行中的作业。
-- **环境**：检查浏览器、GPU 光栅、FFmpeg 等是否就绪；给 Claude Code（`~/.claude/skills/`）和 Codex（`~/.agents/skills/`）安装、更新 Multiplane 的 skill，自己改过的不会被直接覆盖。
+- **作业**：列出各项目里的渲染、抽帧、检查作业，实时显示进度和预览帧，可以停止进行中的作业。点开一个作业，详情分四个标签：
+  - **预览**：成片在逐帧播放器里播放，可以一帧一帧地走、在切点之间跳转，并显示准确的帧号和时间码；任意一帧都能单独打开，放大到实际像素。确定性检查不通过时，参考图、实际图和差异图可以并排看，也可以闪烁对比。
+  - **概览**：产物、成品是否核对过，以及画面、后期、性能、环境一目了然。
+  - **过程**：每个阶段用了多久，以及过程中的事件和警告。
+  - **参数**：用平白的话列出这次作业实际生效的参数，可以复制成命令。
+- **继续渲染**：失败或被停止、又能接着渲的渲染，会显示“继续渲染”和已经完成的帧数；新作业会链回原作业。不能接着渲时（例如镜头用到的文件变了），软件会说明原因。开启托管后，软件也会接管 agent 发起的 `resume`。
+- **托盘弹窗**：在 Windows 和 macOS 上点托盘图标，会打开一个小面板，列出进行中、排队中和最近完成的作业；托盘图标和任务栏按钮会显示渲染进度。Linux 上仍是系统菜单。
+- **环境**：检查浏览器、GPU 光栅、FFmpeg 等是否就绪，首次使用时在这里点“安装浏览器”下载 Chromium；给 Claude Code（`~/.claude/skills/`）和 Codex（`~/.agents/skills/`）安装、更新 Multiplane 的 skill，自己改过的不会被直接覆盖。
 - **设置**：写入上文的用户配置 `config.json`。
 - **托管渲染**（默认关闭）：在设置里开启后，agent 发起的渲染改由软件执行，不再挂在 agent 的会话上，会话结束也会照常做完。一次只执行一个托管渲染，其余排队。agent 的命令和输出不变；会话重启后用 `multiplane wait <job>` 接上之前的作业。开启托管后，关闭窗口时软件留在系统托盘。见协议第 11 节。
-- **更新**：启动时和之后每天检查一次 GitHub 上的新版本（可以关闭）。Windows 上在软件里下载并安装；macOS 和 Linux 上打开下载页。
+- **更新**：启动时和之后每天检查一次 GitHub 上的新版本（可以关闭）。Windows 上在软件里下载并安装；macOS 和 Linux 上打开下载页。“关于”页会按界面语言列出从已安装版本起每个版本的更新内容。
 - 界面有英文和简体中文，默认跟随系统语言，也可以在设置里切换。
 
 它只通过 [`docs/protocol.zh-CN.md`](https://github.com/LBEILC/Multiplane/blob/main/docs/protocol.zh-CN.md) 的文件和命令行与渲染器打交道，不是渲染的必需品：不装它，agent 照样可以用命令行渲染。
 
-从 [Releases 页面](https://github.com/LBEILC/Multiplane/releases) 下载安装包。安装包里带一份同版本的渲染器，不需要另装 Node.js。这份渲染器也可以当命令用：Windows 为安装目录下的 `multiplane.cmd`，macOS 为 `Multiplane.app/Contents/Resources/bin/multiplane`，Linux 为 `Multiplane-<版本>-x86_64.AppImage --multiplane-cli`。PATH 里找不到 `multiplane` 时，环境页会显示完整路径。FFmpeg 不随包提供（见上文），Chromium 在环境页首次使用时下载。
+从 [Releases 页面](https://github.com/LBEILC/Multiplane/releases) 下载安装包。安装包里带一份同版本的渲染器，不需要另装 Node.js。这份渲染器也可以当命令用：Windows 为安装目录下的 `multiplane.cmd`，macOS 为 `Multiplane.app/Contents/Resources/bin/multiplane`，Linux 为 `Multiplane-<版本>-x86_64.AppImage --multiplane-cli`。PATH 里找不到 `multiplane` 时，环境页会显示完整路径。FFmpeg 不随包提供（见上文，需要自己安装一个支持 libx264 的），Chromium 在环境页首次使用时点“安装浏览器”下载。
 
 | 系统 | 安装包 | 首次打开（安装包没有代码签名） |
 |---|---|---|
