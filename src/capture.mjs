@@ -175,7 +175,7 @@ async function openShotOnce(shot, scale = 1, options = {}) {
         return { png: measured };
     };
     return {
-      page, browser, server, ...metadata, alpha, beginFrame, timings,
+      page, browser, server, ...metadata, alpha, beginFrame, timings, _inspectSample: draw,
       get sampleContextUsed() { return sampleContextUsed; },
       get motionProbeUsed() { return motionProbeUsed; },
       get dofSamples() { return dofSamples; },
@@ -195,13 +195,13 @@ async function openShotOnce(shot, scale = 1, options = {}) {
 // Recovery belongs to a complete output frame, never to an individual blur sample.
 export async function openShot(shot, scale = 1, options = {}) {
   const budget = options._browserRecovery ?? recoveryBudget();
-  let current, closed = false;
-  const recover = async (error, t) => {
+  let current, closed = false, stalled;
+  const recover = async (error, t, stallAttempt) => {
     options.check?.();
     if (closed) throw error;
     const failure = crashedError(error, t);
-    if (Atomics.load(budget, 0) >= MAX_BROWSER_RESTARTS) throw failure;
-    const attempt = Atomics.add(budget, 0, 1) + 1;
+    if (!stallAttempt && Atomics.load(budget, 0) >= MAX_BROWSER_RESTARTS) throw failure;
+    const attempt = stallAttempt ?? Atomics.add(budget, 0, 1) + 1;
     if (attempt > MAX_BROWSER_RESTARTS) throw failure;
     await current?.close().catch(() => {});
     try { current = await openShotOnce(shot, scale, options); }
@@ -211,7 +211,8 @@ export async function openShot(shot, scale = 1, options = {}) {
       restarted.details = { ...failure.details, ...restarted.details };
       throw restarted;
     }
-    options.onWarning?.({ code: 'browser_restarted', message: 'Browser restarted; retrying the affected frame.', details: { ...failure.details, attempt } });
+    if (!stallAttempt) options.onWarning?.({ code: 'browser_restarted', message: 'Browser restarted; retrying the affected frame.', details: { ...failure.details, attempt } });
+    options.onRecovered?.();
   };
   try { current = await openShotOnce(shot, scale, options); }
   catch (error) { if (error.code !== 'browser_crashed') throw error; await recover(error); }
@@ -224,13 +225,28 @@ export async function openShot(shot, scale = 1, options = {}) {
     get dofSamples() { return current.dofSamples; },
     ...(current.observe ? { observe: (...args) => current.observe(...args) } : {}),
     beginFrame: (...args) => current.beginFrame(...args),
+    _inspectSample: (...args) => current._inspectSample(...args),
     frame: (...args) => current.frame(...args),
     ...(current.blurAt ? { blurAt: (...args) => current.blurAt(...args) } : {}),
+    // Closing the owned browser interrupts a blocked evaluate/CDP screenshot.
+    // Let the complete post frame unwind before retrying any of its samples.
+    async stall(details) {
+      if (closed || stalled) return;
+      stalled = new MultiplaneError('browser_crashed', 'Rendering worker stopped delivering frames.', { details });
+      await current.close();
+    },
     async retryFrame(t, operation) {
+      let stallAttempts = 0;
       for (;;) {
         try { return await operation(); }
         catch (error) {
           options.check?.();
+          if (!closed && stalled) {
+            const failure = stalled; stalled = undefined;
+            if (stallAttempts >= MAX_BROWSER_RESTARTS) throw failure;
+            await recover(failure, t, ++stallAttempts);
+            continue;
+          }
           if (closed || !current.isCrash(error)) throw error;
           await recover(error, t);
         }

@@ -18,6 +18,7 @@ export const errorCodes = Object.freeze(Object.fromEntries([
   [3, 'skill_changed', 'The installed skill changed since inspection.'],
   [3, 'unsupported_node', 'Node 24 or newer is required.'],
   [2, 'invalid_option', 'Invalid option.'],
+  [2, 'resume_unavailable', 'This render cannot be resumed.'],
   [2, 'invalid_scale', 'Scale must produce positive even integer dimensions.'],
   [2, 'output_exists', 'Output already exists.'],
   [3, 'ffmpeg_not_found', 'FFmpeg was not found.'],

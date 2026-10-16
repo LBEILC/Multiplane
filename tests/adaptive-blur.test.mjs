@@ -161,6 +161,34 @@ test('static detection takes only three screenshots before the initial grid', as
   assert.equal(processed.lastBlurSamples, 1);
 });
 
+test('moving frames skip the redundant endpoint without changing the contributing grid', async () => {
+  for (const pipeline of [false, true]) {
+    const calls = [], inspections = [];
+    const capture = fixture(t => { calls.push(t); return solid(t < 1 ? 0 : 255); }, {
+      _inspectSample: async t => inspections.push(t),
+    });
+    if (pipeline) capture.beginFrame = async (t, context) => ({ png: capture.frame(t, context) });
+    const processed = createPostCapture(capture, { ...settings, pipeline });
+    const actual = decodePNG(await processed.frame(1));
+    const grid = nestedSampleGrids(1, 30, 2, [], { motionBlur: 8, maxMotionBlur: 64, shutter: .5 }).get(64);
+    assert.deepEqual(actual, averageLinear(grid.map(t => solid(t < 1 ? 0 : 255))));
+    assert.equal(calls.length, 66);
+    assert.equal(new Set(calls).size, calls.length);
+    assert.deepEqual(inspections, [1 + .25 / 30]);
+  }
+});
+
+test('a conditional context read on the skipped endpoint still selects the legacy grid', async () => {
+  let contextUsed = false;
+  const draw = (t, context) => solid(t < 1 ? 0 : 255 - context.motionBlur);
+  const capture = fixture(draw, { _inspectSample: async () => { contextUsed = true; } });
+  Object.defineProperty(capture, 'sampleContextUsed', { get: () => contextUsed });
+  const processed = createPostCapture(capture, settings);
+  const actual = decodePNG(await processed.frame(1));
+  const times = sampleTimes(1, 30, 2, [], { motionBlur: 64, shutter: .5 });
+  assert.deepEqual(actual, averageLinear(times.map(t => draw(t, { motionBlur: 64 }))));
+});
+
 test('base one stays disabled; hard cuts and duration boundaries stay protected', async () => {
   const calls = [];
   const processed = createPostCapture(fixture(t => { calls.push(t); return solid(t < 1 ? 0 : Math.round((t - 1) * 15000) % 256); }, { cuts: [1] }), { ...settings, 'motion-blur': 1 });

@@ -1,4 +1,5 @@
 export { renderShot } from './render.mjs';
+export { resumeRender } from './resume.mjs';
 export { stillsShot } from './stills.mjs';
 export { verifyShot } from './verify.mjs';
 export { openShot } from './capture.mjs';

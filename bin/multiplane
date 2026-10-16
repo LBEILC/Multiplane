@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { renderShot, stillsShot, verifyShot, inspectShot, lintShot, doctor, statusJob, cancelJob } from '../src/index.mjs';
+import { resumeRender, renderShot, stillsShot, verifyShot, inspectShot, lintShot, doctor, statusJob, cancelJob } from '../src/index.mjs';
 import { benchmark } from '../src/benchmark.mjs';
 import { serve } from '../src/serve.mjs';
 import { setup } from '../src/setup.mjs';
@@ -19,6 +19,7 @@ const allowed = {
   benchmark: ['raster', 'max-workers'], config: [], skill: ['host', 'force', 'expect'],
   lint: ['root'], doctor: ['ffmpeg', 'raster'], status: ['job-dir'], cancel: ['job-dir', 'wait'],
   wait: ['job-dir', 'timeout'],
+  resume: ['job-dir', 'workers', 'no-hosted', 'job-dir-exact', 'hosted-executor'],
 };
 // Internal flags used by the desktop app to start hosted executors; not listed in help.
 const internal = ['job-dir-exact', 'hosted-executor'];
@@ -35,7 +36,7 @@ const onEvent = event => {
 };
 let command = args[0] ?? 'doctor';
 try {
-  const executor = ['render', 'stills', 'verify'].includes(command) && args.includes('--hosted-executor');
+  const executor = ['render', 'stills', 'verify', 'resume'].includes(command) && args.includes('--hosted-executor');
   const exactIndex = args.indexOf('--job-dir-exact');
   const lostClaim = executor && (exactIndex < 0 || !args[exactIndex + 1]
     || !await claimExecutor(args[exactIndex + 1], command));
@@ -46,6 +47,7 @@ try {
     console.log('Usage: multiplane <render|stills|verify|inspect|lint> <shot.html> [--json] [--option value]\n'
       + '       multiplane serve [--root directory] [--port number] [--json]\n'
       + '       multiplane <status|cancel> <jobId|jobDir> [--json] [--wait seconds]\n'
+      + '       multiplane resume <jobId|jobDir> [--json] [--workers n] [--job-dir directory] [--no-hosted]\n'
       + '       multiplane wait <jobId|jobDir> [--json] [--timeout seconds]\n'
       + '       multiplane benchmark [--json] [--raster gpu|software] [--max-workers n]\n'
       + '       multiplane doctor [--json] [--ffmpeg path]\n'
@@ -60,7 +62,7 @@ try {
   } else {
     if (!allowed[command]) throw invalidOption('command', 'Unknown command: ' + command);
     if (args.includes('--help')) {
-      console.log('Usage: multiplane ' + command + (['doctor', 'serve', 'benchmark'].includes(command) ? '' : ['status', 'cancel', 'wait'].includes(command) ? ' <jobId|jobDir>' : ' <shot.html>') + ' [options]\nOptions: --json --help ' + listed(allowed[command]).map(f => '--' + f + (['static-reuse', 'no-static-reuse', 'overwrite', 'no-lint', 'no-post', 'alpha', 'draft', 'no-hosted', 'hosted-executor'].includes(f) ? '' : ' <value>')).join(' '));
+      console.log('Usage: multiplane ' + command + (['doctor', 'serve', 'benchmark'].includes(command) ? '' : ['status', 'cancel', 'wait', 'resume'].includes(command) ? ' <jobId|jobDir>' : ' <shot.html>') + ' [options]\nOptions: --json --help ' + listed(allowed[command]).map(f => '--' + f + (['static-reuse', 'no-static-reuse', 'overwrite', 'no-lint', 'no-post', 'alpha', 'draft', 'no-hosted', 'hosted-executor'].includes(f) ? '' : ' <value>')).join(' '));
     } else {
       const needsTarget = !['doctor', 'serve', 'benchmark'].includes(command);
       const target = needsTarget ? args[1] : undefined;
@@ -78,14 +80,14 @@ try {
       delete options.json;
       if (options['job-dir-exact'] && !executor) throw invalidOption('--job-dir-exact', '--job-dir-exact requires --hosted-executor.');
       options.onEvent = executor ? undefined : onEvent;
-      if (['render', 'stills', 'verify'].includes(command) && !executor) options._hostedCLI = {
+      if (['render', 'stills', 'verify', 'resume'].includes(command) && !executor) options._hostedCLI = {
         args: args.slice(1).filter(arg => arg !== '--json'), bin: fileURLToPath(import.meta.url), onBytes,
       };
       if (command === 'wait') {
         const result = await waitJob(target, { ...options, onEvent: json ? undefined : onEvent, onBytes: json ? onBytes : undefined });
         reported = true; process.exitCode = resultExitCode(result);
       } else {
-        const action = { render: renderShot, stills: stillsShot, verify: verifyShot, inspect: inspectShot, serve, lint: lintShot, doctor, benchmark, status: statusJob, cancel: cancelJob }[command];
+        const action = { resume: resumeRender, render: renderShot, stills: stillsShot, verify: verifyShot, inspect: inspectShot, serve, lint: lintShot, doctor, benchmark, status: statusJob, cancel: cancelJob }[command];
         const result = needsTarget ? await action(target, options) : await action(options);
         if (result?.ok !== undefined) { reported = true; process.exitCode = resultExitCode(result); }
       }

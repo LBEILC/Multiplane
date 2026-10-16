@@ -127,10 +127,13 @@ For the full contract, patterns that break determinism, and 3D layer usage, see 
 | `multiplane status <job>` | View job status |
 | `multiplane cancel <job>` | Stop a job |
 | `multiplane wait <job>` | Wait for a job to finish and print its events, for example after an agent session restarts |
+| `multiplane resume <job>` | Continue an interrupted render from where it stopped |
 | `multiplane config get\|set\|unset` | Read or change the user config |
 | `multiplane skill status\|install\|remove` | Install, update or remove the agent skill for Claude Code and Codex |
 
 Shot paths are relative to the resource root `--root` (the current directory by default). Each run has its own job directory, `out/jobs/<jobId>/`. Without `--out`, artifacts are written there (video, `stills/`, `verify/`), so runs do not overwrite each other. See `artifacts` in the result for the final paths. `--out` sets the output location. An existing target is rejected unless `--overwrite` is given. `render`, `stills`, and `verify` automatically run `lint` before starting and stop on errors. Use `--no-lint` to skip it. `npx multiplane <command> --help` lists all options for that command.
+
+`render` encodes in segments of about 10 seconds and keeps each one on disk as soon as it is done. If a render stops part way (the process is killed, the machine crashes or loses power, the browser keeps crashing, or you stop it), `multiplane resume <job>` skips the segments already encoded, renders the rest and joins them without re-encoding; the frames are identical to an uninterrupted render. A resume keeps all of the original job's options. It is refused (`resume_unavailable`) when a file the shot loaded has changed or the Multiplane, Chromium or FFmpeg version differs, so a film is never joined from mismatched parts. See section 6.1 of the protocol.
 
 Common `render` options:
 

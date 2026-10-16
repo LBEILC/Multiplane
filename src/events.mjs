@@ -105,6 +105,7 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
   if (!options._hostedCLI) monitor();
   return {
     directory, jobId, emit, warning, artifacts, options, monitor,
+    ...(options._resume ? { resumeData: { resumedFrom: options._resume.jobId, resume: { segmentsReused: 0, framesReused: 0 } } } : {}),
     // TODO(design): Document memoryBytes in status.json (latest sample, null on failure).
     memory(bytes) { state.memoryBytes = bytes; state.updatedAt = new Date().toISOString(); save(); },
     preview(frame) { state.previewFrame = frame; state.updatedAt = new Date().toISOString(); save(); },
@@ -113,7 +114,8 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
       if (deferStart && !resolved) { save(); return; }
       startedEvent = true;
       const { onEvent, _preview, _resources, _probeVideo, _inspectFFmpeg, _hostedCLI, ...effective } = options;
-      emit('start', { version, shot, ...(jobId ? { jobId } : {}), options: effective, ...(this.workersSource ? { workersSource: this.workersSource } : {}) });
+      for (const key of Object.keys(effective)) if (key.startsWith('_')) delete effective[key];
+      emit('start', { ...this.resumeData, version, shot, ...(jobId ? { jobId } : {}), options: effective, ...(this.workersSource ? { workersSource: this.workersSource } : {}) });
       index('start', { command, shot, pid: process.pid });
       for (const [type, fields] of pendingEvents.splice(0)) emit(type, fields);
     },
@@ -129,7 +131,7 @@ export function createEvents(command, shot, options = {}, job = false, deferStar
       if (deferStart) this.start(true);
       const result = { command, ok: !error, code: error?.code ?? null, message: error?.message ?? null,
         ...(error?.hint ? { hint: error.hint } : {}), ...(error?.details ? { details: error.details } : {}),
-        artifacts, elapsedMs: Math.round(performance.now() - started), ...(jobId ? { jobId } : {}), data };
+        artifacts, elapsedMs: Math.round(performance.now() - started), ...(jobId ? { jobId } : {}), data: this.resumeData ? { ...this.resumeData, ...data } : data };
       index('end', { state: !error ? 'succeeded' : error.code === 'cancelled' ? 'cancelled' : 'failed' });
       emit('result', result);
       return result;
@@ -142,7 +144,7 @@ export async function runCommand(command, shot, options, action, job = true) {
   let events, resources, linted = false;
   try {
     const explicit = options;
-    const user = loadUserConfig(command, options);
+    const user = options._effectiveOptions ? { options: { ...options }, config: { applied: [] }, warnings: [] } : loadUserConfig(command, options);
     options = user.options;
     if (['render', 'stills', 'verify'].includes(command)) {
       options.quality = resolveQuality(options);
@@ -192,7 +194,7 @@ export async function runCommand(command, shot, options, action, job = true) {
       if (!options['no-lint']) { await checkLint(shot, events.options, events); linted = true; }
       events.start();
       const request = { schema: 'multiplane/1', jobId: events.jobId, jobDir: events.directory,
-        command, args: options._hostedCLI.args, cwd: process.cwd(), node: process.execPath,
+        command: options._resume ? 'resume' : command, args: options._hostedCLI.args, cwd: process.cwd(), node: process.execPath,
         bin: options._hostedCLI.bin, env: hostedEnvironment(process.env), at: new Date().toISOString() };
       const ownership = await handoff(request);
       if (ownership.hosted) {
@@ -210,7 +212,7 @@ export async function runCommand(command, shot, options, action, job = true) {
       resources = createResourceSampler({ enabled: options._resources !== false, onSample: events.memory });
       events.resources = resources;
     }
-    if (options.draft) {
+    if (options.draft && !options._effectiveOptions) {
       // Keep lint and cancellation active before the dimension-only draft probe.
       if (!linted && !options['no-lint']) {
         const { findings, data } = await scanShot(shot, events.options);

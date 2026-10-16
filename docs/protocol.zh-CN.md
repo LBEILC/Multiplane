@@ -19,14 +19,14 @@
 |---|---|
 | `schema` | 固定 `"multiplane/1"`。字段只增不改；改含义或删字段时升到 `/2`。 |
 | `type` | 事件类型，见下表。 |
-| `command` | `render` / `stills` / `verify` / `inspect` / `serve` / `lint` / `benchmark` / `doctor` / `status` / `cancel` / `wait` / `config` / `skill`。 |
+| `command` | `render` / `stills` / `verify` / `inspect` / `serve` / `lint` / `benchmark` / `doctor` / `status` / `cancel` / `wait` / `resume` / `config` / `skill`。续传的渲染作业事件里写的是 `render`；只有在新作业建立之前就失败时才出现 `resume`（第 6.1 节）。 |
 | `ts` | ISO 8601 UTC 时间戳。 |
 
 （`lint`、`inspect`、`serve` 不建作业目录，事件里没有 `jobId`。）
 
 | `type` | 何时 | 额外字段 |
 |---|---|---|
-| `start` | 参数解析成功后第一行（给了 `--draft`、或镜头可能声明 `alpha` 默认值时，在预检之后发出：预检会加载镜头但不调用 `render(t)`，这样 `options` 里才是最终值；它仍是第一条事件） | `version`（包版本）、`shot`（绝对路径，无镜头的命令为 `null`）、`jobId`（有作业时）、`options`（加载镜头前就能确定的生效参数，含渲染器默认值；镜头自己声明的 `fps`、`post` 等见 `shot` 事件，最终生效值见 `result.data`） |
+| `start` | 参数解析成功后第一行（给了 `--draft`、或镜头可能声明 `alpha` 默认值时，在预检之后发出：预检会加载镜头但不调用 `render(t)`，这样 `options` 里才是最终值；它仍是第一条事件） | `version`（包版本）、`shot`（绝对路径，无镜头的命令为 `null`）、`jobId`（有作业时）、`options`（加载镜头前就能确定的生效参数，含渲染器默认值；镜头自己声明的 `fps`、`post` 等见 `shot` 事件，最终生效值见 `result.data`）；续传的渲染另有 `resumedFrom` 和 `resume`（第 6.1 节） |
 | `environment` | 浏览器启动后一次 | `node`、`platform`、`chromium`、`gpu`（`{renderer, hardware}`）、`ffmpeg`（`{path, version}`，不需要时为 `null`） |
 | `shot` | 镜头加载完一次 | `width`、`height`、`duration`、`fps`、`cuts`、`post`（镜头声明的默认后期参数） |
 | `progress` | 进度变化时，最多每 250 ms 一行 | `phase`（`launch` / `load` / `capture` / `encode` / `compare` / `finalize`）、`done`、`total`、`unit`（`"frame"` 等）、`fps`（实测速度，可为 `null`）、`etaMs`（可为 `null`）。`render` 在 `capture` 阶段的 `done` 是已截好的不同帧数（含复用的帧）；截好的帧可能还在等核验点，未必已交付或编码。预览帧总是已交付的帧 |
@@ -63,7 +63,8 @@
 - `inspect`：`{ shot, duration, fps, frames, stage: {width, height}, cuts, post, hasBlurAt, meta }`（第 10.1 节）。
 - `serve`：服务器停止后为 `{}`（第 10.2 节）。
 - `doctor`：`{ checks: [{name, ok, detail}] }`，检查 Node 版本、浏览器、GPU 光栅、FFmpeg 和 libx264、可选 three.js。
-- `status` / `cancel`：作业状态快照（第 6 节）。
+- 由 `resume` 发起的 `render` 另有 `resumedFrom` 和 `resume`（第 6.1 节）。
+- `status` / `cancel`：作业状态快照（第 6 节）；`render` 作业的 `status` 另有 `resume`（第 6.1 节）。
 - `wait`：原作业的事件流，见第 11.5 节。
 
 ## 4. `finding`
@@ -96,12 +97,12 @@
 |---|---|---|
 | 0 | 成功 | — |
 | 1 | 镜头或检查不通过 | `shot_not_found`、`shot_outside_root`、`shot_load_failed`（HTTP 或脚本错误）、`shot_contract_invalid`（缺 `SHOT`、`render` 不是函数、`duration`/`fps`/`cuts` 不合法等）、`stage_size_invalid`（缺 `#stage`、尺寸不是正整数或随视口变化）、`ready_timeout`、`render_threw`（`render(t)` 抛错，`details` 带 `t`）、`resource_failed`（字体或素材加载失败）、`nondeterministic_output`、`lint_failed`、`cancel_timeout`（`cancel --wait` 到时作业仍未结束） |
-| 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` 找不到作业或快照损坏） |
+| 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` / `resume` 找不到作业或快照损坏）、`resume_unavailable`（作业不能续传；`details.reason`，见第 6.1 节） |
 | 3 | 环境问题 | `skill_modified`、`skill_blocked`、`skill_changed`（见 9.2）、`config_invalid`（作为 `config` 命令的失败，见 9.1；在其他地方只是警告）、`ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`wait_timeout`（`wait --timeout` 到时，作业本身不受影响）、`port_in_use`（`serve --port` 指定的端口已被占用）、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
-| 4 | 渲染器内部 | `output_invalid`（编码后的文件与渲染内容不符：帧数、时长、尺寸或帧率；`details.expected` 与 `details.actual`；文件不会发布）、`worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败；已知时带 `details.t`）、`encode_failed`、`internal_error` |
+| 4 | 渲染器内部 | `output_invalid`（编码后的文件与渲染内容不符：帧数、时长、尺寸或帧率；`details.expected` 与 `details.actual`；文件不会发布）、`worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败，或者同一帧第三次卡住，见 `worker_stalled`；已知时带 `details.t`）、`encode_failed`、`internal_error` |
 | 130 | 被取消 | `cancelled` |
 
-警告码（只出现在 `warning` 事件，不影响退出码）：`browser_restarted`（浏览器进程或页面意外关闭，已重新启动并重渲受影响的帧；`render(t)` 只由 `t` 决定，所以不会改变像素；`details.attempt`）、`output_unverified`（无法探测编码后的文件，未经核对就发布了；`details.reason`）、`gpu_software_fallback`（要求 GPU 光栅但实际落到软件渲染器）、`home_unavailable`（用户级目录读写失败，见第 8 节）、`config_invalid`（用户配置某字段非法，已忽略；整份文件损坏或顶层不是对象时 `details.field` 为 `"$"`）、`preview_failed`（预览帧写入失败，每个作业只报一次，此后不再更新预览，渲染照常）、`static_reuse_disabled`（核验帧与复用的那份不一致：本作业余下部分关闭复用，受影响的帧重新截图，成品仍然正确；`details.frame`、`details.t`）。
+警告码（只出现在 `warning` 事件，不影响退出码）：`browser_restarted`（浏览器进程或页面意外关闭，已重新启动并重渲受影响的帧；`render(t)` 只由 `t` 决定，所以不会改变像素；`details.attempt`）、`worker_stalled`（某个 worker 手上有帧，却在 `max(120 秒, 本次作业已完成帧最长耗时 × 10)` 内一帧都没交出；已关闭并重启它的浏览器，整帧重做，像素不变；每帧最多重试两次，第三次卡住以 `browser_crashed` 结束；`details: { worker, frame, waitedSeconds }`，`worker` 和 `frame` 从 0 数起）、`output_unverified`（无法探测编码后的文件，未经核对就发布了；`details.reason`）、`gpu_software_fallback`（要求 GPU 光栅但实际落到软件渲染器）、`home_unavailable`（用户级目录读写失败，见第 8 节）、`config_invalid`（用户配置某字段非法，已忽略；整份文件损坏或顶层不是对象时 `details.field` 为 `"$"`）、`preview_failed`（预览帧写入失败，每个作业只报一次，此后不再更新预览，渲染照常）、`static_reuse_disabled`（核验帧与复用的那份不一致：本作业余下部分关闭复用，受影响的帧重新截图，成品仍然正确；`details.frame`、`details.t`）、`resume_renderer_changed`（续传时的显卡或驱动与原作业不同；`details.before`、`details.after`；见第 6.1 节）。
 
 lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_animation`、`web_animations`、`media_playback`、`remote_resource`、`resource_missing`、`stage_missing`、`shot_missing`、`runtime_missing`、`async_render` 为 error；`timer_driven`、`animated_image`、`stage_size_unfixed`、`font_not_awaited`、`lint_directive_invalid`、`lint_incomplete`（某段源码无法解析、被跳过，扫描覆盖不完整）为 warning。lint 的 `location` 为 `{file, line, column}`（相对资源根，从 1 开始），`details.snippet` 为该行源码。问题行的上一行写注释 `multiplane-disable-next-line <规则码>` 可豁免。
 
@@ -116,10 +117,29 @@ lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_ani
   - `events.jsonl`：与 `--json` 的 stdout **完全相同**的事件流（不管开没开 `--json` 都写）。
   - `status.json`：最新快照，原子写入（写临时文件再改名）：`{schema, jobId, command, shot, pid, state, phase, done, total, fps, etaMs, previewFrame, memoryBytes, startedAt, updatedAt, result}`；`state` 为 `queued` / `running` / `succeeded` / `failed` / `cancelled`。`queued` 只用于在软件队列里等待的托管作业（第 11 节）：排队期间由软件写快照，`pid` 是软件的进程，并加字段 `queuePosition`（从 1 起，1 表示下一个执行）。读取方遇到不认识的状态按“进行中”显示。`result` 结束时等于 `result` 事件的内容，运行中为 `null`。
   - 停止请求：在目录里创建 `stop` 文件。渲染器检测到后清理并以 `cancelled` 结束。
+  - `segments/`（仅 `render`）：编好的分段及其记录，见第 6.1 节；渲染成功后删除。续传作业没有自己的 `segments/`，而是有 `resume.json`（`{ directory }`），指向它接着写的那个 `segments/` 目录。
 - `multiplane status <jobId|jobDir> [--json]`：读 `status.json`；进程已不在而 `state` 仍是 `running` 时报告为 `failed` / `internal_error`（不改文件）。`status` 本身的 `ok` 只表示读到了快照，原作业的成败看 `data.state` 和 `data.result`。
 - `multiplane cancel <jobId|jobDir> [--json]`：创建 `stop` 文件，等待作业结束（`--wait` 秒，默认 30），输出最终状态；作业已经结束时直接返回原终态；到时仍未结束返回 `cancel_timeout`。
 - `--help`（全局或 `multiplane <command> --help`）和 `--version` 只输出人类可读文字，不产生事件。
 - 作业目录不自动清理；桌面软件和其他读取方依赖这套文件。
+
+### 6.1 分段与 `multiplane resume`
+
+渲染中途停下（进程被杀、死机或睡眠、浏览器反复崩溃、用户停止）后，可以从停下的地方接着渲，不用从头再来。
+
+- **分段**：每个 `render` 都按约 10 秒一段编码（`round(fps × 10)` 帧，从本次范围的第一帧起算），每段用独立的编码器、不含音轨。一段的帧数核对无误并改名到位之后才算保留；在那之前中断的段不算。所有段齐了以后不重新编码、直接拼接，按原来的规则裁剪并混入音轨，拼好的文件照常做成品核对（第 3 节）。只有一段时不拼接。成功后删除 `segments/`，失败或取消时保留。
+- **记录**：`segments/manifest.json`（schema 为 `multiplane-segments/1`，原子写入）保存镜头、生效参数、环境、帧范围、段长、镜头经渲染器本地服务器加载过的每个文件（以及 `--audio` 文件）的 SHA-256，以及每个已保留段的范围、文件名、大小和 SHA-256。`segments/render.lock` 由正在写段的进程持有，持有者进程已不在时视为过期。这份记录是内部格式，读取方应使用 `status`。
+- **命令**：`multiplane resume <jobId|jobDir> [--json] [--job-dir <dir>] [--workers <n>] [--no-hosted]`；JS API 为 `resumeRender(jobIdOrDir, options)`，返回结构与 `renderShot` 相同。只接受这几个参数，给别的以 `invalid_option` 失败。渲染使用原作业的生效参数和输出路径，不读当前的用户配置和镜头默认值。
+- **新作业**：续传会新建一个 `render` 作业，有自己的 ID 和目录；原作业的文件和终态不变。已保留的段直接复用，丢失或损坏（大小或 SHA-256 不符）的段重新渲染；新段写进原来的 `segments/`，所以续传的作业还可以再续。`start` 事件和 `result.data` 加 `resumedFrom`（原作业的 `jobId`）和 `resume: { segmentsReused, framesReused }`。进度把复用的帧算作已完成。
+- **拒绝续传的情况**（`resume_unavailable`，退出码 2，`details.reason`）：
+  - `running`：原作业还在运行，或另一个续传正持有分段锁；
+  - `succeeded`：已经没有要渲的部分；
+  - `not_render`：作业是 `stills` 或 `verify`；
+  - `missing_manifest`：作业没有可用的记录（由不分段的旧版本生成，或在开始渲染之前就失败了）；
+  - `inputs_changed`：镜头加载过的某个文件或音轨文件被改动或删除；`details.changes` 列出路径；
+  - `environment_changed`：Multiplane 版本、Chromium 版本、光栅方式、FFmpeg 版本或编码器不同；`details.changes` 列出哪几项。
+  `state` 为 `running` 但进程已不在的作业按 `failed` 处理，可以续传。显卡或驱动不同不会拒绝续传，只发警告 `resume_renderer_changed` 后继续，因为 GPU 光栅的差别最多是第 14 节所说的抖动。
+- **状态**：`render` 作业的 `status` 加 `resume: { available, reason, framesDone, framesTotal }`。`available` 和 `reason` 只看作业状态和记录，输入和环境在运行 `resume` 时才核对。
 
 ## 7. JS API
 
@@ -236,7 +256,7 @@ agent 发起的渲染本来是会话的子进程，会话一结束就被连带�
 
 同时满足才托管，否则照旧自己渲染：
 
-1. 命令是 `render`、`stills` 或 `verify`。
+1. 命令是 `render`、`stills`、`verify` 或 `resume`。续传请求的 `command` 为 `"resume"`；不认这种请求的软件版本会拒绝或不认领，等待者照第 11.3 节自己渲染。
 2. `config.json` 的 `hosted` 为 `true`（`multiplane config set hosted true`），默认关闭。
 3. 没有给 `--no-hosted`，`MULTIPLANE_HOSTED` 不是 `0`。
 4. `<用户级目录>/app.json` 表明软件在运行并接受托管：`{ schema, pid, createdAt, acceptsHosted: true, version }`。`createdAt` 是操作系统记录的 `pid` 进程创建时间（UTC ISO 字符串）；渲染器核对进程存在且时间一致。软件启动时写这个文件，退出时删除或把 `acceptsHosted` 改为 `false`。

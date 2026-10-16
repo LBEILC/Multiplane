@@ -18,7 +18,7 @@ async function move(from, to) {
 }
 
 export async function hostedAvailable(command, options, env = process.env) {
-  if (!['render', 'stills', 'verify'].includes(command) || !options._hostedCLI || options.hosted !== true
+  if (!['render', 'stills', 'verify', 'resume'].includes(command) || !options._hostedCLI || options.hosted !== true
     || options['no-hosted'] || options['hosted-executor'] || env.MULTIPLANE_HOSTED === '0') return false;
   try {
     const app = await json(path.join(userHome(env), 'app.json'));
@@ -84,7 +84,7 @@ export async function handoff(request, { home = userHome(), timeout = 5000, star
 // Claim before loading config, creating status, linting or opening output files.
 export async function claimExecutor(jobDir, command) {
   try {
-    if (!path.isAbsolute(jobDir) || !['render', 'stills', 'verify'].includes(command)) return false;
+    if (!path.isAbsolute(jobDir) || !['render', 'stills', 'verify', 'resume'].includes(command)) return false;
     const jobId = path.basename(jobDir), base = hostedBase(jobId);
     const request = await json(base + '.claimed.json');
     if (request?.schema !== schema || request.jobId !== jobId || request.command !== command

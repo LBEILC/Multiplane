@@ -6,8 +6,9 @@ import { MultiplaneError, invalidOption } from './errors.mjs';
 import { number } from './capture.mjs';
 import { followJob } from './hosted.mjs';
 import { loadUserConfig } from './user-home.mjs';
+import { resumeStatus } from './segments.mjs';
 
-const resolveJob = (target, options) => path.isAbsolute(target) || /[\\/]/.test(target) ? path.resolve(target) : path.join(jobDirectory(options), target);
+export const resolveJob = (target, options) => path.isAbsolute(target) || /[\\/]/.test(target) ? path.resolve(target) : path.join(jobDirectory(options), target);
 export async function readStatus(target, options = {}) {
   let status;
   try { status = JSON.parse(await readFile(path.join(resolveJob(target, options), 'status.json'), 'utf8')); }
@@ -25,6 +26,7 @@ export async function readStatus(target, options = {}) {
       }
     }
   }
+  if (status.command === 'render') status.resume = resumeStatus(status, resolveJob(target, options));
   return status;
 }
 export const statusJob = (target, options = {}) => runCommand('status', null, options, events => readStatus(target, events.options), false);

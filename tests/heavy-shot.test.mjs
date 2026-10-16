@@ -166,3 +166,16 @@ test('final lens samples partition the full pattern and jitter regardless of cap
     }
   } finally { await capture.close(); }
 });
+
+test('zero aperture retains interleaved projection jitter and cannot reuse a fixed-phase probe', async () => {
+  const capture = await openShot(await threeShot(), 1, { raster: 'software' });
+  try {
+    await capture.page.evaluate(() => { SHOT.render = () => layer.render({ aperture: 0, adaptiveSamples: false }); });
+    const probe = decodePNG(await capture.frame(.25, { motionBlur: 4, motionBlurBase: 4, motionProbeTime: .25 }));
+    assert.equal(capture.motionProbeUsed, true);
+    const finalContext = { motionBlur: 4, motionBlurBase: 4, dofMotionSamples: 4, dofMotionIndex: 0 };
+    const final = decodePNG(await capture.frame(.25, finalContext));
+    assert.notDeepEqual(final.data, probe.data);
+    assert.deepEqual(decodePNG(await capture.frame(.25, finalContext)).data, final.data);
+  } finally { await capture.close(); }
+});

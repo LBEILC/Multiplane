@@ -53,3 +53,13 @@ test('host process-tree RSS is positive and plausible when platform access is av
   await reader.close();
   if (process.platform === 'win32') assert.equal(await reader.sample(), null);
 });
+
+test('resource samples continue without frame progress, including unavailable samples', async () => {
+  let ticks = 0;
+  const sampler = createResourceSampler({ intervalMs: 5, sample: async () => ++ticks === 2 ? null : 123 });
+  try {
+    await delay(60);
+    assert.ok(ticks >= 3);
+    assert.equal(sampler.snapshot().memorySamples, ticks - 1);
+  } finally { await sampler.stop(); }
+});

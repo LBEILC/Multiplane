@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { resolveThree } from './three-package.mjs';
+import { recordInput } from './input-records.mjs';
 
 export const root = process.cwd();
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -71,6 +72,7 @@ export async function startServer(port = 0, root = process.cwd()) {
       target = await normalizeResourcePath(target);
       if (!await isInsideResourceRoot(resourceBase, target)) { res.writeHead(403); return res.end(); }
       const info = await stat(target);
+      const recorded = await recordInput(target);
       const contentType = { '.wav': 'audio/wav', '.srt': 'text/plain; charset=utf-8', '.mp4': 'video/mp4' }[path.extname(target)] ?? mime[path.extname(target)] ?? 'application/octet-stream';
       const headers = { 'Content-Type': contentType, 'Content-Length': info.size, 'Accept-Ranges': 'bytes' };
       if (req.headers.range) {
@@ -82,10 +84,12 @@ export async function startServer(port = 0, root = process.cwd()) {
         }
         res.writeHead(206, { ...headers, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${info.size}` });
         if (req.method === 'HEAD') return res.end();
+        if (recorded) return res.end(recorded.subarray(start, end + 1));
         return createReadStream(target, { start, end }).on('error', () => res.destroy()).pipe(res);
       }
       res.writeHead(200, headers);
       if (req.method === 'HEAD') return res.end();
+      if (recorded) return res.end(recorded);
       createReadStream(target).on('error', () => res.destroy()).pipe(res);
     } catch (error) {
       if (error.code === 'ERR_MODULE_NOT_FOUND') { res.writeHead(503, { 'x-multiplane-error': 'three_not_installed' }); return res.end('Optional three.js is not installed.'); }

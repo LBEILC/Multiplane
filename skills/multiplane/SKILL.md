@@ -171,6 +171,7 @@ Use `--json` with any command. Resolve shot paths relative to `--root` (the curr
 | `multiplane status <job>` | View job status | — |
 | `multiplane cancel <job>` | Stop a job | `--wait` (seconds) |
 | `multiplane wait <job>` | Wait for a job started earlier and print its events | `--timeout` (seconds) |
+| `multiplane resume <job>` | Continue an interrupted render; already encoded segments are reused | `--workers` |
 
 Use `--out`, `--overwrite`, and `--no-lint` (skip automatic lint) with `stills`, `verify`, or `render`. Run `multiplane <command> --help` to list all options for that command.
 
@@ -213,3 +214,5 @@ With `--json`, stdout contains one JSON event per line. **The last line is alway
 Rendering may take a long time. Each run creates a job directory, `out/jobs/<jobId>/` (`jobId` appears in both the `start` event and the `result`). Read `status.json` for the latest progress snapshot and `events.jsonl` for the full event stream. To stop a job, run `multiplane cancel <jobId>` or create a file named `stop` in its job directory.
 
 If the user turned on hosting in the desktop app, the app runs the render and it keeps going after your session ends. Nothing changes in how you call the command; stderr says the job was handed over, and `status.json` may show `queued` while another hosted job runs. When a session resumes and you started a job earlier but never saw its `result`, run `multiplane wait <jobId> --json` to get its events and exit code instead of starting it again. Use `--no-hosted` only when the user asks for a render that should not go through the app.
+
+A `render` that ended without succeeding (`failed` or `cancelled`, or a job whose process disappeared, for example after a crash or reboot) can usually be continued instead of rendered again: run `multiplane resume <jobId> --json`. It reuses the segments already encoded (about 10 seconds each), renders the rest with the original options and output path, and produces the same frames as an uninterrupted render. It is a new job; its `result` carries `resumedFrom` and `resume.framesReused`. `multiplane status <jobId> --json` shows `data.resume.available` and how many frames are done. If it fails with `resume_unavailable`, read `details.reason`: `inputs_changed` or `environment_changed` means start a fresh `render` (do this deliberately, for example after you edited the shot); `running` means the job, or another resume, is still going, so `wait` for it; `missing_manifest` means the job predates segments. Only `--workers` can change on resume. A `resume_renderer_changed` warning (a different GPU or driver) needs no action.

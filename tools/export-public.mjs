@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { npm } from './process.mjs';
 import { ensureLocalFfmpeg } from '../tests/local-ffmpeg.mjs';
 
-export const excluded = name => ['AGENTS.md', 'docs/requirements.md', 'docs/internal.md', 'docs/design.md'].includes(name) || ['docs/roles/', 'docs/specs/', 'tools/reports/', '.claude/', 'app/design/preview.'].some(prefix => name.startsWith(prefix));
+export const excluded = name => ['AGENTS.md', 'docs/requirements.md', 'docs/internal.md', 'docs/design.md'].includes(name) || ['docs/roles/', 'docs/specs/', 'tools/reports/', '.claude/', 'app/design/preview', 'app/design/vendor/'].some(prefix => name.startsWith(prefix));
 const git = (root, args) => execFileSync('git', args, { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
 async function noLinks(file, root) {
   for (let current = path.resolve(file); current !== root; current = path.dirname(current)) {

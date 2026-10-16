@@ -329,11 +329,25 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       let png, result, usedSamples = motionBlur;
       if (candidate && !verifyReuse) { ({ png, image: result, usedSamples } = previousRaw); }
       else if (upward) {
+        // TODO(design): Half-size probes need a compatible decision policy;
+        // halving the raster and displacement threshold changes refinement.
         // Calibrated in capture raster pixels: about 2px for fast/standard, 1px for high.
         const threshold = resolveQuality(options) === 'high' ? 1 : 2;
-        await sampleMany([...endpoints, t], true);
+        // Stop as soon as motion is established. Retain exact full-size still
+        // checks, and reuse every matching time without changing the final grid.
+        await sampleMany([t, endpoints[0]], true);
         const centerProbe = cache.get(t);
-        const still = endpoints.every(time => cache.get(time).image.data.equals(centerProbe.image.data));
+        let still = cache.get(endpoints[0]).image.data.equals(centerProbe.image.data);
+        if (still) {
+          await sampleMany([endpoints[1]], true);
+          still = cache.get(endpoints[1]).image.data.equals(centerProbe.image.data);
+        } else if (capture._inspectSample) {
+          // Preserve conditional sampleContext reads at the skipped endpoint.
+          const start = performance.now();
+          await capture._inspectSample(endpoints[1], context(false, endpoints[1]));
+          stats.captureMs += performance.now() - start;
+          contextUsed ||= capture.sampleContextUsed === true;
+        }
         let legacy = contextUsed;
         let grid = legacy ? times : grids.get(motionBlur);
         if (still) {
@@ -400,6 +414,8 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       if (!(candidate && !verifyReuse)) {
         // Only lens-dependent probe captures need replacing. DOM captures and
         // final hook captures remain reusable at the same time and context.
+        // TODO(design): Zero aperture still has interleaved projection jitter;
+        // reusing its probes requires an approved change to that pattern.
         if (motionProbeUsed && !finalCapture) {
           finalCapture = true;
           dofMotionSamples = new Set(selectedTimes).size;

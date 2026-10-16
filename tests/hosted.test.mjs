@@ -12,6 +12,8 @@ import { stopOwned } from '../app/src/main/owned-process.mjs';
 import { hostedAvailable, hostedEnvironment, handoff, claimExecutor, followJob } from '../src/hosted.mjs';
 import { processCreatedAt } from '../src/process-identity.mjs';
 import { loadUserConfig } from '../src/user-home.mjs';
+import { renderShot } from '../src/render.mjs';
+import { MultiplaneError } from '../src/errors.mjs';
 
 const bin = fileURLToPath(new URL('../bin/multiplane', import.meta.url));
 async function until(check, timeout = 20000) {
@@ -38,6 +40,21 @@ async function fixture(t, options = {}) {
   return { root, home, jobs, shot, env, app, start, cli, request };
 }
 const final = output => JSON.parse(output.stdout.trim().split('\n').at(-1));
+
+fullTest('resume requests identify resume and fall back locally when the app rejects them', { timeout: 60000 }, async t => {
+  const f = await fixture(t, { mode: 'reject' });
+  let original;
+  try {
+    await renderShot(f.shot, { root: f.root, 'job-dir': f.jobs, workers: 1, 'no-lint': true, 'no-post': true, 'no-hosted': true,
+      _segmentHook() { throw new MultiplaneError('cancelled'); } });
+  } catch (error) { assert.equal(error.code, 'cancelled'); original = path.join(f.jobs, error.result.jobId); }
+  const output = await f.cli(['resume', original, '--json']);
+  assert.equal(output.code, 0, output.stdout + output.stderr);
+  assert.equal(f.app.requests.at(-1).command, 'resume');
+  assert.equal(final(output).command, 'render');
+  assert.equal(final(output).data.resumedFrom, path.basename(original));
+  assert.match(output.stderr, /Rendering locally/);
+});
 
 test('hosted executor keeps the job and forwards exact bytes; wait replays completed logs', { timeout: 60000 }, async t => {
   const f = await fixture(t);

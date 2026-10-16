@@ -3,8 +3,11 @@ import { MultiplaneError, asError } from './errors.mjs';
 import { parentPort, workerData, isMarkedAsUntransferable } from 'node:worker_threads';
 import { openShot } from './capture.mjs';
 import { createPostCapture, resolveScale } from './post.mjs';
+import { inputRecords } from './input-records.mjs';
 
-let capture, closing = false, running = false;
+if (workerData.options._recordInputs) inputRecords.enterWith((file, record) => parentPort.postMessage({ type: 'input', file, record }));
+
+let capture, closing = false, running = false, activeFrame;
 const sendFailure = error => {
   const failure = asError(error);
   parentPort.postMessage({ type: 'failure', error: failure.message, code: failure.code, details: failure.details, hint: failure.hint });
@@ -16,12 +19,17 @@ async function close() {
   parentPort.close();
 }
 try {
-  capture = await openShot(workerData.shot, resolveScale(workerData.options).renderScale, { ...workerData.options, onWarning: warning => parentPort.postMessage({ type: 'warning', warning }), check: () => { if (closing) throw new MultiplaneError('cancelled'); } });
+  capture = await openShot(workerData.shot, resolveScale(workerData.options).renderScale, { ...workerData.options, onRecovered: () => parentPort.postMessage({ type: 'recovered' }), onWarning: warning => parentPort.postMessage({ type: 'warning', warning }), check: () => { if (closing) throw new MultiplaneError('cancelled'); } });
   if (workerData.size && (capture.width !== workerData.size.width || capture.height !== workerData.size.height)) throw new MultiplaneError('internal_error', 'Worker stage dimensions differ from the main process.');
   const processed = createPostCapture(capture, { ...workerData.options, onWarning: warning => parentPort.postMessage({ type: 'warning', warning }) }, workerData.fps);
   parentPort.on('message', async message => {
     if (message.type === 'cancel') { closing = true; await capture?.close(); if (!running) parentPort.close(); return; }
     if (message.type === 'close') { await close(); return; }
+    if (message.type === 'stalled') {
+      if (!closing && activeFrame === message.details.frame) await capture.stall(message.details).catch(sendFailure);
+      else parentPort.postMessage({ type: 'recovered' });
+      return;
+    }
     if (closing) return;
     running = true;
     try {
@@ -29,7 +37,10 @@ try {
       const source = async function* (first, end) {
         for (let index = first; index < end && !closing; index++) {
           const frame = message.first + index;
+          activeFrame = frame;
+          parentPort.postMessage({ type: 'frame-start', frame });
           const png = await processed.frame(frame / workerData.fps, frame, index === end - 1);
+          activeFrame = undefined;
           parentPort.postMessage({ type: 'captured', frame });
           yield { png, hash: processed.lastHash, blurSamples: processed.lastBlurSamples, dofSamples: processed.lastDofSamples };
         }

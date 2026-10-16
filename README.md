@@ -127,10 +127,13 @@ Shot.define({
 | `multiplane status <job>` | 查看作业状态 |
 | `multiplane cancel <job>` | 停止作业 |
 | `multiplane wait <job>` | 等一个作业结束并输出它的事件，例如 agent 会话重启之后 |
+| `multiplane resume <job>` | 中断的渲染从停下的地方接着渲 |
 | `multiplane config get\|set\|unset` | 读取或修改用户配置 |
 | `multiplane skill status\|install\|remove` | 给 Claude Code 和 Codex 安装、更新、移除 agent skill |
 
 镜头路径相对资源根 `--root`（默认当前目录）。每次运行都有自己的作业目录 `out/jobs/<jobId>/`，不给 `--out` 时产物就写在里面（视频、`stills/`、`verify/`），多次运行互不覆盖；最终路径见结果里的 `artifacts`。`--out` 指定输出位置，目标已存在时会拒绝覆盖，加 `--overwrite` 才替换。`render`、`stills`、`verify` 启动前自动跑 `lint`，有 error 就停下，`--no-lint` 跳过。`npx multiplane <command> --help` 列出该命令的全部参数。
+
+`render` 按约 10 秒一段编码，每段编完就落盘。渲染中途停下（进程被杀、死机、断电、浏览器反复崩溃、手动停止）后，`multiplane resume <job>` 会跳过已经编好的段、只渲剩下的，最后不重新编码地拼成成片，画面与一次渲完的逐帧相同。续传沿用原作业的全部参数；镜头加载过的文件改了，或 Multiplane、Chromium、FFmpeg 版本变了，会拒绝续传（`resume_unavailable`），以免拼出前后不一致的片子。见协议第 6.1 节。
 
 `render` 的常用参数：
 
