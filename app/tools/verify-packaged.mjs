@@ -181,15 +181,25 @@ try {
     assert.equal(await readFile(path.join(preferenceSource, 'Cache'), 'utf8'), 'keep');
     evidence.checks.push('Default Windows profile home: CLI migrated old config and index before first job list; desktop preferences moved and old cache retained');
   }
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
-  await waitFor(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()), 'Owner did not minimize');
+  // The tray popover is also a BrowserWindow; identify the owner by its page.
+  const ownerUrl = page.url();
+  const ownerId = await application.evaluate(({ BrowserWindow }, url) => {
+    const owners = BrowserWindow.getAllWindows().filter(win => win.webContents.getURL() === url);
+    if (owners.length !== 1) throw Error('Expected exactly one owner window');
+    owners[0].minimize();
+    return owners[0].id;
+  }, ownerUrl);
+  await waitFor(() => application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isMinimized(), ownerId), 'Owner did not minimize');
   // Without FUSE, both AppImage copies would extract to the same /tmp directory, and the
   // runtime deletes it when the second copy exits, taking the first copy's files with it.
   const contenderEnv = appImageInvocationEnvironment(env, path.join(work, 'contender-tmp'));
   if (contenderEnv !== env) await mkdir(contenderEnv.TMPDIR, { recursive: true });
   const contender = await run(executable, launchArgs, { env: contenderEnv, capture: true, timeout: 15000, killTree: true });
   assert.equal(contender.code, 0);
-  await waitFor(() => application.evaluate(({ BrowserWindow }) => { const windows = BrowserWindow.getAllWindows(); return windows.length === 1 && !windows[0].isMinimized() && windows[0].isVisible(); }), 'Owner window was not restored');
+  await waitFor(() => application.evaluate(({ BrowserWindow }, { id, url }) => {
+    const owners = BrowserWindow.getAllWindows().filter(win => win.webContents.getURL() === url);
+    return owners.length === 1 && owners[0].id === id && !owners[0].isMinimized() && owners[0].isVisible();
+  }, { id: ownerId, url: ownerUrl }), 'Owner window was not restored');
   evidence.checks.push('Second packaged instance exited and restored the existing window');
   await page.locator('[data-page="environment"]').click();
   const checkDoctor = async browserAvailable => {
