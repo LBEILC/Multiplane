@@ -11,7 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { readFile, mkdir } from 'node:fs/promises';
 import { Configuration, Skills, rendererRoot, bundledCommand, parseDoctor, readEnvironment, checkFfmpeg } from './settings.mjs';
-import { pathToFileURL } from 'node:url';
+import { mediaResponse } from './media.mjs';
 import { JobStore, Preferences, homeDirectory } from './store.mjs';
 import type { Job, Snapshot } from '../shared/types';
 import { BrowserInstaller } from './browser.mjs';
@@ -93,7 +93,7 @@ if (primary) app.whenReady().then(async () => {
       const url = new URL(request.url), job = store.job(url.searchParams.get('job')) as Job;
       const file = path.resolve(url.searchParams.get('file') ?? '');
       if (!allowed(job).has(file) || !/\.(png|jpe?g|webp|mp4|webm)$/i.test(file)) return new Response(null, { status: 403 });
-      return await net.fetch(pathToFileURL(file).href, { headers: request.headers });
+      return await mediaResponse(file, request);
     } catch { return new Response(null, { status: 404 }); }
   });
   const handle = (name: string, fn: (...args: any[]) => unknown) => ipcMain.handle(name, async (event, ...args) => {

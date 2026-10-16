@@ -1,6 +1,6 @@
 {
   "name": "multiplane",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "type": "module",
   "license": "Apache-2.0",
   "publishConfig": {
@@ -40,7 +40,8 @@
     "export:public": "node tools/export-public.mjs",
     "release:check": "node tools/release-check.mjs",
     "bench": "node tools/bench/run.mjs",
-    "test:full": "node --import ./tests/test-home.mjs tools/test-suite.mjs --full"
+    "test:full": "node --import ./tests/test-home.mjs tools/test-suite.mjs --full",
+    "release": "node tools/release.mjs"
   },
   "dependencies": {
     "acorn": "8.15.0",

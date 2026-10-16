@@ -1,10 +1,23 @@
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { mkdir, readFile, writeFile, rename, readdir, stat, unlink, appendFile, utimes, realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { processIdentity, jobAlive } from './process-identity.mjs';
 const schema = 'multiplane/1';
 export async function json(file) { try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT' || e instanceof SyntaxError) return null; throw e; } }
-export async function atomic(file, value) { await writeFile(file + '.app-tmp', JSON.stringify(value) + '\n'); await rename(file + '.app-tmp', file); }
+export async function atomic(file, value, { move = rename, pause = delay, platform = process.platform } = {}) {
+  const temporary = file + '.app-tmp';
+  await writeFile(temporary, JSON.stringify(value) + '\n');
+  for (let attempt = 0; ; attempt++) {
+    try { await move(temporary, file); return; }
+    catch (error) {
+      // Windows readers and scanners can briefly deny replacement. Preserve
+      // the previous file until rename succeeds; never unlink it as a fallback.
+      if (platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 5) throw error;
+      await pause(Math.min(25 * 2 ** attempt, 200));
+    }
+  }
+}
 const exists = file => stat(file).then(() => true, () => false);
 function jobReference(r, id) {
   return r?.schema === schema && r.jobId === id && typeof r.jobDir === 'string' && path.isAbsolute(r.jobDir) && path.basename(r.jobDir) === id;

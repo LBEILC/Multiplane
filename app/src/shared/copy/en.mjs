@@ -162,8 +162,6 @@ export default {
   "detect": "Detect",
   "automatic": "Automatic",
   "notifyFinish": "Notify when a job finishes",
-  "on": "On",
-  "off": "Off",
   "description": "A local renderer that turns web pages into video, for AI agents.",
   "rerunWizard": "Run the setup guide again",
   "checkEnvironment": "Check environment",

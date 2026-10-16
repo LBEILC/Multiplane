@@ -43,7 +43,7 @@ export default {
   usedL: 'Elapsed', avgL: 'Average speed', peakL: 'Peak memory', parallelL: 'Parallel', reuseL: 'Static frame reuse',
   browserL: 'Browser', gpuL: 'GPU', ffmpegL: 'FFmpeg', nodeL: 'Node', rendererL: 'Renderer', jobIdL: 'Job ID',
   durV: '{d} · {n} frames', none0: 'None', blurV: '{min}–{max} samples per frame · mean {mean}',
-  off: 'Off', on: 'On', yes: 'Yes', no: 'No', q_standard: 'Standard', q_draft: 'Draft', q_high: 'High',
+  yes: 'Yes', no: 'No', q_standard: 'Standard', q_draft: 'Draft', q_high: 'High',
   parallelV: '{n} browsers · {c} cores', reuseV: '{n} frames reused', reuseNone: 'No static frames to reuse', hwAccel: 'hardware accelerated',
   copyPath: 'Copy path', copyRaw: 'Copy raw result', summaryPending: 'Output, verification and performance appear here when the job ends.',
   errWhere: 'Where', errWhereV: '{tc} · frame {f}', viewFrame: 'View this frame', errOriginal: 'Renderer message',

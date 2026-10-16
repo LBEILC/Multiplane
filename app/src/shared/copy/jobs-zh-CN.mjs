@@ -31,7 +31,7 @@ export default {
   usedL: '用时', avgL: '平均速度', peakL: '内存峰值', parallelL: '并行', reuseL: '静帧复用',
   browserL: '浏览器', gpuL: 'GPU', ffmpegL: 'FFmpeg', nodeL: 'Node', rendererL: '渲染器', jobIdL: '作业编号',
   durV: '{d} · {n} 帧', none0: '没有', blurV: '每帧 {min}–{max} 次采样 · 平均 {mean}',
-  off: '关', on: '开', yes: '是', no: '否', q_standard: '标准', q_draft: '草稿', q_high: '高',
+  yes: '是', no: '否', q_standard: '标准', q_draft: '草稿', q_high: '高',
   parallelV: '{n} 个浏览器 · 本机 {c} 核', reuseV: '{n} 帧直接复用', reuseNone: '没有可复用的静止帧', hwAccel: '硬件加速',
   copyPath: '复制路径', copyRaw: '复制原始结果', summaryPending: '完成后这里显示产物、成品核对和性能数据。',
   errWhere: '出错位置', errWhereV: '{tc} · 第 {f} 帧', viewFrame: '在预览里看这一帧', errOriginal: '渲染器原文',

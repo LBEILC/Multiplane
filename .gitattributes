@@ -2,3 +2,7 @@
 bin/multiplane text eol=lf
 # Preserve upstream license bytes so the checked provenance hashes remain valid.
 licenses/native/* -text
+
+# Generated brand SVGs must keep the same bytes after packaging on Windows.
+app/design/icons/app.svg text eol=lf
+app/design/icons/mark.svg text eol=lf

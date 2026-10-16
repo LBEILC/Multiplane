@@ -162,8 +162,6 @@ export default {
   "detect": "检测",
   "automatic": "自动",
   "notifyFinish": "作业结束通知",
-  "on": "开启",
-  "off": "关闭",
   "description": "把网页渲染成视频的本地渲染器，给 AI agent 用。",
   "rerunWizard": "重新运行首次引导",
   "checkEnvironment": "检查环境",

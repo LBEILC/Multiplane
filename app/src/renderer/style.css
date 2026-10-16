@@ -528,6 +528,7 @@ button.primary:disabled { background: var(--surface-2); border-color: transparen
 .path-value span { flex: 1; min-width: 0; }
 .path-value button { flex-shrink: 0; }
 .setting-control input.path-input { color: var(--text-2); font: 12px var(--font-mono); }
+.setting-control input.path-input::placeholder { font: var(--fs-body) var(--font-ui); }
 .about { padding: 24px 0; }
 .about p { margin: 18px 0; }
 .wizard { max-width: 800px; margin: 0 auto; }
@@ -806,6 +807,7 @@ button.primary:disabled { background: var(--surface-2); border-color: transparen
 .job-failure { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: start; }
 .job-failure > i { font-size: 18px; }
 .job-failure .bt { min-width: 0; }
+.job-failure .bt > p { color: var(--text-2); }
 .job-failure .code { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .lb-tools button.on { background: rgba(255,255,255,.12); color: #fff; }
 .lb-img { overflow: hidden; }

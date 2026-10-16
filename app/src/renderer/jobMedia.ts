@@ -18,7 +18,8 @@ export function mountPlayer(j:Job) {
   const cuts=(j.events.find(e=>e.type==='shot')?.cuts??[]).map((s:number)=>Math.round((s-from)*fps)).filter((f:number)=>f>=0&&f<frames);
   host.querySelector('.cut-marks')!.innerHTML=cuts.map((f:number)=>`<i style="left:${f/Math.max(1,frames-1)*100}%" title="${t('cutAt',{tc:tc(f/fps)})}"></i>`).join('');
   let frame=Math.min(frames-1,Math.max(0,Math.floor(video.currentTime*fps))), callback=0, alive=true;
-  const paint=()=>{range.value=String(frame);host.querySelector('.tcode')!.textContent=`${tc(frame/fps)} / ${tc(frames/fps)}`;host.querySelector('.fnum')!.textContent=t('frameOf',{f:number(frame)});const b=host.querySelector<HTMLButtonElement>('[data-pl=toggle]')!;b.innerHTML=`<i class="ri-${video.paused?'play':'pause'}-fill"></i>`;b.title=t(video.paused?'play':'pause');b.setAttribute('aria-label',b.title);};
+  let paintedPaused:boolean|undefined;
+  const paint=()=>{range.value=String(frame);host.querySelector('.tcode')!.textContent=`${tc(frame/fps)} / ${tc(frames/fps)}`;host.querySelector('.fnum')!.textContent=t('frameOf',{f:number(frame)});const b=host.querySelector<HTMLButtonElement>('[data-pl=toggle]')!;if(paintedPaused!==video.paused){paintedPaused=video.paused;b.querySelector('i')!.className=`ri-${video.paused?'play':'pause'}-fill`;b.title=t(video.paused?'play':'pause');b.setAttribute('aria-label',b.title);}};
   // Seek inside the frame interval, avoiding timestamp rounding at frame boundaries.
   const seek=(f:number)=>{video.pause();frame=Math.max(0,Math.min(frames-1,Math.round(f)));video.currentTime=(frame+.5)/fps;paint();};
   const presented=(_now:number, metadata:VideoFrameCallbackMetadata)=>{if(!alive)return;if(!video.paused){frame=Math.min(frames-1,Math.max(0,Math.round(metadata.mediaTime*fps)));paint();}callback=video.requestVideoFrameCallback(presented);};

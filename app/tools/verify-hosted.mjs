@@ -1,3 +1,4 @@
+import { waitForMainWindow } from './main-window.mjs';
 import { _electron } from 'playwright';
 import { spawnOwned, stopOwned } from '../src/main/owned-process.mjs';
 import { processIdentity } from '../src/main/process-identity.mjs';
@@ -41,7 +42,7 @@ try {
   desktopChild.stderr.on('data', bytes => { desktopLog = (desktopLog + bytes).slice(-12000); });
   desktopChild.on('exit', (code, signal) => console.log('Packaged app exit:', code, signal, desktopLog));
   console.log('Packaged app launched.');
-  const page = await desktop.firstWindow({ timeout: 30000 }); page.setDefaultTimeout(30000); await page.locator('[data-page=settings]').click();
+  const page = await waitForMainWindow(() => desktop.windows()); page.setDefaultTimeout(30000); await page.locator('[data-page=settings]').click();
   console.log('Settings ready.');
   evidence.packaged = await desktop.evaluate(({ app }) => app.isPackaged); assert.equal(evidence.packaged, true);
   await page.locator('[data-pref=hosted]').click(); await until(async () => (await json(path.join(home, 'app.json')))?.acceptsHosted);

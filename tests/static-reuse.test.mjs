@@ -153,20 +153,26 @@ fullTest('stylesheet snapshots are cached until a possible CSSOM or DOM edit', a
   const shot = await fixture('style-snapshot-cache', html());
   const capture = await openShot(shot);
   try {
-    await capture.page.evaluate(() => {
+    // Test cache invalidation within one browser task: unrelated asynchronous
+    // load/focus/resize events legitimately dirty the general observer.
+    const result = await capture.page.evaluate(() => {
       const descriptor = Object.getOwnPropertyDescriptor(CSSRule.prototype, 'cssText');
-      globalThis.snapshotReads = 0;
-      Object.defineProperty(CSSRule.prototype, 'cssText', { ...descriptor, get() { globalThis.snapshotReads++; return descriptor.get.call(this); } });
+      let reads = 0;
+      Object.defineProperty(CSSRule.prototype, 'cssText', { ...descriptor, get() { reads++; return descriptor.get.call(this); } });
+      for (let i = 0; i < 3; i++) __multiplaneStatic.read();
+      const before = reads;
+      const unchanged = Array.from({ length: 12 }, (_, i) => { SHOT.render(i / 12); return __multiplaneStatic.read(); });
+      const cached = reads;
+      document.styleSheets[0].insertRule('#box { opacity:.7 }', 0);
+      const edited = __multiplaneStatic.read();
+      for (let i = 0; i < 3; i++) __multiplaneStatic.read();
+      return { before, unchanged, cached, edited, after: reads };
     });
-    for (let i = 0; i < 3; i++) await capture.observe(0);
-    const before = await capture.page.evaluate(() => globalThis.snapshotReads);
-    assert.ok(before > 0);
-    for (let i = 0; i < 12; i++) assert.equal(await capture.observe(i / 12), false);
-    assert.equal(await capture.page.evaluate(() => globalThis.snapshotReads), before);
-    await capture.page.evaluate(() => document.styleSheets[0].insertRule('#box { opacity:.7 }', 0));
-    assert.equal(await capture.observe(1), true);
-    for (let i = 0; i < 3; i++) await capture.observe(1);
-    assert.ok(await capture.page.evaluate(() => globalThis.snapshotReads) > before);
+    assert.ok(result.before > 0);
+    assert.deepEqual(result.unchanged, Array(12).fill(false));
+    assert.equal(result.cached, result.before);
+    assert.equal(result.edited, true);
+    assert.ok(result.after > result.before);
   } finally { await capture.close(); }
 });
 
