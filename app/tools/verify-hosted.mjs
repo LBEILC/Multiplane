@@ -25,7 +25,7 @@ const home = path.join(work, 'renderer-home'), data = path.join(work, 'desktop-h
 await mkdir(home); await mkdir(data);
 await writeFile(path.join(data, 'preferences.json'), JSON.stringify({ wizardDone: true, language: 'zh-CN', theme: 'light', notifications: false, autoCheckUpdates: false }));
 const shot = path.join(work, 'sample.html');
-await writeFile(shot, '<div id="stage" style="width:320px;height:180px;background:#ddd"><div id="box" style="width:40px;height:40px;background:#333"></div></div><script>window.SHOT={duration:4,fps:24,async render(t){document.getElementById("box").style.transform=`translateX(${t*40}px)`;await new Promise(resolve=>setTimeout(resolve,80));}}</script>');
+await writeFile(shot, '<div id="stage" style="width:320px;height:180px;background:#ddd"><div id="box" style="width:40px;height:40px;background:#333"></div></div><script>window.SHOT={duration:12,fps:24,async render(t){document.getElementById("box").style.transform=`translateX(${t*40}px)`;await new Promise(resolve=>setTimeout(resolve,80));}}</script>');
 const env = { ...process.env, MULTIPLANE_HOME: home, MULTIPLANE_APP_DATA: data, MULTIPLANE_TEST_USER_HOME: work };
 delete env.ELECTRON_RUN_AS_NODE; delete env.MULTIPLANE_NO_INDEX; delete env.MULTIPLANE_JOBS_DIR;
 let desktop, terminal, desktopIdentity, desktopChild; let desktopLog = '';

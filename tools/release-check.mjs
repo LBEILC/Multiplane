@@ -2,6 +2,14 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { npm, run } from './process.mjs';
+import { validateReleaseNotes } from '../app/src/shared/release-notes.mjs';
+
+export async function checkReleaseNotes(root, version) {
+  const value = JSON.parse(await readFile(path.join(root, 'docs', 'release-notes', `${version}.json`), 'utf8'));
+  const { notes, errors } = validateReleaseNotes(value, { version, bilingual: true });
+  if (!notes || errors.length) throw Error(errors.join('; '));
+  return version;
+}
 
 const publicDocs = new Set(['docs/protocol.md', 'docs/protocol.zh-CN.md']);
 export const forbiddenPackageFiles = files => files.filter(file => file === 'AGENTS.md' || /^(?:app|tests|out|\.github|tools\/reports)\//.test(file) || (file.startsWith('docs/') && !publicDocs.has(file)));
@@ -37,6 +45,7 @@ export async function releaseCheck(root, log = console.log) {
   const json = async file => JSON.parse(await readFile(path.join(root, file), 'utf8'));
   const git = async args => (await run('git', args, { cwd: root, capture: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout;
   const pkg = await json('package.json');
+  await check('Bilingual release notes', () => checkReleaseNotes(root, pkg.version));
   await check('npm publish configuration', async () => validatePublishConfig(pkg));
   await check('Versions and lockfiles', async () => {
     const app = await json('app/package.json');

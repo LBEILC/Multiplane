@@ -10,6 +10,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { demo } from './demo.mjs';
 import sharp from 'sharp';
 import { errorCodes } from '../../src/errors.mjs';
+if (process.argv.includes('--jobs-084')) {
+  await import('../../tests/test-home.mjs');
+  await (await import('./jobs-shots.mjs')).jobsShots();
+  process.exit(0);
+}
 const demoIds = Object.fromEntries(['running', 'success', 'failed', 'cancelled', 'verify', 'lost', 'stills'].map((name, i) => [name, `demo-20261011-${String(i + 1).padStart(3, '0')}`]));
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const require = createRequire(path.join(root, 'package.json'));

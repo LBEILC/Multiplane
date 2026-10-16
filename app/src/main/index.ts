@@ -1,9 +1,11 @@
+import { ResumeJobs } from './resume.mjs';
+import { TrayPopover } from './tray-popover';
 import { cliEntry, copyableCommand } from './cli-entry.mjs';
 import { t, setLanguage, resolveLanguage, language, languagePreferences } from '../shared/i18n.mjs';
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, dialog, protocol, net, clipboard, Menu, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, dialog, protocol, net, clipboard, Menu, Tray, nativeImage, screen } from 'electron';
 import { Hosted } from './hosted.mjs';
 import { JobStopper } from './stop.mjs';
-import { trayTemplate, hideOnClose } from './tray.mjs';
+import { trayTemplate, hideOnClose, trayProgress } from './tray.mjs';
 import { userError } from '../shared/errors.mjs';
 import path from 'node:path';
 import os from 'node:os';
@@ -32,18 +34,42 @@ const primary = singleInstance(app, () => win);
 const store = new JobStore(homeDirectory());
 const prefs = new Preferences(app.getPath('userData'));
 let hosted: Hosted;
+let resumes: ResumeJobs;
 let tray: Tray | undefined;
+let popover: TrayPopover | undefined;
+let trayBusy: boolean | undefined;
+let tooltipAt = 0;
+let tooltipTimer: ReturnType<typeof setTimeout> | undefined;
 let quitting = false, quitReady = false, confirmingQuit = false;
 let stopper: JobStopper;
+let jobsReady = false;
+let hostedReady = false;
+let startup: Promise<void> = Promise.resolve();
 const showWindow = (id?: string) => { if (win.isMinimized()) win.restore(); win.show(); win.focus(); publish(id); };
 function updateTray() {
-  if (tray) tray.setContextMenu(Menu.buildFromTemplate(trayTemplate(store.jobs, showWindow, () => app.quit()) as Electron.MenuItemConstructorOptions[]));
+  if (!tray) return;
+  const progress = trayProgress(store.jobs);
+  win.setProgressBar(progress.value);
+  const busy = progress.count > 0;
+  if (trayBusy !== busy) {
+    trayBusy = busy;
+    const file = process.platform === 'darwin' ? (busy ? 'trayBusyTemplate.png' : 'trayTemplate.png') : process.platform === 'win32' ? (busy ? 'tray-busy.ico' : 'app.ico') : (busy ? 'tray-busy-32.png' : 'tray.png');
+    const image = nativeImage.createFromPath(path.join(__dirname, 'brand', file));
+    if (process.platform === 'darwin') image.setTemplateImage(true);
+    tray.setImage(image);
+  }
+  const remaining = 1000 - (Date.now() - tooltipAt);
+  if (remaining <= 0) {
+    tray.setToolTip(busy ? t('trTip', { n: progress.count, p: progress.percent }) : t('appName'));
+    tooltipAt = Date.now();
+  } else if (!tooltipTimer) tooltipTimer = setTimeout(() => { tooltipTimer = undefined; updateTray(); }, remaining);
+  if (process.platform === 'linux') tray.setContextMenu(Menu.buildFromTemplate(trayTemplate(store.jobs, showWindow, () => app.quit()) as Electron.MenuItemConstructorOptions[]));
 }
 function updateMenu() {
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate(applicationMenu()) : null);
 }
-const snapshot = (select?: string): Snapshot => ({ hosted: hosted?.enabled ?? false, language: language(), languagePreference: prefs.value.language, jobs: store.jobs.filter((j: Job) => !prefs.value.hidden.includes(j.jobId)), runningCount: store.jobs.filter((j: Job) => j.state === 'running').length, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', select });
-const publish = (select?: string) => { if (win && !win.isDestroyed()) win.webContents.send('snapshot', snapshot(select)); };
+const snapshot = (select?: string): Snapshot => ({ ready: jobsReady, hosted: hostedReady ? hosted.enabled : undefined, language: language(), languagePreference: prefs.value.language, jobs: (resumes?.decorate(store.jobs) ?? store.jobs).filter((j: Job) => !prefs.value.hidden.includes(j.jobId)), runningCount: store.jobs.filter((j: Job) => j.state === 'running').length, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', select });
+const publish = (select?: string) => { const value = snapshot(select); if (win && !win.isDestroyed()) win.webContents.send('snapshot', value); popover?.publish(value); };
 function allowed(job: Job) {
   const files = new Set<string>([path.join(job.jobDir, 'preview.png')]);
   for (const a of [...(job.result?.artifacts ?? []), ...job.events.filter(e => e.type === 'artifact')]) if (typeof a.path === 'string' && path.isAbsolute(a.path)) files.add(a.path);
@@ -87,10 +113,23 @@ if (primary) app.whenReady().then(async () => {
   const root = rendererRoot(app.isPackaged, process.resourcesPath, app.getAppPath());
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
   const config = new Configuration(root, homeDirectory());
+  resumes = new ResumeJobs(store, root, { changed: (id?: string) => publish(id), report: error => log('resume', error) });
+  handle('resume', (id: string) => { jobFor(id); return resumes.resume(id); });
+  handle('resume-priority', (id: string) => { jobFor(id); resumes.prioritize(id); });
   hosted = new Hosted(store.home, version, { report: error => log('hosted', error), changed: () => { publish(); updateTray(); } });
   const image = nativeImage.createFromPath(path.join(__dirname, 'brand', process.platform === 'win32' ? 'app.ico' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'));
   if (process.platform === 'darwin') image.setTemplateImage(true);
-  tray = new Tray(image); tray.setToolTip(t('appName')); tray.on('click', () => showWindow()); updateTray();
+  tray = new Tray(image);
+  if (process.platform !== 'linux') {
+    popover = new TrayPopover({ tray, screen, snapshot, directory: __dirname, open: (id?: string, settings?: boolean) => {
+      showWindow(id);
+      if (settings) win.webContents.send('navigate', 'settings');
+      else win.webContents.send('navigate', 'jobs');
+    }, quit: () => app.quit() });
+    tray.on('click', () => popover?.toggle());
+    if (process.platform === 'win32') tray.on('right-click', () => popover?.toggle());
+  }
+  updateTray();
   win.on('close', event => {
     if (!hideOnClose(hosted.enabled, quitting)) {
       // Ask about a retained queue before destroying the only window.
@@ -109,6 +148,7 @@ if (primary) app.whenReady().then(async () => {
     if (confirmingQuit) return;
     confirmingQuit = true;
     void (async () => {
+      await startup;
       await store.refresh();
       if (store.jobs.some((job: Job) => job.state === 'queued')) {
         // TODO(design): Review queue-exit and forced-file-location copy introduced by 046.
@@ -116,13 +156,18 @@ if (primary) app.whenReady().then(async () => {
         const answer = await (win.isDestroyed() ? dialog.showMessageBox(options) : dialog.showMessageBox(win, options));
         if (answer.response !== 1) return;
       }
-      quitting = true; updates.close(); await hosted.close(); await installer.cancel(); await store.close();
+      quitting = true; resumes.close(); updates.close(); await hosted.close(); await installer.cancel(); await store.close();
       stopper?.close();
-      tray?.destroy(); tray = undefined; quitReady = true; app.quit();
+      if (tooltipTimer) clearTimeout(tooltipTimer); popover?.destroy(); tray?.destroy(); tray = undefined; quitReady = true; app.quit();
     })().catch(error => log('quit', error)).finally(() => { confirmingQuit = false; });
   });
   const skills = new Skills(root, { ...process.env, MULTIPLANE_AGENT_HOME: process.env.MULTIPLANE_TEST_USER_HOME || process.env.MULTIPLANE_AGENT_HOME || os.homedir() });
-  const settings = async () => ({ ...await config.read(), own: prefs.value, version, packaged: app.isPackaged });
+  let initialConfig: ReturnType<typeof config.read>;
+  let firstSettings = true;
+  const settings = async () => {
+    const initial = firstSettings; firstSettings = false;
+    return { ...await (initial ? initialConfig : config.read()), own: prefs.value, version, packaged: app.isPackaged };
+  };
   const updates = new Updates({ platform: process.platform, packaged: app.isPackaged, version: app.getVersion(), updater: autoUpdater, installationDirectory: path.dirname(app.getPath('exe')), fetcher: (input, init) => net.fetch(input instanceof URL ? input.href : input, init), log, publish: (state: unknown) => { if (!win.isDestroyed()) win.webContents.send('updates:state', state); } });
   handle('updates:state', () => updates.state);
   handle('updates:check', () => updates.check());
@@ -145,15 +190,17 @@ if (primary) app.whenReady().then(async () => {
   handle('settings', settings);
   handle('check-ffmpeg', async () => checkFfmpeg(((await config.read()).values as Record<string, unknown>).ffmpeg));
   handle('save-setting', async (key, value, own) => {
+    await startup; firstSettings = false;
     if (own) {
       if (!(key === 'language' ? languagePreferences.includes(value) : key === 'theme' ? ['system', 'light', 'dark'].includes(value) : ['notifications', 'wizardDone', 'autoCheckUpdates'].includes(key) && typeof value === 'boolean')) throw Error('Invalid preference');
-      await prefs.save({ [key]: value }); if (key === 'language') { setLanguage(resolveLanguage(value, app.getLocale())); updateMenu(); win.setTitle(t('appName')); installer.refresh(); } nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark'; publish();
+      await prefs.save({ [key]: value }); if (key === 'language') { setLanguage(resolveLanguage(value, app.getLocale())); updateMenu(); win.setTitle(t('appName')); installer.refresh(); updateTray(); } nativeTheme.themeSource = prefs.value.theme as 'system' | 'light' | 'dark'; publish();
       if (key === 'wizardDone') log('wizard', JSON.stringify({ done: value, discovered: store.jobs.length, visible: snapshot().jobs.length }));
       if (key === 'autoCheckUpdates') updates.configureAutomatic(value);
     } else { const saved = await config.save(key, value); if (key === 'hosted') { await hosted.tick(); publish(); updateTray(); } return { ...await settings(), check: saved.check }; }
     return settings();
   });
   handle('choose-setting', async key => {
+    await startup; firstSettings = false;
     if (!['ffmpeg', 'jobsDir'].includes(key)) throw Error('Invalid setting');
     const result = await dialog.showOpenDialog(win, { title: t(key === 'jobsDir' ? 'jobDirectory' : 'chooseFfmpeg'), buttonLabel: t('open'), properties: key === 'jobsDir' ? ['openDirectory'] : ['openFile'] });
     if (!result.canceled && result.filePaths[0]) { const saved = await config.save(key, result.filePaths[0]); return { ...await settings(), check: saved.check }; }
@@ -211,7 +258,7 @@ if (primary) app.whenReady().then(async () => {
     return value;
   });
   stopper = new JobStopper(store, {
-    changed: () => hosted.tick(), report: error => log('stop', error),
+    changed: async () => { await startup; await hosted.tick(); }, report: error => log('stop', error),
     confirm: async (job: Job) => (await dialog.showMessageBox(win, { type: 'warning', message: t(job.state === 'queued' ? 'queueStopT' : 'stopTitle', { name: path.basename(job.shot) }), detail: t(job.state === 'queued' ? 'queueStopH' : 'stopDetail'), buttons: [t('cancel'), t('stop')], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
     confirmForce: async (job: Job) => (await dialog.showMessageBox(win, { type: 'warning', message: t('forceT', { name: path.basename(job.shot) }), detail: t('forceH'), buttons: [t('keepWaiting'), t('force')], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
   });
@@ -225,6 +272,7 @@ if (primary) app.whenReady().then(async () => {
   });
   let previousSummary = '';
   store.on('change', () => {
+    resumes.update();
     const summary = JSON.stringify({ discovered: store.jobs.length, visible: snapshot().jobs.length });
     if (summary !== previousSummary) { log('jobs-scan', summary); previousSummary = summary; }
     publish();
@@ -246,11 +294,19 @@ if (primary) app.whenReady().then(async () => {
       notification.show();
     } catch (error) { log('notification', error); }
   });
-  // Let the CLI migrate shared files before the first index read.
-  try { await config.read(); } catch (error) { log('home-migration', error); }
-  await hosted.start();
-  await store.start();
-  await win.loadFile(path.join(__dirname, 'index.html')); win.show();
+  // Register IPC before loading. Shared-file migration still precedes both consumers.
+  initialConfig = config.read();
+  void initialConfig.catch(error => log('home-migration', error));
+  const loaded = win.loadFile(path.join(__dirname, 'index.html'), { query: { theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', language: language() } });
+  startup = (async () => {
+    try { await initialConfig; } catch { /* The settings IPC reports the read failure. */ }
+    await Promise.all([
+      hosted.start().then(() => { hostedReady = true; publish(); }),
+      store.start().then(() => { jobsReady = true; publish(); }),
+    ]);
+  })();
+  void startup.catch(error => { log('startup-services', error); app.exit(1); });
+  await loaded; win.show();
   updates.configureAutomatic(prefs.value.autoCheckUpdates);
 }).catch(error => { log('startup', error); app.exit(1); });
 app.on('window-all-closed', () => app.quit());

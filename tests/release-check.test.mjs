@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { forbiddenPackageFiles, missingReadmeLinks, validatePublishConfig } from '../tools/release-check.mjs';
+import { checkReleaseNotes } from '../tools/release-check.mjs';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { createTempDirectory } from './helpers.mjs';
+import path from 'node:path';
+import { note } from '../app/tests/release-notes-fake.mjs';
+
+test('release notes preflight requires the current bilingual document', async ctx => {
+  const root = createTempDirectory('multiplane-release-notes-');
+  ctx.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'docs/release-notes'), { recursive: true });
+  await assert.rejects(checkReleaseNotes(root, '0.3.8'), /ENOENT/);
+  const file = path.join(root, 'docs/release-notes/0.3.8.json');
+  await writeFile(file, JSON.stringify(note('0.3.8')));
+  assert.equal(await checkReleaseNotes(root, '0.3.8'), '0.3.8');
+  const value = note('0.3.8'); delete value.items[0].title.en;
+  await writeFile(file, JSON.stringify(value)); await assert.rejects(checkReleaseNotes(root, '0.3.8'), /Invalid/);
+  await writeFile(file, JSON.stringify(note('0.3.7'))); await assert.rejects(checkReleaseNotes(root, '0.3.8'), /Invalid/);
+  await writeFile(file, '{'); await assert.rejects(checkReleaseNotes(root, '0.3.8'), SyntaxError);
+});
 
 test('publish configuration accepts the official public registry', () => {
   assert.doesNotThrow(() => validatePublishConfig({ publishConfig: { registry: 'https://registry.npmjs.org/', access: 'public' } }));

@@ -5,18 +5,48 @@
   "items": [
     {
       "kind": "new",
+      "area": "app",
+      "highlight": true,
+      "icon": "film",
+      "title": { "zh-CN": "重新设计的作业页", "en": "Redesigned Jobs page" },
+      "detail": { "zh-CN": "详情分为预览、概览、过程、参数；成片可以逐帧看，画面可以放大比对。", "en": "Details split into Preview, Summary, Timeline and Options; step through videos frame by frame and zoom into any frame." }
+    },
+    {
+      "kind": "new",
       "area": "renderer",
       "highlight": true,
       "icon": "restart",
       "title": { "zh-CN": "断点续传", "en": "Resume rendering" },
-      "detail": { "zh-CN": "渲染中途停下后，用 multiplane resume 从停下的地方接着渲，不用从头再来。", "en": "After a render stops part way, multiplane resume continues from where it stopped instead of starting over." }
+      "detail": { "zh-CN": "渲染中途停下后，在软件里点“继续渲染”，或用 multiplane resume，从停下的地方接着渲。", "en": "After a render stops part way, choose Resume in the app or run multiplane resume to continue from where it stopped." }
+    },
+    {
+      "kind": "new",
+      "area": "app",
+      "title": { "zh-CN": "托盘弹窗", "en": "Tray popover" },
+      "detail": { "zh-CN": "点托盘图标就能看到进行中、排队和最近完成的作业。", "en": "Click the tray icon to see running, queued and recently finished jobs." }
+    },
+    {
+      "kind": "improved",
+      "area": "app",
+      "title": { "zh-CN": "打开更快", "en": "Faster start" },
+      "detail": { "zh-CN": "窗口先出来，作业读完就显示；深色主题不再闪一下浅色。", "en": "The window shows at once and jobs appear as soon as they are read; no light flash in the dark theme." }
+    },
+    {
+      "kind": "improved",
+      "area": "app",
+      "title": { "zh-CN": "看得懂的更新说明", "en": "Clearer update notes" },
+      "detail": { "zh-CN": "关于页按界面语言列出每个版本的变化，跳过的版本也能看到。", "en": "The About page lists what changed in your language, including versions you skipped." }
+    },
+    {
+      "kind": "improved",
+      "area": "renderer",
+      "title": { "zh-CN": "截图更快", "en": "Faster capture" },
+      "detail": { "zh-CN": "运动帧不再重复做静止检查，快 2～9%，画面不变。", "en": "Motion frames skip a redundant still check: 2–9% faster with identical output." }
     },
     {
       "kind": "fixed",
       "area": "renderer",
-      "highlight": true,
-      "icon": "shield",
-      "title": { "zh-CN": "渲染不再无声卡住", "en": "Renders no longer stall silently" },
+      "title": { "zh-CN": "渲染不再无声卡住", "en": "No more silent stalls" },
       "detail": { "zh-CN": "浏览器卡住时自动重启并重做这一帧，画面不变，并给出提示。", "en": "A stuck browser is restarted and the frame rendered again, with the same pixels and a warning." }
     },
     {
@@ -26,10 +56,10 @@
       "detail": { "zh-CN": "停止时有浏览器卡住，5 秒后直接关掉它；已编好的段保留，可以续传。", "en": "A browser stuck while stopping is closed after 5 seconds; finished segments are kept for resuming." }
     },
     {
-      "kind": "improved",
-      "area": "renderer",
-      "title": { "zh-CN": "截图更快", "en": "Faster capture" },
-      "detail": { "zh-CN": "运动帧不再重复做静止检查，快 2～9%，画面不变。", "en": "Motion frames skip a redundant still check: 2–9% faster with identical output." }
+      "kind": "fixed",
+      "area": "app",
+      "title": { "zh-CN": "项目名显示成“.”", "en": "Project shown as \".\"" },
+      "detail": { "zh-CN": "项目根目录是相对路径时，显示实际的文件夹名。", "en": "Relative project roots now show the actual folder name." }
     }
   ]
 }

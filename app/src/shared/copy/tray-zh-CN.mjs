@@ -1,0 +1,1 @@
+export default { trNow: '进行中', trQueue: '排队 · {n}', trRecent: '最近完成', trIdle: '没有进行中的作业', trMore: '还有 {n} 个', trOpen: '打开 Multiplane', trSettings: '设置', trQuit: '退出', trQuitHint: '退出后托管的渲染会停止', trProgress: '{done} / {total} 帧 · 剩余 {left}', trPos: '第 {n} 个', trTip: 'Multiplane · {n} 个作业进行中 · {p}%' };

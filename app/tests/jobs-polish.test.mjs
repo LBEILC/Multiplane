@@ -1,0 +1,74 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import sharp from 'sharp';
+import { mountJobs } from './jobs-fixture.mjs';
+import { bytes, jobStarted, setLanguage } from '../src/shared/i18n.mjs';
+import { encoderName, formatName, failureCopy, phaseIcons } from '../src/shared/job-detail.mjs';
+
+test('job display formats sizes, codecs, local calendar dates and known failures', () => {
+  setLanguage('zh-CN');
+  assert.equal(bytes(246800), '241 KB');
+  assert.equal(bytes(950000000, 'GB'), '0.9 GB');
+  assert.equal(bytes(1536), '1.5 KB');
+  assert.equal(bytes(null), '—');
+  assert.deepEqual(['mp4','webm','mov'].map(formatName), ['MP4','WebM','MOV']);
+  assert.deepEqual(['x264','nvenc-h264','nvenc-hevc','vp9','prores'].map(encoderName), ['H.264','H.264 (NVENC)','HEVC (NVENC)','VP9','ProRes']);
+  const now = new Date(2026, 9, 16, 15);
+  assert.equal(jobStarted(new Date(2026, 9, 16, 14, 31), now), '开始于 14:31');
+  assert.equal(jobStarted(new Date(2026, 9, 15, 14, 31), now), '开始于 昨天 14:31');
+  assert.match(jobStarted(new Date(2026, 9, 14, 14, 31), now), /2026/);
+  assert.deepEqual(failureCopy({lost:true}), ['lostT','lostH']);
+  assert.deepEqual(failureCopy({command:'verify', result:{code:'future'}}), ['checkFailed',null]);
+  assert.equal(new Set(Object.values(phaseIcons)).size, 6);
+  setLanguage('en');
+});
+
+test('polished job details preserve units, hierarchy, failure fallback and viewer toggles in both languages', async ctx => {
+  const browser = await chromium.launch(); ctx.after(() => browser.close());
+  const image = await sharp({create:{width:640,height:360,channels:3,background:'#ccc'}}).png().toBuffer();
+  for (const language of ['zh-CN','en']) {
+    const page = await browser.newPage();
+    const {jobs,errors} = await mountJobs(page, {language, reduced:true, media:async()=>({body:image,contentType:'image/png'})});
+    assert.match(await page.locator('.progress-card .top').innerText(), language === 'zh-CN' ? /截帧[\s\S]*18 \/ 30 帧/ : /18 \/ 30 frames/);
+    assert.match(await page.locator('.stats').innerText(), language === 'zh-CN' ? /18.0 帧\/秒/ : /18.0 fps/);
+    await page.locator('[data-job=success]').click(); await page.locator('[data-tab=summary]').click();
+    assert.match(await page.locator('.out-card').innerText(), /MP4 · H.264 · 241 KB/);
+    assert.equal(await page.locator('.oc-acts [data-copy-value] i').count(), 0);
+    assert.equal(await page.locator('.hist').evaluate(el=>el.parentElement.tagName), 'DD');
+    assert.equal(await page.locator('.hist').evaluate(el=>el.parentElement.previousElementSibling.textContent), language === 'zh-CN' ? '运动模糊' : 'Motion blur');
+    let text = await page.locator('#tab-content').innerText();
+    assert.match(text, /0.9 GB/); assert.match(text, language === 'zh-CN' ? /0:01 · 30 帧/ : /0:01 · 30 frames/);
+    assert.match(text, language === 'zh-CN' ? /2 个 · 0:00.40、0:00.70/ : /2 · 0:00.40, 0:00.70/);
+    assert.doesNotMatch(text, /透明背景|Transparency/);
+    jobs[1].result.data.alpha=true; delete jobs[1].result.data.blurSamples;
+    jobs[1].events.find(e=>e.type==='shot').cuts=[];
+    await page.evaluate(jobs=>window.publish({jobs}),jobs);
+    text = await page.locator('#tab-content').innerText();
+    assert.match(text, language === 'zh-CN' ? /每帧最多 16 次采样/ : /Up to 16 samples per frame/);
+    assert.match(text, language === 'zh-CN' ? /透明背景\s+是/ : /Transparency\s+Yes/);
+    await page.locator('[data-tab=timeline]').click();
+    assert.match(await page.locator('.tl').innerText(), language === 'zh-CN' ? /Chromium 153 · GPU 硬件加速 · FFmpeg 8.0/ : /Chromium 153 · GPU Hardware accelerated · FFmpeg 8.0/i);
+    assert.equal(await page.locator('.tl .ri-camera-lens-line').count(),1);
+    await page.locator('[data-job=failed]').click(); await page.locator('[data-tab=summary]').click();
+    assert.doesNotMatch(await page.locator('#banner').innerText(), /render\(t\) threw an exception/);
+    assert.equal(await page.locator('.err-card dt').count(),2);
+    assert.match(await page.locator('.err-card dd').last().innerText(), /render\(t\) threw an exception/);
+    assert.equal((await page.locator('#detail').innerText()).match(/render_threw/g).length,1);
+    jobs[2].result.code='future_error'; jobs[2].result.message='Original <message>';
+    await page.evaluate(jobs=>window.publish({jobs}),jobs);
+    assert.match(await page.locator('#banner').innerText(), /Original <message>/);
+    jobs[2].lost=true; await page.evaluate(jobs=>window.publish({jobs}),jobs);
+    assert.doesNotMatch(await page.locator('#banner').innerText(), /Original <message>/);
+    await page.locator('[data-job=verify]').click(); await page.locator('[data-tab=preview]').click(); await page.locator('.triptych img').first().click();
+    await page.locator('.lb .bbox').waitFor();
+    assert.equal(await page.locator('[data-v=box]').getAttribute('aria-pressed'),'true');
+    assert.equal(await page.locator('.lb-img').evaluate(el=>getComputedStyle(el).overflow),'hidden');
+    assert.match(await page.locator('.lb .bbox').evaluate(el=>getComputedStyle(el).boxShadow),/9999px/);
+    await page.locator('[data-v=box]').click(); assert.equal(await page.locator('[data-v=box]').getAttribute('aria-pressed'),'false');
+    await page.locator('[data-v=flicker]').click(); assert.equal(await page.locator('[data-v=flicker]').getAttribute('aria-pressed'),'true');
+    await page.locator('[data-index="2"]').click(); assert.equal(await page.locator('[data-v=flicker]').getAttribute('aria-pressed'),'false');
+    assert.deepEqual(errors,[]); assert.deepEqual(await page.evaluate(()=>window.faults),[]);
+    await page.close();
+  }
+});

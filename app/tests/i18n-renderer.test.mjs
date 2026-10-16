@@ -1,3 +1,4 @@
+import jobZh from '../src/shared/copy/jobs-zh-CN.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -40,14 +41,14 @@ test('live language changes preserve jobs, tabs, scroll and inputs and update al
   });
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await page.locator('[data-job="job-1"]').click();
-  await page.locator('[data-tab=events]').click();
+  await page.locator('[data-tab=timeline]').click();
   await page.evaluate(() => { document.querySelector('#list').scrollTop = 180; document.querySelector('#detail').scrollTop = 200; });
   await page.evaluate(() => window.changeLanguage('zh-CN'));
   assert.equal(await page.locator('[data-job="job-1"]').getAttribute('aria-selected'), 'true');
-  assert.equal(await page.locator('[data-tab=events]').getAttribute('aria-selected'), 'true');
+  assert.equal(await page.locator('[data-tab=timeline]').getAttribute('aria-selected'), 'true');
   assert.deepEqual(await page.evaluate(() => [document.querySelector('#list').scrollTop, document.querySelector('#detail').scrollTop]), [180, 200]);
   assert.equal(await page.locator('#heading').innerText(), zh.jobs);
-  assert.equal(await page.locator('[data-tab=events]').innerText(), zh.events);
+  assert.equal(await page.locator('[data-tab=timeline]').innerText(), jobZh.timeline);
   await page.evaluate(() => window.changeLanguage('en'));
   assert.equal(await page.locator('#heading').innerText(), en.jobs);
   for (const id of ['environment', 'settings', 'about', 'jobs']) {

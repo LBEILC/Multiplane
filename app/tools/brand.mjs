@@ -53,6 +53,15 @@ export async function generateBrand() {
   await writeFile(path.join(design, 'mark.svg'), mark); await writeFile(path.join(design, 'app.svg'), tile);
   const traySvg = mark.replace('currentColor', '#000000');
   for (const [name, size] of [['trayTemplate.png', 16], ['trayTemplate@2x.png', 32], ['tray.png', 32]]) await writeFile(path.join(build, name), await sharp(Buffer.from(traySvg)).resize(size, size).png().toBuffer());
+  const busy = tile.replace('</svg>', '<circle cx="81" cy="81" r="16" fill="#7fa7d1" stroke="#1E1C1A" stroke-width="5"/></svg>');
+  const busyImages = [];
+  for (const size of [16,24,32,48,64,128,256]) {
+    const png = await sharp(Buffer.from(busy)).resize(size,size).png().toBuffer();
+    await writeFile(path.join(build, 'tray-busy-'+size+'.png'),png); busyImages.push({size,png});
+  }
+  await writeFile(path.join(build,'tray-busy.ico'),ico(busyImages));
+  const busyTemplate = traySvg.replace('</svg>', '<circle cx="84" cy="84" r="16" fill="black"/></svg>');
+  for (const [name,size] of [['trayBusyTemplate.png',16],['trayBusyTemplate@2x.png',32]]) await writeFile(path.join(build,name),await sharp(Buffer.from(busyTemplate)).resize(size,size).png().toBuffer());
   const images = [];
   for (const size of [16, 24, 32, 48, 64, 128, 256, 512, 1024]) {
     const png = await sharp(Buffer.from(tile), { density: size * 72 / 100 }).resize(size, size).png().toBuffer();

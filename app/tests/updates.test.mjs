@@ -7,7 +7,7 @@ import { createTempDirectory } from './helpers.mjs';
 import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const make = (extra = {}) => new Updates({ platform: 'win32', packaged: true, version: '0.3.0', updater: new FakeUpdater(), ...extra });
+const make = (extra = {}) => new Updates({ platform: 'win32', packaged: true, version: '0.3.0', updater: new FakeUpdater(), fetcher: async () => ({ ok: true, json: async () => [] }), ...extra });
 
 test('updater diagnostics and actual transferred bytes reach the persistent logger', async () => {
   const rows = [], u = make({ log: (scope, message) => rows.push({ scope, message }) });
@@ -93,7 +93,7 @@ test('automatic startup/daily checks honor preferences, development and active o
 test('macOS/Linux use stable Release metadata only and cannot download/install', async () => {
   for (const platform of ['darwin', 'linux']) {
     let release = { tag_name: 'v0.3.1', body: 'Notes', html_url: 'https://untrusted.invalid/file', published_at: '2026-10-01' };
-    const u = make({ platform, fetcher: async (url, options) => { assert.match(url, /LBEILC\/Multiplane\/releases\/latest$/); assert.ok(options.signal); return { ok: true, json: async () => release }; } });
+    const u = make({ platform, fetcher: async (url, options) => { assert.ok(options.signal); if (url.includes('?per_page=')) return { ok: true, json: async () => [] }; assert.match(url, /LBEILC\/Multiplane\/releases\/latest$/); return { ok: true, json: async () => release }; } });
     await u.check(); assert.equal(u.state.phase, 'manual'); assert.equal(u.state.releaseUrl, releasePage);
     await u.download(); u.install(); assert.equal(u.updater.downloads + u.updater.installs + u.updater.checks, 0);
     release = { ...release, tag_name: 'v0.3.0' }; await u.check(); assert.equal(u.state.phase, 'current');

@@ -1,3 +1,4 @@
+import { validateReleaseNotes } from '../shared/release-notes.mjs';
 export const releasePage = 'https://github.com/LBEILC/Multiplane/releases/latest';
 const releaseApi = 'https://api.github.com/repos/LBEILC/Multiplane/releases/latest';
 const day = 24 * 60 * 60 * 1000;
@@ -8,7 +9,6 @@ export function newerVersion(next, current) {
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
   return false;
 }
-const notesText = notes => (typeof notes === 'string' ? notes : Array.isArray(notes) ? notes.map(item => item.note ?? '').join('\n') : '').slice(0, 4000);
 const releaseUrl = value => {
   try { const url = new URL(value); if (url.origin === 'https://github.com' && /^\/LBEILC\/Multiplane\/releases\/(?:tag\/[^/]+|latest)$/.test(url.pathname) && !url.username && !url.password) return url.href; } catch {}
   return releasePage;
@@ -18,7 +18,7 @@ const releaseUrl = value => {
 export class Updates {
   constructor({ platform, packaged, version, updater, installationDirectory, fetcher = fetch, publish = (_state) => {}, log = (_scope, _error) => {}, now = () => new Date().toISOString(), timers = { setInterval, clearInterval } }) {
     Object.assign(this, { updater, fetcher, publish, log, now, timers });
-    this.state = { phase: packaged ? 'idle' : 'development', currentVersion: version, version: '', canInstall: packaged && platform === 'win32', checkedAt: '', publishedAt: '', notes: '', releaseUrl: releasePage, percent: 0, transferred: 0, total: 0, errorStage: '' };
+    this.state = { phase: packaged ? 'idle' : 'development', currentVersion: version, version: '', canInstall: packaged && platform === 'win32', checkedAt: '', publishedAt: '', notes: [], releaseUrl: releasePage, percent: 0, transferred: 0, total: 0, errorStage: '' };
     this.packaged = packaged;
     if (this.state.canInstall) {
       // Preserve updater diagnostics, including blockmap URLs, fallback errors and spawn arguments.
@@ -75,22 +75,59 @@ export class Updates {
         if (!result?.updateInfo) throw Error('Missing update information');
         allowed = result.isUpdateAvailable === true;
         this.token = result.cancellationToken;
-        info = { version: result.updateInfo.version, publishedAt: result.updateInfo.releaseDate ?? '', notes: notesText(result.updateInfo.releaseNotes), releaseUrl: releasePage };
+        info = { version: result.updateInfo.version, publishedAt: result.updateInfo.releaseDate ?? '', releaseUrl: `https://github.com/LBEILC/Multiplane/releases/tag/v${result.updateInfo.version}` };
       } else {
         this.abort = new AbortController();
         const response = await this.fetcher(releaseApi, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Multiplane' }, signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(20000)]) });
         if (!response.ok) throw Error(`Release request failed: ${response.status}`);
         const release = await response.json();
         if (release.draft || release.prerelease) throw Error('Expected a stable release');
-        info = { version: String(release.tag_name ?? '').replace(/^v/, ''), publishedAt: release.published_at ?? '', notes: notesText(release.body), releaseUrl: releaseUrl(release.html_url) };
+        info = { version: String(release.tag_name ?? '').replace(/^v/, ''), publishedAt: release.published_at ?? '', releaseUrl: releaseUrl(release.html_url) };
       }
       if (!stable(info.version)) throw Error('Invalid stable version');
       if (this.closed) return this.state;
       const available = allowed && newerVersion(info.version, this.state.currentVersion);
-      this.set({ ...info, checkedAt: this.now(), phase: available ? this.state.canInstall ? 'available' : 'manual' : 'current', percent: 0, transferred: 0, total: 0 });
+      const notes = available ? await this.loadNotes(info.version) : [];
+      if (this.closed) return this.state;
+      this.set({ ...info, notes, checkedAt: this.now(), phase: available ? this.state.canInstall ? 'available' : 'manual' : 'current', percent: 0, transferred: 0, total: 0 });
     } catch (error) { this.log('updates', error); if (!this.closed) this.set({ phase: 'error', errorStage: 'check' }); }
     finally { this.operation = undefined; this.abort = undefined; }
     return this.state;
+  }
+  async loadNotes(target) {
+    this.abort ??= new AbortController();
+    const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(20000)]);
+    const request = async url => {
+      const response = await this.fetcher(url, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Multiplane' }, signal });
+      if (!response.ok) throw Error(`Release notes request failed: ${response.status}`);
+      return response.json();
+    };
+    try {
+      const releases = new Map();
+      // Both update paths use the same paginated public inventory.
+      for (let page = 1; ; page++) {
+        const batch = await request(`https://api.github.com/repos/LBEILC/Multiplane/releases?per_page=100&page=${page}`);
+        if (!Array.isArray(batch)) throw Error('Invalid release inventory');
+        for (const release of batch) {
+          const version = String(release.tag_name ?? '').replace(/^v/, '');
+          if (!release.draft && !release.prerelease && stable(version) && newerVersion(version, this.state.currentVersion) && !newerVersion(version, target)) releases.set(version, release);
+        }
+        if (batch.length < 100) break;
+        if (page === 20) throw Error('Release inventory exceeds page limit');
+      }
+      const versions = [...releases.keys()].sort((a, b) => newerVersion(a, b) ? -1 : newerVersion(b, a) ? 1 : 0).slice(0, 5);
+      const notes = await Promise.all(versions.map(async version => {
+        try {
+          const asset = releases.get(version).assets?.find(asset => asset.name === 'release-notes.json');
+          if (!asset) return null;
+          const url = new URL(asset.browser_download_url);
+          if (url.origin !== 'https://github.com' || url.username || url.password || !url.pathname.startsWith('/LBEILC/Multiplane/releases/download/')) throw Error('Invalid release notes asset URL');
+          return validateReleaseNotes(await request(url.href), { version, log: message => this.log('updates:notes', `${version}: ${message}`) }).notes;
+        } catch (error) { this.log('updates:notes', error); return null; }
+      }));
+      // Never present an older document as the target release.
+      return notes[0]?.version === target ? notes.filter(Boolean) : [];
+    } catch (error) { this.log('updates:notes', error); return []; }
   }
   async download() {
     if (!this.state.canInstall || this.closed || this.operation || this.state.phase !== 'available') return this.state;

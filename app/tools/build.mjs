@@ -21,6 +21,9 @@ await Promise.all([
       await writeFile('dist/bundled-dependencies.json', JSON.stringify([...roots].sort()) + '\n');
     }
   }),
+  build({ entryPoints: ['src/preload/tray.ts'], outfile: 'dist/tray-preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
+  build({ entryPoints: ['src/renderer/tray.ts'], outfile: 'dist/tray.js', bundle: true, platform: 'browser', format: 'iife', target: 'chrome140' }),
+  copyFile('src/renderer/tray.css', 'dist/tray.css'),
   copyFile('src/renderer/style.css', 'dist/style.css'),
   copyFile('src/main/browser-worker.cjs', 'dist/browser-worker.cjs'),
   copyFile('design/tokens.css', 'dist/tokens.css'),
@@ -35,3 +38,5 @@ await copyFont('dist');
 await cp('build/icons', 'dist/brand', { recursive: true });
 const mark = await readFile('design/icons/mark.svg', 'utf8');
 await writeFile('dist/index.html', (await readFile('src/renderer/index.html', 'utf8')).replaceAll('<!-- BRAND_MARK -->', mark.trim().replace('<svg ', '<svg class="brand-mark" aria-hidden="true" ')));
+
+await writeFile('dist/tray.html', (await readFile('src/renderer/tray.html', 'utf8')).replaceAll('<!-- BRAND_MARK -->', mark.trim()));

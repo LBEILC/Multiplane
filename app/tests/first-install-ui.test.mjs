@@ -88,7 +88,7 @@ test('mixed jobs stay visible; saved FFmpeg paths are checked automatically in s
   assert.equal(await page.locator('[data-job]').count(), 2);
   assert.ok((await page.evaluate(() => window.faults)).length >= 2);
   await page.locator('[data-job=missing-fields]').click();
-  await page.locator('[data-tab=result]').click();
+  await page.locator('[data-tab=summary]').click();
   await page.locator('[data-page=settings]').click();
   const save = async path => { await page.locator('#input-ffmpeg').fill(path); await page.locator('#input-ffmpeg').press('Tab'); await page.waitForFunction(() => window.completeCheck); };
   const finish = async result => { await page.evaluate(result => { window.completeCheck(result); window.completeCheck = undefined; }, result); await page.waitForFunction(() => !document.querySelector('#input-ffmpeg').disabled); };

@@ -206,3 +206,17 @@ test('tray shows at most five running jobs, queue count and working actions; onl
   menu[0].click(); menu[2].click(); menu.at(-1).click(); assert.deepEqual(shown, [undefined, '0']); assert.equal(quit, true);
   assert.equal(hideOnClose(true, false), true); assert.equal(hideOnClose(false, false), false); assert.equal(hideOnClose(true, true), false);
 });
+
+test('resume requests pass the whitelist and are claimed and executed', async t => {
+  const f=await fixture(t),r=await f.request('resume-job');
+  r.command='resume';r.args=['original-job'];
+  await atomic(path.join(f.home,'hosted','resume-job.request.json'),r);
+  assert.equal(await validRequest(r,r.jobId),true);
+  await f.hosted.start();clearInterval(f.hosted.timer);
+  assert.deepEqual(f.launched,['resume-job']);
+  await launchExecutor(r,(file,args,options)=>{
+    assert.deepEqual(args,[r.bin,'resume','original-job','--job-dir-exact',r.jobDir,'--hosted-executor']);
+    const child=Object.assign(new EventEmitter(),{pid:17,unref(){}});queueMicrotask(()=>child.emit('spawn'));return child;
+  });
+  assert.equal(await validRequest({...r,command:'config'},r.jobId),false);
+});

@@ -1,11 +1,24 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, Snapshot, SkillConfirmation } from '../shared/types';
+// The parser may not have created <html> yet. Mutation observers run before paint.
+const initial = new URLSearchParams(location.search);
+const initializeDocument = () => {
+  if (!document.documentElement) return false;
+  document.documentElement.dataset.theme = initial.get('theme') === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.language = initial.get('language') === 'zh-CN' ? 'zh-CN' : 'en';
+  return true;
+};
+if (!initializeDocument()) {
+  const observer = new MutationObserver(() => { if (initializeDocument()) observer.disconnect(); });
+  observer.observe(document, { childList: true });
+}
 const invoke = (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args).catch(error => {
   let message = String(error?.message ?? error);
   for (;;) { const clean = message.replace(/^(?:Error:\s*|Error invoking remote method '[^']+':\s*)/, ''); if (clean === message) break; message = clean; }
   throw Error(message);
 });
 const bridge: Bridge = {
+  onNavigate: fn => { const listener = (_event: unknown, page: string) => fn(page); ipcRenderer.on('navigate', listener); return () => ipcRenderer.removeListener('navigate', listener); },
   updateState: () => invoke('updates:state'),
   checkUpdates: () => invoke('updates:check'),
   downloadUpdate: () => invoke('updates:download'),
@@ -33,6 +46,8 @@ const bridge: Bridge = {
   copyBrowserCommand: () => invoke('copy-browser-command'),
   snapshot: () => invoke('snapshot'),
   subscribe: fn => { const listener = (_event: unknown, value: Snapshot) => fn(value); ipcRenderer.on('snapshot', listener); return () => ipcRenderer.removeListener('snapshot', listener); },
+  resume: id => invoke('resume', id),
+  resumePriority: id => invoke('resume-priority', id),
   stop: id => invoke('stop', id),
   hide: id => invoke('hide', id),
   open: (id, file, reveal) => invoke('open', id, file, reveal),

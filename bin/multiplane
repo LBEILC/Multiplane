@@ -1,16 +1,13 @@
 #!/usr/bin/env node
-import { resumeRender, renderShot, stillsShot, verifyShot, inspectShot, lintShot, doctor, statusJob, cancelJob } from '../src/index.mjs';
-import { benchmark } from '../src/benchmark.mjs';
-import { serve } from '../src/serve.mjs';
-import { setup } from '../src/setup.mjs';
-import { postArgs, scaleArgs } from '../src/post.mjs';
-import { createEvents, version } from '../src/events.mjs';
+import { readFileSync } from 'node:fs';
 import { asError, invalidOption } from '../src/errors.mjs';
-import { waitJob } from '../src/jobs.mjs';
 import { claimExecutor, resultExitCode } from '../src/hosted.mjs';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2), json = args.includes('--json');
+// Keep CLI flag metadata independent of the rendering implementation.
+const postArgs = ['quality', 'motion-blur', 'max-motion-blur', 'shutter', 'grain', 'no-post', 'adaptive-blur'];
+const scaleArgs = ['scale', 'render-scale', 'upscale'];
 const common = [...postArgs, ...scaleArgs, 'static-reuse', 'no-static-reuse', 'alpha', 'fps', 'raster', 'root', 'job-dir', 'no-lint', 'overwrite', 'no-hosted', 'job-dir-exact', 'hosted-executor'];
 const allowed = {
   inspect: ['root', 'fps', 'no-lint'], serve: ['root', 'port'],
@@ -42,7 +39,7 @@ try {
     || !await claimExecutor(args[exactIndex + 1], command));
   const onBytes = bytes => new Promise((resolve, reject) => process.stdout.write(bytes, error => error ? reject(error) : resolve()));
   if (lostClaim) { process.exitCode = 0; }
-  else if (args.length === 1 && args[0] === '--version') console.log(version);
+  else if (args.length === 1 && args[0] === '--version') console.log(JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version);
   else if (args.length === 0 || args[0] === '--help') {
     console.log('Usage: multiplane <render|stills|verify|inspect|lint> <shot.html> [--json] [--option value]\n'
       + '       multiplane serve [--root directory] [--port number] [--json]\n'
@@ -58,7 +55,9 @@ try {
     if (args.includes('--help')) console.log(command === 'config'
       ? 'Usage: multiplane config <get [key]|set key value|unset key> [--json]\nKeys: ffmpeg jobsDir raster encoder workers hosted'
       : 'Usage: multiplane skill <status|install|remove> [--host claude|codex|all] [--force] [--expect signature] [--json]\nInstall and remove require --host.');
-    else await setup(command, args.slice(1), onEvent);
+    // TODO(design): setup/jobs still transitively load rendering through src/events.mjs.
+    // Removing those dependencies requires extending task 083's read-only src scope.
+    else { const { setup } = await import('../src/setup.mjs'); await setup(command, args.slice(1), onEvent); }
   } else {
     if (!allowed[command]) throw invalidOption('command', 'Unknown command: ' + command);
     if (args.includes('--help')) {
@@ -84,10 +83,19 @@ try {
         args: args.slice(1).filter(arg => arg !== '--json'), bin: fileURLToPath(import.meta.url), onBytes,
       };
       if (command === 'wait') {
+        const { waitJob } = await import('../src/jobs.mjs');
         const result = await waitJob(target, { ...options, onEvent: json ? undefined : onEvent, onBytes: json ? onBytes : undefined });
         reported = true; process.exitCode = resultExitCode(result);
       } else {
-        const action = { resume: resumeRender, render: renderShot, stills: stillsShot, verify: verifyShot, inspect: inspectShot, serve, lint: lintShot, doctor, benchmark, status: statusJob, cancel: cancelJob }[command];
+        let action;
+        if (command === 'lint') {
+          const { runCommand } = await import('../src/events.mjs');
+          const { checkLint } = await import('../src/lint.mjs');
+          action = (shot, options) => runCommand('lint', shot, options, events => checkLint(shot, events.options, events), false);
+        } else {
+          const [module, name] = { render: ['render', 'renderShot'], stills: ['stills', 'stillsShot'], verify: ['verify', 'verifyShot'], inspect: ['inspect', 'inspectShot'], serve: ['serve', 'serve'], doctor: ['doctor', 'doctor'], benchmark: ['benchmark', 'benchmark'], status: ['jobs', 'statusJob'], cancel: ['jobs', 'cancelJob'], resume: ['resume', 'resumeRender'] }[command];
+          action = (await import(`../src/${module}.mjs`))[name];
+        }
         const result = needsTarget ? await action(target, options) : await action(options);
         if (result?.ok !== undefined) { reported = true; process.exitCode = resultExitCode(result); }
       }
@@ -95,6 +103,6 @@ try {
   }
 } catch (failure) {
   const error = asError(failure);
-  if (!reported) createEvents(command, null, { onEvent }).finish({}, error);
+  if (!reported) { const { createEvents } = await import('../src/events.mjs'); createEvents(command, null, { onEvent }).finish({}, error); }
   process.exitCode = error.exitCode;
 }

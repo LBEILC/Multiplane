@@ -5,13 +5,16 @@ export interface Event {
   [key: string]: any;
 }
 export interface Job {
+  resume?: { available: boolean; reason?: string; framesDone: number; framesTotal: number };
+  resuming?: boolean; resumedBy?: string; resumeError?: { reason: string; changes?: string[] };
   jobId: string; jobDir: string; command: string; shot: string; pid: number;
   state: State; phase: string; done: number; total: number | null; fps: number | null;
   etaMs: number | null; startedAt: string; updatedAt: string; result: Event | null;
   previewFrame: number | null; previewVersion: string; events: Event[]; lost?: boolean; hosted?: boolean; queuePosition?: number; stuck?: boolean; forced?: boolean; temporaryDirectories?: string[];
 }
-export interface Snapshot { hosted?: boolean; language?: string; languagePreference?: string; jobs: Job[]; runningCount: number; theme: 'dark' | 'light'; select?: string }
+export interface Snapshot { ready?: boolean; hosted?: boolean; language?: string; languagePreference?: string; jobs: Job[]; runningCount: number; theme: 'dark' | 'light'; select?: string }
 export interface Bridge {
+  onNavigate(fn: (page: string) => void): () => void;
   updateState(): Promise<UpdateState>;
   checkUpdates(): Promise<UpdateState>;
   downloadUpdate(): Promise<UpdateState>;
@@ -39,6 +42,8 @@ export interface Bridge {
   copyBrowserCommand(): Promise<void>;
   snapshot(): Promise<Snapshot>;
   subscribe(fn: (snapshot: Snapshot) => void): () => void;
+  resume(id: string): Promise<void>;
+  resumePriority(id: string): Promise<void>;
   stop(id: string): Promise<void>;
   hide(id: string): Promise<void>;
   open(id: string, file?: string, reveal?: boolean): Promise<void>;
@@ -46,8 +51,10 @@ export interface Bridge {
 }
 export interface SkillConfirmation { id: number; title: string; detail: string; action: string; danger: boolean; titleKey?: string; detailKey?: string; actionKey?: string; values?: Record<string, string> }
 export interface BrowserInstallState { running: boolean; text: string }
-export interface UpdateState { phase: 'idle' | 'development' | 'checking' | 'current' | 'available' | 'manual' | 'downloading' | 'downloaded' | 'error'; currentVersion: string; version: string; canInstall: boolean; checkedAt: string; publishedAt: string; notes: string; releaseUrl: string; percent: number; transferred: number; total: number; errorStage: string; fullDownloadReason?: '' | 'old-blockmap-missing' | 'other' }
+export interface UpdateState { phase: 'idle' | 'development' | 'checking' | 'current' | 'available' | 'manual' | 'downloading' | 'downloaded' | 'error'; currentVersion: string; version: string; canInstall: boolean; checkedAt: string; publishedAt: string; notes: ReleaseNotes[]; releaseUrl: string; percent: number; transferred: number; total: number; errorStage: string; fullDownloadReason?: '' | 'old-blockmap-missing' | 'other' }
 export interface Settings { check?: { usable: boolean; version: string | null; reason: string | null; encoders: Record<string, boolean> }; values: Record<string, any>; file: string; overrides: Record<string, string | null>; own: { autoCheckUpdates?: boolean; language?: string; theme: string; notifications: boolean; wizardDone: boolean }; version: string; packaged: boolean }
 export interface Skill { blocked?: boolean; error?: string | null; host: string; target: string; detected: boolean; availableVersion: string; version: string | null; state: string }
 export interface Environment { skills: Skill[]; command: { bundled?: string | null; path: string | null; version: string | null; error: string | null } }
 declare global { interface Window { multiplane: Bridge } }
+
+export interface ReleaseNotes { version: string; date: string; items: { kind: 'new' | 'improved' | 'fixed'; area: 'renderer' | 'app' | 'skill'; highlight?: boolean; icon?: string; title: Partial<Record<'zh-CN' | 'en', string>>; detail: Partial<Record<'zh-CN' | 'en', string>> }[] }

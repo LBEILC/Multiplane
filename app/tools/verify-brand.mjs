@@ -13,7 +13,7 @@ await generateBrand();
 const mark = await readFile(path.join(root, 'app/design/icons/mark.svg'), 'utf8');
 assert.equal((mark.match(/<path /g) ?? []).length, 1);
 assert.ok(!/<(?:mask|clipPath|filter|text)|stroke=/.test(mark));
-const files = ['app/design/icons/mark.svg', 'app/design/icons/app.svg', ...[16,24,32,48,64,128,256,512,1024].map(n => `app/build/icons/app-${n}.png`), 'app/build/icons/app.ico'];
+const files = ['app/design/icons/mark.svg', 'app/design/icons/app.svg', ...[16,24,32,48,64,128,256,512,1024].map(n => `app/build/icons/app-${n}.png`), 'app/build/icons/app.ico', 'app/build/icons/tray-busy.ico', 'app/build/icons/trayBusyTemplate.png', 'app/build/icons/trayBusyTemplate@2x.png', ...[16,24,32,48,64,128,256].map(n => `app/build/icons/tray-busy-${n}.png`)];
 const hash = async () => Promise.all(files.map(async f => createHash('sha256').update(await readFile(path.join(root, f))).digest('hex')));
 const hashes = await hash(); await generateBrand(); assert.deepEqual(await hash(), hashes);
 const ico = await readFile(path.join(root, 'app/build/icons/app.ico'));
@@ -22,6 +22,16 @@ for (let i = 0; i < 7; i++) {
   const at = 6 + i * 16, size = ico[at] || 256;
   const png = ico.subarray(ico.readUInt32LE(at + 12), ico.readUInt32LE(at + 12) + ico.readUInt32LE(at + 8));
   const meta = await sharp(png).metadata(); assert.equal(meta.width, size); assert.equal(meta.height, size);
+}
+const busy = await readFile(path.join(root,'app/build/icons/tray-busy.ico'));
+assert.equal(busy.readUInt16LE(4),7);
+for (let i=0;i<7;i++) {
+  const at=6+i*16,size=busy[at]||256,png=busy.subarray(busy.readUInt32LE(at+12),busy.readUInt32LE(at+12)+busy.readUInt32LE(at+8));
+  const meta=await sharp(png).metadata();assert.equal(meta.width,size);assert.equal(meta.height,size);
+  assert.notDeepEqual(png,await readFile(path.join(root,'app/build/icons/app-'+size+'.png')));
+}
+for (const [name,size] of [['trayBusyTemplate.png',16],['trayBusyTemplate@2x.png',32]]) {
+  const meta=await sharp(path.join(root,'app/build/icons',name)).metadata();assert.equal(meta.width,size);assert.equal(meta.height,size);
 }
 // Inspect the actual solid path and analytic thickness, independent of old drafts.
 const size = 1000;

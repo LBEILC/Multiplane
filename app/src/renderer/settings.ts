@@ -52,6 +52,7 @@ export class SettingsView {
   async init() {
     try { this.updates = await api.updateState(); updateHint(this.updates); this.settings = await api.settings(); this.browserInstall = await api.browserInstallState(); if (!this.settings.own.wizardDone) this.startWizard(); }
     catch (e) { this.failure(e); }
+    finally { this.render(); }
   }
   syncHosting(enabled: boolean) {
     if (this.settings) this.settings.values.hosted = enabled;
@@ -128,7 +129,7 @@ export class SettingsView {
     updateHint(this.updates);
     if (this.page === 'jobs' && !this.step) { this.container.replaceChildren(); return; }
     const top = this.container.scrollTop;
-    this.container.innerHTML = `${this.error ? `<div class="banner" role="alert">${esc(userError(this.error))}</div>` : ''}${this.page === 'environment' ? this.environmentPage() : !this.settings ? `<p>${t('settingsReadError')}</p>` : this.step ? this.wizard() : this.page === 'settings' ? this.settingsPage() : this.page === 'about' ? this.about() : ''}`;
+    this.container.innerHTML = `${this.error ? `<div class="banner" role="alert">${esc(userError(this.error))}</div>` : ''}${!this.settings ? `<p role="status">${t(this.error ? 'settingsReadError' : 'checking')}</p>` : this.page === 'environment' ? this.environmentPage() : this.step ? this.wizard() : this.page === 'settings' ? this.settingsPage() : this.page === 'about' ? this.about() : ''}`;
     this.container.scrollTop = top;
   }
   startWizard() {

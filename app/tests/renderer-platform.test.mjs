@@ -1,3 +1,4 @@
+import jobCopy from '../src/shared/copy/jobs-en.mjs';
 import copy from '../src/shared/copy/en.mjs';
 import releasePackage from '../../package.json' with { type: 'json' };
 import test from 'node:test';
@@ -50,8 +51,8 @@ test('renderer uses Darwin labels, home paths and brand spacing after delayed pl
   assert.equal(await page.locator('.titlebar > .brand-lockup').evaluate(el => getComputedStyle(el).visibility), 'visible');
   assert.equal(await page.locator('.info-row .mono').last().innerText(), '~/bin/multiplane');
   await page.locator('[data-page="jobs"]').click();
-  await page.getByRole('tab', { name: copy.result, exact: true }).click();
+  await page.getByRole('tab', { name: jobCopy.summary, exact: true }).click();
   assert.equal(await page.getByRole('button', { name: copy.revealFinder, exact: true }).count(), 1);
-  assert.equal(await page.locator('.artifact .mono').innerText(), '~/output.png');
+  assert.equal(await page.locator('.oc-main .path').innerText(), '~/output.png');
   assert.deepEqual(errors, []);
 });

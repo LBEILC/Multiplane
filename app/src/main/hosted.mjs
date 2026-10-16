@@ -13,7 +13,7 @@ export async function validRequest(r, id, { execPath = process.execPath } = {}) 
   if (!jobReference(r, id)
     || !['jobDir', 'node', 'bin', 'cwd'].every(key => typeof r[key] === 'string' && path.isAbsolute(r[key]))
     || path.basename(r.jobDir) !== id
-    || !['render', 'stills', 'verify'].includes(r.command) || !Array.isArray(r.args) || !r.args.every(a => typeof a === 'string')
+    || !['render', 'stills', 'verify', 'resume'].includes(r.command) || !Array.isArray(r.args) || !r.args.every(a => typeof a === 'string')
     || !r.env || typeof r.env !== 'object' || Array.isArray(r.env) || Object.values(r.env).some(v => typeof v !== 'string')) return false;
   if (!/^node(\.exe)?$/i.test(path.basename(r.node))) {
     if (r.env.ELECTRON_RUN_AS_NODE !== '1') return false;

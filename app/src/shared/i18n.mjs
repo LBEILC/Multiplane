@@ -1,6 +1,14 @@
+import resumeZh from './copy/resume-zh-CN.mjs';
+import resumeEn from './copy/resume-en.mjs';
+import trayZh from './copy/tray-zh-CN.mjs';
+import trayEn from './copy/tray-en.mjs';
+import jobsZh from './copy/jobs-zh-CN.mjs';
+import jobsEn from './copy/jobs-en.mjs';
 import zh from './copy/zh-CN.mjs';
 import en from './copy/en.mjs';
 
+Object.assign(zh, jobsZh, trayZh, resumeZh);
+Object.assign(en, jobsEn, trayEn, resumeEn);
 export const languagePreferences = ['system', 'zh-CN', 'en'];
 let current = 'en';
 const listeners = new Set();
@@ -40,4 +48,17 @@ export function pixels(count) {
   return t(new Intl.PluralRules(current).select(count) === 'one' ? 'pixelsOne' : 'pixelsOther', { count: number(count) });
 }
 export const list = values => new Intl.ListFormat(current).format(values);
-export const bytes = value => new Intl.NumberFormat(current, { style: 'unit', unit: 'byte', unitDisplay: 'short' }).format(value);
+export function bytes(value, unit) {
+  if (!Number.isFinite(value)) return '—';
+  const units = ['KB', 'MB', 'GB'];
+  const index = unit ? units.indexOf(unit) : Math.min(2, Math.max(0, Math.floor(Math.log(Math.max(1, value)) / Math.log(1024)) - 1));
+  return `${new Intl.NumberFormat(current, { maximumFractionDigits: 1 }).format(value / 1024 ** (index + 1))} ${units[index]}`;
+}
+export function jobStarted(value, now = new Date()) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '—';
+  const time = date.toLocaleTimeString(current, { hour: '2-digit', minute: '2-digit', hour12: false });
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const text = date.toDateString() === now.toDateString() ? time : date.toDateString() === yesterday.toDateString() ? `${t('yesterday')} ${time}` : `${date.toLocaleDateString(current)} ${time}`;
+  return t('started', { t: text });
+}

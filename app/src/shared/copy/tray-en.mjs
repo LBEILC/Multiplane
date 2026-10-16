@@ -1,0 +1,1 @@
+export default { trNow: 'Running', trQueue: 'Queued · {n}', trRecent: 'Recently finished', trIdle: 'Nothing is rendering', trMore: '{n} more', trOpen: 'Open Multiplane', trSettings: 'Settings', trQuit: 'Quit', trQuitHint: 'Quitting stops hosted renders', trProgress: '{done} / {total} frames · {left} left', trPos: '#{n}', trTip: 'Multiplane · {n} running · {p}%' };
