@@ -233,6 +233,9 @@ for (const format of ['webm', 'mov']) fullTest(`${format}: concatenated transpar
 });
 
 for (const encoder of ['nvenc-h264', 'nvenc-hevc']) fullTest(`${encoder}: segmented MP4 stream copy passes output checks`, { timeout: 60000 }, async t => {
+  // Hosts without an NVIDIA encoder end FFmpeg before the renderer can report its stderr, so probe first.
+  const probe = await run(await resolveFFmpeg(), ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.1', '-frames:v', '1', '-c:v', encoder === 'nvenc-hevc' ? 'hevc_nvenc' : 'h264_nvenc', '-f', 'null', '-']);
+  if (probe.code !== 0) { t.skip('NVENC is unavailable on this host: ' + (probe.stderr.trim().split(/\r?\n/).at(-1) || 'exit ' + probe.code)); return; }
   let result;
   try { result = await renderShot(shot, { ...options, encoder, to: 1, out: path.join(root, encoder + '.mp4') }); }
   catch (error) {
