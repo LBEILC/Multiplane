@@ -1,3 +1,4 @@
+import { waitForMainWindow } from './main-window.mjs';
 import copy from '../src/shared/copy/en.mjs';
 import { nativeRealpath } from '../../tools/native-realpath.mjs';
 import { _electron } from 'playwright';
@@ -164,7 +165,7 @@ try {
     const runtimeInstallation = path.dirname(evidence.runtime.execPath);
     if (runtimeInstallation !== installation) snapshots.set(runtimeInstallation, await fileSnapshot(runtimeInstallation));
   }
-  const page = await application.firstWindow(); page.setDefaultTimeout(30000);
+  const page = await waitForMainWindow(() => application.windows()); page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const shot = async name => {
     await page.evaluate(() => document.fonts.ready);
@@ -329,7 +330,7 @@ try {
     // Also observe AppRun's default policy, independently of the CI GUI override.
     const defaultEnv = { ...env }; delete defaultEnv.MULTIPLANE_NO_SANDBOX;
     application = await _electron.launch({ executablePath: executable, args: [], env: defaultEnv });
-    await application.firstWindow();
+    await waitForMainWindow(() => application.windows());
     evidence.linuxSandbox.withoutCiOverride = await application.evaluate(({ app }) => ({ noSandbox: app.commandLine.hasSwitch('no-sandbox'), argv: process.argv }));
     await application.close(); application = undefined;
   }
@@ -345,7 +346,7 @@ try {
     console.error('Window restore diagnostics:', JSON.stringify(evidence.windowRestoreFailure));
   }
   if (application) {
-    const page = await application.firstWindow();
+    const page = await waitForMainWindow(() => application.windows());
     evidence.failureView = await page.locator('#placeholder').innerText().catch(() => 'unavailable');
     evidence.browserState = await page.evaluate(() => window.multiplane.browserInstallState()).catch(() => null);
     evidence.failureDoctor = await page.evaluate(() => window.multiplane.doctor()).catch(() => null);

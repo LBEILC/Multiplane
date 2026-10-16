@@ -7,6 +7,15 @@ const main = { ...target, index: 1, role: 'AXWindow', position: { x: 0, y: 31 } 
 const other = { ...main, index: 0, title: 'Inspector' };
 const duplicate = { ...main, index: 2, position: { x: 100, y: 31 } };
 
+test('native control checks distinguish a same-title frameless tray from the main window', () => {
+  const owner = { ...main, hasWindowControls: true };
+  const tray = { ...duplicate, hasWindowControls: false };
+  const controlsTarget = { ...target, requireWindowControls: true };
+  assert.equal(selectWindowCandidate([tray, owner], controlsTarget), owner);
+  assert.equal(selectWindowCandidate([tray], controlsTarget), null);
+  assert.equal(selectWindowCandidate([owner, { ...duplicate, hasWindowControls: true }], controlsTarget), null);
+});
+
 test('multiple windows select only the matching PID, title and role', async () => {
   const candidates = [other, { ...main, pid: 43 }, { ...main, role: 'AXSheet' }, main];
   assert.equal(selectWindowCandidate(candidates, target), main);

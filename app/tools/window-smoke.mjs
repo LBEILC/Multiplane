@@ -61,28 +61,28 @@ export async function ensureWindowManager(evidence) {
   } catch (error) { await stopOwned(child); throw error; }
 }
 
-async function geometry(app) {
-  return app.evaluate(({ BrowserWindow, screen }) => {
-    const win = BrowserWindow.getAllWindows()[0], handle = win.getNativeWindowHandle();
+async function geometry(app, url) {
+  return app.evaluate(({ BrowserWindow, screen }, url) => {
+    const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL() === url), handle = win.getNativeWindowHandle();
     const bounds = win.getBounds(), content = win.getContentBounds();
     return { bounds, content, display: screen.getDisplayMatching(bounds), source: win.getMediaSourceId(),
       handle: (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString(),
       electron: process.versions.electron, pid: process.pid, title: win.getTitle(), id: win.id };
-  });
+  }, url);
 }
 
-export async function captureWindow(app, out, evidence) {
+export async function captureWindow(app, out, evidence, page) {
   const result = evidence.wholeWindow = { status: 'unavailable', attempts: [] };
   const file = 'window.png', destination = path.join(out, file);
   // A clean empty jobs page is selected by the caller before any native capture.
   let info;
   try {
-    await app.evaluate(({ app, BrowserWindow }) => {
+    await app.evaluate(({ app, BrowserWindow }, url) => {
       if (process.platform === 'darwin') app.focus({ steal: true });
-      const win = BrowserWindow.getAllWindows()[0]; win.show(); win.focus();
-    });
+      const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL() === url); win.show(); win.focus();
+    }, page.url());
     await delay(200);
-    info = await geometry(app);
+    info = await geometry(app, page.url());
   } catch (error) { result.reason = `Cannot prepare native window capture: ${error.message}`; return; }
   result.bounds = info.bounds;
   const methods = ['desktopCapturer:window', ...(process.platform === 'linux' ? ['import:X11'] : process.platform === 'darwin' ? ['screencapture'] : ['desktopCapturer:screen-crop'])];
@@ -90,8 +90,8 @@ export async function captureWindow(app, out, evidence) {
     try {
       let png;
       if (method.startsWith('desktopCapturer:')) {
-        const capture = await app.evaluate(async ({ BrowserWindow, desktopCapturer, screen }, method) => {
-          const win = BrowserWindow.getAllWindows()[0], bounds = win.getBounds();
+        const capture = await app.evaluate(async ({ BrowserWindow, desktopCapturer, screen }, { method, id }) => {
+          const win = BrowserWindow.fromId(id), bounds = win.getBounds();
           const display = screen.getDisplayMatching(bounds);
           const isScreen = method.endsWith('screen-crop');
           const size = isScreen ? display.size : bounds;
@@ -109,7 +109,7 @@ export async function captureWindow(app, out, evidence) {
             image = image.crop({ x: Math.round((bounds.x - d.x) * scaleX), y: Math.round((bounds.y - d.y) * scaleY), width: Math.round(bounds.width * scaleX), height: Math.round(bounds.height * scaleY) });
           }
           return image.toPNG().toString('base64');
-        }, method);
+        }, { method, id: info.id });
         png = Buffer.from(capture, 'base64');
       } else if (method === 'import:X11') {
         await run('import', ['-window', info.handle, destination]);
@@ -135,11 +135,11 @@ export async function checkWindowControls(app, page, work, out, evidence) {
   const check = evidence.windowControls = { status: 'running', actions: [] };
   let macHelper;
   try {
-    const info = await geometry(app);
+    const info = await geometry(app, page.url());
     const macAction = (action, method = 'AXPress') => runAccessibilityAction(
       async (operation, nativeMethod, index) => JSON.parse((await run(macHelper,
         [String(info.pid), operation, info.title, ...(index === undefined ? [] : [nativeMethod, String(index)])])).stdout),
-      { pid: info.pid, title: info.title }, action, method, check);
+      { pid: info.pid, title: info.title, requireWindowControls: true }, action, method, check);
     check.electron = info.electron;
     const lock = JSON.parse(await readFile(tool('../package.json'), 'utf8')).devDependencies.electron;
     assert.equal(info.electron, lock, 'Runtime Electron must match the locked version');

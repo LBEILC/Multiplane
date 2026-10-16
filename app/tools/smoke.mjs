@@ -1,3 +1,4 @@
+import { waitForMainWindow } from './main-window.mjs';
 import copy from '../src/shared/copy/en.mjs';
 import { nativeRealpath } from '../../tools/native-realpath.mjs';
 import { _electron } from 'playwright';
@@ -31,7 +32,7 @@ const errors = [], evidence = { platform: process.platform, arch: process.arch, 
 try {
   windowManager = await ensureWindowManager(evidence);
   app = await _electron.launch({ executablePath: await ensureElectron(), args, env });
-  page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
+  page = await waitForMainWindow(() => app.windows()); page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => document.documentElement.dataset.platform);
   assert.equal(await page.locator('html').getAttribute('data-platform'), process.platform);
   for (const name of ['jobs', 'environment', 'settings', 'about']) {
@@ -45,7 +46,7 @@ try {
   // Native captures cannot use Playwright masks. This isolated, empty jobs page has no local paths.
   await page.locator('[data-page="jobs"]').click();
   await page.evaluate(() => document.fonts.ready);
-  await captureWindow(app, out, evidence);
+  await captureWindow(app, out, evidence, page);
   const doctor = await page.evaluate(() => window.multiplane.doctor());
   assert.equal(doctor.ok, true, JSON.stringify(doctor));
   evidence.doctor = doctor.data.checks.map(({ name, ok }) => ({ name, ok }));

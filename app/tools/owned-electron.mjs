@@ -1,3 +1,4 @@
+import { waitForMainWindow } from './main-window.mjs';
 import { spawnOwned, stopOwned } from '../src/main/owned-process.mjs';
 import { chromium } from 'playwright';
 
@@ -38,7 +39,8 @@ export async function launchOwned(executable, env, onSpawn = () => {}) {
     };
     const endpoint = await wait(() => output.match(/DevTools listening on (ws:\/\/\S+)/)?.[1]);
     browser = await chromium.connectOverCDP(endpoint);
-    const page = await wait(() => browser.contexts()[0]?.pages()[0]);
-    return { page, firstWindow: async () => page, evaluate, close, pid: child.pid, diagnostics };
+    const windows = () => browser.contexts()[0]?.pages() ?? [];
+    const page = await waitForMainWindow(windows);
+    return { page, windows, firstWindow: async () => page, evaluate, close, pid: child.pid, diagnostics };
   } catch (error) { await close(); throw error; }
 }

@@ -61,13 +61,13 @@ try {
     assert.equal(await app.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().filter(win => win.webContents.getURL() === url).length, page.url()), 1);
     evidence.lock = true;
   }
-  await app.evaluate(({ Notification, BrowserWindow }) => {
+  await app.evaluate(({ Notification, BrowserWindow }, url) => {
     globalThis.observed = { notifications: [], pushes: [] };
     const show = Notification.prototype.show;
     Notification.prototype.show = function () { globalThis.observed.notifications.push({ title: this.title, body: this.body }); return show.call(this); };
-    const contents = BrowserWindow.getAllWindows()[0].webContents, send = contents.send.bind(contents);
+    const contents = BrowserWindow.getAllWindows().find(win => win.webContents.getURL() === url).webContents, send = contents.send.bind(contents);
     contents.send = (channel, ...args) => { if (channel === 'snapshot') globalThis.observed.pushes.push({ count: args[0].jobs.length, at: Date.now() }); return send(channel, ...args); };
-  });
+  }, page.url());
   const observe = async phase => {
     const value = await page.evaluate(async () => ({ snapshot: (await window.multiplane.snapshot()).jobs.map(j => j.jobId), rows: Array.from(document.querySelectorAll('[data-job]'), e => e.dataset.job), heading: document.querySelector('#heading').textContent, error: document.querySelector('#error').textContent, own: (await window.multiplane.settings()).own }));
     evidence.phases.push({ phase, ...value }); console.log(phase, value.snapshot.length, value.rows.length);

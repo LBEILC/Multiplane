@@ -1,6 +1,6 @@
-// PID scopes the AX application; title and role identify its main window.
-export function selectWindowCandidate(candidates, { pid, title }) {
-  const matches = candidates.filter(c => c.pid === pid && c.title === title && c.role === 'AXWindow');
+// Frameless tray popovers may share the main window's title and AX role.
+export function selectWindowCandidate(candidates, { pid, title, requireWindowControls = false }) {
+  const matches = candidates.filter(c => c.pid === pid && c.title === title && c.role === 'AXWindow' && (!requireWindowControls || c.hasWindowControls === true));
   return matches.length === 1 ? matches[0] : null;
 }
 

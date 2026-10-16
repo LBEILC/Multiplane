@@ -41,6 +41,7 @@ func describe(_ window: AXUIElement, _ index: Int, _ pid: Int32) -> [String: Any
     return ["index": index, "pid": pid,
             "title": optionalAttribute(window, kAXTitleAttribute) as? String ?? "",
             "role": optionalAttribute(window, kAXRoleAttribute) as? String ?? "",
+            "hasWindowControls": [kAXMinimizeButtonAttribute, kAXZoomButtonAttribute, kAXCloseButtonAttribute].allSatisfy { optionalAttribute(window, $0) != nil },
             "position": position]
 }
 
@@ -58,7 +59,7 @@ if action == "windows" {
     emit(["candidates": candidates])
     exit(0)
 }
-let matches = candidates.filter { ($0["title"] as? String) == title && ($0["role"] as? String) == "AXWindow" }
+let matches = candidates.filter { ($0["title"] as? String) == title && ($0["role"] as? String) == "AXWindow" && ($0["hasWindowControls"] as? Bool) == true }
 guard CommandLine.arguments.count == 6, let index = Int(CommandLine.arguments[5]),
       windows.indices.contains(index), matches.count == 1, (matches[0]["index"] as? Int) == index else {
     emit(["kind": "window-selection-pending", "candidates": candidates])
