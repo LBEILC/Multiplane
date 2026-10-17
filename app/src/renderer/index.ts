@@ -1,6 +1,6 @@
 import { resumeAction, resumeBlock, resumedFromLine, resumable } from './jobResume';
 import { summary, timeline, options, tc } from './jobDetail';
-import { playerHTML, mountPlayer, mountImages } from './jobMedia';
+import { playerHTML, mountPlayer, mountImages, mediaURL } from './jobMedia';
 import { failureCopy, projectPath, commandText, mergedEvents } from '../shared/job-detail.mjs';
 import { roll, hydrateRolls, updateRolls, setRoll, motionOn } from './jobMotion';
 import { t, language, setLanguage, number, bytes, pixels, runningCount, formatDuration, jobStarted, onLanguageChange } from '../shared/i18n.mjs';
@@ -106,7 +106,7 @@ function renderProgress(j:Job) {
     const bar=host.querySelector<HTMLElement>('.pbar');
     bar?.classList.remove('indeterminate');
     if(bar){bar.classList.add('complete');bar.querySelector<HTMLElement>('i')!.style.width='100%';}
-    setRoll('phase-'+j.jobId,t('completed'));setRoll('remaining-'+j.jobId,duration(0));
+    setRoll('phase-'+j.jobId,t('completed'),true);setRoll('remaining-'+j.jobId,duration(0),true);
     return;
   }
   if(!['running','queued'].includes(j.state)) {host.innerHTML='';delete host.dataset.progressJob;return;}
@@ -139,7 +139,7 @@ function renderDetail() {
   if ($('.tabs').innerHTML !== tabs) $('.tabs').innerHTML = tabs;
   // Preserve the video element during background refreshes and elapsed-time ticks.
   const key = JSON.stringify([selected, tab, j.state, j.command, j.lost, tab === 'summary' ? j.stderr : null, tab === 'preview' ? (j.command === 'render' ? (j.state==='succeeded'?'video':j.previewFrame!=null) : j.events) : j.events]);
-  if(tab==='preview'&&j.command==='render'&&j.previewFrame!=null){const img=$('#tab-content').querySelector<HTMLImageElement>('img.preview');if(img){const src=media(j,j.jobDir+'/preview.png',j.previewVersion);if(img.src!==src)img.src=src;setRoll('preview-'+j.jobId,j.previewFrame);const time=$('#tab-content').querySelector('[data-preview-time]');if(time)time.textContent=tc(j.previewFrame/(j.events.find(e=>e.type==='shot')?.fps??30));}}
+  if(tab==='preview'&&j.command==='render'&&j.previewFrame!=null){const img=$('#tab-content').querySelector<HTMLImageElement>('img.preview');if(img){const src=mediaURL(j,j.jobDir+'/preview.png',j.previewVersion);if(img.src!==src)img.src=src;setRoll('preview-'+j.jobId,j.previewFrame);const time=$('#tab-content').querySelector('[data-preview-time]');if(time)time.textContent=tc(j.previewFrame/(j.events.find(e=>e.type==='shot')?.fps??30));}}
   if (key !== contentKey) {
     contentKey = key;
     $('#tab-content').innerHTML = tab === 'preview' ? preview(j) : tab === 'timeline' ? timeline(j) : tab === 'options' ? options(j) : summary(j);

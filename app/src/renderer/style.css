@@ -229,7 +229,7 @@ main {
   color: var(--text-2);
   margin-top: 4px;
 }
-.row-sub span {
+.row-sub > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

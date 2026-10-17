@@ -15,7 +15,7 @@
 .tr-job:hover, .tr-row:hover, .tr-open:hover, .tr-ic:hover { background: var(--surface-2); }
 .tr-l1 { display: flex; align-items: baseline; gap: 8px; }
 .tr-l1 b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr-l1 span { margin-left: auto; color: var(--info); font-weight: 500; }
+.tr-l1 > span { margin-left: auto; color: var(--info); font-weight: 500; }
 .tr-bar { height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
 .tr-bar i { display: block; height: 100%; border-radius: 2px; background: var(--info); transition: width 1s linear; }
 .tr-l2 { font-size: 12px; color: var(--text-2); }

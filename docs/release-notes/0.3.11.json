@@ -1,0 +1,27 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.11",
+  "date": "2026-10-17",
+  "items": [
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "title": { "zh-CN": "进度数字不再重复", "en": "Progress numbers no longer doubled" },
+      "detail": { "zh-CN": "作业页和托盘里的帧数、速度、用时、剩余时间不再重复显示成两遍（例如 “10,82510,825”）。", "en": "Frame counts, speed, elapsed and remaining time on the Jobs page and in the tray no longer show up twice (for example \"10,82510,825\")." }
+    },
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "title": { "zh-CN": "最新完成帧不再裂图", "en": "Latest frame preview stays visible" },
+      "detail": { "zh-CN": "渲染时“预览”里的最新完成帧在更新后不再变成裂图。", "en": "The latest finished frame in the Preview tab no longer turns into a broken image after it updates during a render." }
+    },
+    {
+      "kind": "fixed",
+      "area": "app",
+      "title": { "zh-CN": "滚动数字对齐", "en": "Rolling numbers line up" },
+      "detail": { "zh-CN": "进度数字和旁边的文字对齐；更新很快时每次滚动走完再换下一个值，不再停在半截像上标。", "en": "Progress numbers sit on the same line as the text next to them, and when values change quickly each roll finishes before the next, instead of digits getting stuck halfway like superscripts." }
+    }
+  ]
+}

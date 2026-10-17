@@ -29,16 +29,19 @@ export function fixtureJobs() {
   return [running,success,failed,verify,stills,cancelled];
 }
 
-export async function mountJobs(page,{language='zh-CN',theme='dark',jobs=fixtureJobs(),media, reduced=false}={}) {
+export async function mountJobs(page,{language='zh-CN',theme='dark',jobs=fixtureJobs(),media, reduced=false, tray=false}={}) {
   await page.emulateMedia({reducedMotion:reduced?'reduce':'no-preference'});
   await page.setViewportSize({width:1160,height:800});page.setDefaultTimeout(5000);
   const source=name=>new URL('../src/renderer/'+name,import.meta.url);
-  const bundle=await build({entryPoints:[fileURLToPath(source('index.ts'))],bundle:true,write:false,platform:'browser',format:'iife'});
+  const bundle=await build({entryPoints:[fileURLToPath(source(tray?'tray.ts':'index.ts'))],bundle:true,write:false,platform:'browser',format:'iife'});
   await page.route('https://multiplane.test/**',async route=>{
     const url=new URL(route.request().url());
-    if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:(await readFile(source('index.html'),'utf8')).replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/,'').replace(/<link[^>]*>/g,'').replace('<script src="renderer.js"></script>','').replace('<!-- BRAND_MARK -->',(await readFile(new URL('../design/icons/mark.svg',import.meta.url),'utf8')).replace('<svg ','<svg class="brand-mark" '))});
-    if(url.pathname.startsWith('/media/')) {
-      const response=await media(decodeURIComponent(url.pathname.slice(7)));
+    if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:(await readFile(source(tray?'tray.html':'index.html'),'utf8')).replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/,'').replace(/<link(?![^>]*rolling-number)[^>]*>/g,'').replace(/<script src="(?:renderer|tray).js"><\/script>/,'').replace('<!-- BRAND_MARK -->',(await readFile(new URL('../design/icons/mark.svg',import.meta.url),'utf8')).replace('<svg ','<svg class="brand-mark" '))});
+    if(url.pathname==='/rolling-number.css')return route.fulfill({contentType:'text/css',body:await readFile(new URL('../node_modules/@kitlangton/rolling-number/dist/styles.css',import.meta.url))});
+    if(url.pathname==='/media/') {
+      const file=url.searchParams.get('file');
+      if(!file)return route.fulfill({status:403,body:'Forbidden'});
+      const response=await media(file);
       const range=route.request().headers().range?.match(/^bytes=(\d+)-(\d*)$/);
       if(range){const start=Number(range[1]),end=range[2]?Number(range[2]):response.body.length-1;return route.fulfill({...response,status:206,body:response.body.subarray(start,end+1),headers:{'accept-ranges':'bytes','content-range':`bytes ${start}-${end}/${response.body.length}`}});}
       return route.fulfill({...response,headers:{'accept-ranges':'bytes'}});
@@ -48,19 +51,20 @@ export async function mountJobs(page,{language='zh-CN',theme='dark',jobs=fixture
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('https://multiplane.test/');
   await page.addStyleTag({content:await readFile(new URL('../design/tokens.css',import.meta.url),'utf8')});
-  await page.addStyleTag({content:await readFile(source('style.css'),'utf8')});
+  await page.addStyleTag({content:await readFile(source(tray?'tray.css':'style.css'),'utf8')});
   await page.addStyleTag({content:(await readFile(new URL('../node_modules/remixicon/fonts/remixicon.css',import.meta.url),'utf8')).replaceAll('url("','url("/icons/')});
   await page.evaluate(({jobs,language,theme})=>{
     document.documentElement.dataset.language=language;document.documentElement.dataset.theme=theme;
     const state={ready:true,jobs,language,theme,hosted:true,runningCount:1};let subscriber;
     window.publish=(change)=>{Object.assign(state,change);subscriber(structuredClone(state));};
+    window.trayBridge={snapshot:async()=>structuredClone(state),subscribe:fn=>{subscriber=fn;},visibility:()=>{},height:()=>{},action:()=>{}};
     window.faults=[];window.opened=[];
     window.multiplane={platform:async()=>({platform:'win32',home:'/example'}),snapshot:async()=>structuredClone(state),subscribe:fn=>{subscriber=fn;},reportFault:e=>window.faults.push(e),
       settings:async()=>({own:{wizardDone:true,language,theme},values:{hosted:true},overrides:{},version:'0.3.7'}),
       browserInstallState:async()=>({running:false}),onBrowserInstallState:()=>{},onSkillConfirmation:()=>{},updateState:async()=>({phase:'development'}),onUpdateState:()=>{},
-      media:(_id,path)=>'https://multiplane.test/media/'+encodeURIComponent(path),open:async(...args)=>window.opened.push(args),stop:async()=>{},hide:async()=>{}};
+      media:(id,path,version='')=>'https://multiplane.test/media/?job='+encodeURIComponent(id)+'&file='+encodeURIComponent(path)+'&v='+encodeURIComponent(version),open:async(...args)=>window.opened.push(args),stop:async()=>{},hide:async()=>{}};
   },{jobs,language,theme});
   await page.addScriptTag({content:bundle.outputFiles[0].text});
-  await page.locator('.job').first().waitFor();await page.evaluate(()=>document.fonts.ready);
+  await page.locator(tray?'.tr-job':'.job').first().waitFor();await page.evaluate(()=>document.fonts.ready);
   return {errors,jobs};
 }

@@ -23,6 +23,7 @@ await Promise.all([
   }),
   build({ entryPoints: ['src/preload/tray.ts'], outfile: 'dist/tray-preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
   build({ entryPoints: ['src/renderer/tray.ts'], outfile: 'dist/tray.js', bundle: true, platform: 'browser', format: 'iife', target: 'chrome140' }),
+  copyFile('node_modules/@kitlangton/rolling-number/dist/styles.css', 'dist/rolling-number.css'),
   copyFile('src/renderer/tray.css', 'dist/tray.css'),
   copyFile('src/renderer/style.css', 'dist/style.css'),
   copyFile('src/main/browser-worker.cjs', 'dist/browser-worker.cjs'),
