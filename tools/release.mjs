@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { excluded } from './export-public.mjs';
+import { checkReleaseNotes } from './release-check.mjs';
 import { run, npm } from './process.mjs';
 
-export const steps = ['prepare', 'verify', 'export', 'push', 'collect', 'draft'];
+export const steps = ['prepare', 'preflight', 'export', 'push', 'verify', 'promote', 'collect', 'draft'];
 const repository = 'LBEILC/Multiplane';
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 const exists = async file => !!await lstat(file).catch(error => { if (error.code !== 'ENOENT') throw error; });
@@ -34,6 +36,20 @@ export async function checkArtifacts(directory, version) {
   return hashes;
 }
 
+// Dependency changes include tooling and lockfile resolution changes, but not version-only bumps.
+export function dependencyChange(before, after) {
+  const fields = ['dependencies', 'devDependencies', 'peerDependencies', 'peerDependenciesMeta', 'optionalDependencies', 'overrides'];
+  return fields.some(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+}
+export function validationPlan(files, { retry = false, dependencies = false } = {}) {
+  const tests = files.filter(file => /^(?:app\/)?tests\/.*\.test\.mjs$/.test(file));
+  const testSupport = files.some(file => /^(?:app\/)?tests\//.test(file) && !tests.includes(file));
+  const renderer = dependencies || files.some(file => /^(src|bin|skills)\//.test(file)) || testSupport;
+  const app = files.some(file => file.startsWith('app/') && !file.startsWith('app/tests/') && !/\.md$/.test(file));
+  const tooling = files.some(file => /^tools\/(test-suite|install-browser|process)\.mjs$/.test(file));
+  return { files, renderer: renderer || tooling, app: !retry || app || dependencies || tooling || testSupport, tests, retry };
+}
+
 // The injectable command boundary lets failure tests exercise the actual pipeline offline.
 export async function release(options, { execute, log = console.log, sleep = delay } = {}) {
   const root = path.resolve(options.root ?? process.cwd());
@@ -55,11 +71,14 @@ export async function release(options, { execute, log = console.log, sleep = del
       if (value && value !== state[key]) throw Error(`Saved ${key} differs; use a new output directory`);
     }
     const save = async () => { await writeFile(stateFile + '.tmp', JSON.stringify(state, null, 2) + '\n'); await rename(stateFile + '.tmp', stateFile); };
+    state.timings ??= [];
+    const localOnly = options.to === 'verify' || options.step === 'verify';
     const command = async (label, file, args, cwd = state.worktree) => {
       const logs = path.join(directory, 'logs'); await mkdir(logs, { recursive: true });
       const stepLabel = state.current && !label.startsWith(state.current + '-') ? `${state.current}-${label}` : label;
       const logfile = path.join(logs, `${stepLabel}.log`);
       const handle = await open(logfile, 'a');
+      const started = Date.now();
       let writes = Promise.resolve();
       await handle.write(`\n${file} ${JSON.stringify(args)}\n`);
       log(`${label}: ${logfile}`);
@@ -72,7 +91,7 @@ export async function release(options, { execute, log = console.log, sleep = del
         if (execute) await handle.write((result?.stdout ?? '') + (result?.stderr ?? ''));
         return result?.stdout?.trim() ?? '';
       } catch (error) { await writes; await handle.write(`\nFAILED: ${error.message}\n`); throw Error(`${label} failed; log: ${logfile}\n${error.message.slice(-3000)}`); }
-      finally { try { await writes; } finally { await handle.close(); } }
+      finally { try { await writes; } finally { await handle.close(); state.timings.push({ label: stepLabel, ms: Date.now() - started }); await save(); } }
     };
     const git = (args, cwd = state.worktree) => command('git', 'git', args, cwd);
     const gh = (args, label = 'github') => command(label, 'gh', args[0] === 'api' ? args : [...args, '-R', repository]);
@@ -86,17 +105,21 @@ export async function release(options, { execute, log = console.log, sleep = del
       if (await git(['config', '--local', '--get', 'multiplane.publicExport'], state.publicRepo) !== '1') throw Error('Public export marker missing');
       const remote = await git(['remote', 'get-url', 'origin'], state.publicRepo);
       if (!['https://github.com/' + repository, 'https://github.com/' + repository + '.git', 'git@github.com:' + repository + '.git'].includes(remote)) throw Error('Unexpected public remote');
-      if (await git(['branch', '--show-current'], state.publicRepo) !== 'main') throw Error('Public checkout must be on main');
+      const branch = await git(['branch', '--show-current'], state.publicRepo);
+      if (!['main', state.branch].includes(branch)) throw Error('Unexpected public checkout branch');
     };
     const boundary = async () => checkDesignFiles((await git(['ls-tree', '-rz', '--name-only', 'HEAD', '--', 'app/design'], state.publicRepo)).split('\0').filter(Boolean));
     const rollback = async () => {
+      const parent = state.exportParent ?? state.exportBase;
       const head = await git(['rev-parse', 'HEAD'], state.publicRepo);
-      if (head !== state.exportBase) {
-        if (await git(['rev-parse', 'HEAD^'], state.publicRepo) !== state.exportBase) throw Error('Unexpected public history; refusing rollback');
+      if (head !== parent) {
+        if (await git(['rev-parse', 'HEAD^'], state.publicRepo) !== parent) throw Error('Unexpected public history; refusing rollback');
         const remote = await git(['ls-remote', 'origin', 'refs/heads/main'], state.publicRepo);
         if (!remote.startsWith(state.exportBase + '\t')) throw Error('Remote changed; refusing rollback');
       }
-      await git(['reset', '--hard', state.exportBase], state.publicRepo);
+      const published = await git(['ls-remote', 'origin', `refs/heads/${state.branch}`], state.publicRepo);
+      if (head !== parent && published.startsWith(head + '\t')) throw Error('Export already reached release branch; refusing rollback');
+      await git(['reset', '--hard', parent], state.publicRepo);
       state.exportPending = false; delete state.publicCommit; await save();
     };
     const waitRuns = async () => {
@@ -105,8 +128,9 @@ export async function release(options, { execute, log = console.log, sleep = del
       for (let attempt = 0; attempt < 360; attempt++) {
         for (const workflow of pending) {
           const id = state.runs[workflow];
-          const result = JSON.parse(await gh(['run', 'view', String(id), '--json', 'headSha,status,conclusion,jobs,url'], `run-${id}`));
+          const result = JSON.parse(await gh(['run', 'view', String(id), '--json', 'headSha,headBranch,status,conclusion,jobs,url'], `run-${id}`));
           if (result.headSha !== state.publicCommit) throw Error(`Wrong commit for run ${id}`);
+          if (result.headBranch !== state.branch) throw Error(`Wrong branch for run ${id}`);
           if (result.status === 'completed' && result.conclusion === 'success') pending.delete(workflow);
           else if (result.status === 'completed' || attempt === 359) {
             const failed = result.jobs?.filter(job => job.conclusion !== 'success' && job.conclusion !== 'skipped').map(job => job.name).join(', ');
@@ -116,6 +140,13 @@ export async function release(options, { execute, log = console.log, sleep = del
         }
         if (!pending.size) return;
         await sleep(15000);
+      }
+    };
+    const cancelRuns = async () => {
+      for (const id of Object.values(state.runs)) {
+        const run = JSON.parse(await gh(['run', 'view', String(id), '--json', 'headSha,status']));
+        if (run.headSha !== state.publicCommit) throw Error('Cancellation commit mismatch');
+        if (run.status !== 'completed') await gh(['run', 'cancel', String(id)]);
       }
     };
     const actions = {
@@ -128,41 +159,97 @@ export async function release(options, { execute, log = console.log, sleep = del
         if (!registered.replaceAll('\\', '/').includes(`worktree ${state.worktree.replaceAll('\\', '/')}\n`)) throw Error('Not a registered worktree');
         if (await git(['branch', '--show-current'])) throw Error('Validation requires a detached worktree');
         await source();
-        for (const base of [state.worktree, path.join(state.worktree, 'app')]) {
-          const modules = path.join(base, 'node_modules');
-          if (await exists(modules) && (await lstat(modules)).isSymbolicLink()) throw Error(`Dependencies must be locally installed: ${modules}`);
-          await command(base === state.worktree ? 'prepare-root' : 'prepare-app', 'npm', ['ci'], base);
-        }
+      },
+      async preflight() {
         await source();
+        for (const file of ['package.json', 'package-lock.json', 'app/package.json', 'app/package-lock.json']) {
+          const manifest = await json(path.join(state.worktree, file));
+          if (manifest.version !== state.version || (file.endsWith('lock.json') && manifest.packages?.['']?.version !== state.version)) throw Error(`Version mismatch: ${file}`);
+        }
+        await checkReleaseNotes(state.worktree, state.version);
+        // Use this runner's scanner, including when validating an older source revision.
+        const scan = JSON.parse(await command('scan-public', process.execPath, [fileURLToPath(new URL('./export-public.mjs', import.meta.url)), '--scan-only']));
+        checkDesignFiles(scan.files);
+        await publicCheck(); await clean(state.publicRepo);
+        state.branch ??= `release/${state.version}`;
+        await git(['fetch', 'origin', '--tags'], state.publicRepo);
+        const tags = (await git(['tag', '--list', 'v*', '--sort=-version:refname', '--merged', 'main'], state.publicRepo)).split(/\r?\n/).filter(tag => /^v\d+\.\d+\.\d+$/.test(tag));
+        // A revalidation of an already released version still compares against its predecessor.
+        const versionTuple = value => value.replace(/^v/, '').split('.').map(Number);
+        const less = tag => { const a = versionTuple(tag), b = versionTuple(state.version); for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+        const baseline = tags.find(less);
+        if (!baseline) throw Error('Previous public version tag is required');
+        const parseTree = text => new Map(text.split('\0').filter(Boolean).map(row => { const match = row.match(/^\d+ \w+ ([a-f0-9]+)\t([\s\S]+)$/); if (!match) throw Error('Invalid tree entry'); return [match[2], row.slice(0, 6) + ':' + match[1]]; }));
+        const previous = parseTree(await git(['ls-tree', '-rz', baseline], state.publicRepo));
+        const current = parseTree(await git(['ls-tree', '-rz', state.commit]));
+        const exported = new Set(scan.files);
+        const files = [...new Set([...previous.keys(), ...exported])].filter(file => previous.get(file) !== (exported.has(file) ? current.get(file) : undefined)).sort();
+        const before = JSON.parse(await git(['show', `${baseline}:package.json`], state.publicRepo));
+        const after = await json(path.join(state.worktree, 'package.json'));
+        let dependencies = dependencyChange(before, after);
+        if (files.includes('package-lock.json')) {
+          const oldLock = JSON.parse(await git(['show', `${baseline}:package-lock.json`], state.publicRepo));
+          const newLock = await json(path.join(state.worktree, 'package-lock.json'));
+          const normalize = value => { delete value.version; if (value.packages?.['']) delete value.packages[''].version; return value; };
+          dependencies ||= JSON.stringify(normalize(oldLock)) !== JSON.stringify(normalize(newLock));
+        }
+        state.scope = { baseline, ...validationPlan(files, { dependencies }) };
+        state.plan = state.retryPlan ?? state.scope;
+        log(`Validation scope: ${JSON.stringify(state.scope)}; plan: ${JSON.stringify(state.plan)}`);
+        await writeFile(path.join(directory, 'logs', 'scope.log'), JSON.stringify({ scope: state.scope, plan: state.plan }, null, 2));
+        await save();
       },
       async verify() {
         await source();
-        if ((await lstat(path.join(state.worktree, 'app/node_modules'))).isSymbolicLink()) throw Error('app/node_modules cannot be linked');
+        if (!state.plan) throw Error('Preflight validation plan missing');
+        for (const base of [state.worktree, path.join(state.worktree, 'app')]) {
+          const modules = path.join(base, 'node_modules');
+          if (await exists(modules) && (await lstat(modules)).isSymbolicLink()) throw Error(`Dependencies must be locally installed: ${modules}`);
+        }
+        if (!state.installed) {
+          for (const base of [state.worktree, path.join(state.worktree, 'app')]) {
+            await command(base === state.worktree ? 'prepare-root' : 'prepare-app', 'npm', ['ci'], base);
+          }
+          state.installed = true; await save();
+        }
         state.verified ??= [];
+        for (const file of state.plan.tests ?? []) {
+          const label = `test:${file}`;
+          if (state.verified.includes(label) || !await exists(path.join(state.worktree, file))) continue;
+          await command('verify-changed-test', process.execPath, ['--import', './tests/test-home.mjs', '--test', file]);
+          state.verified.push(label); await save();
+        }
         for (const [label, file, args] of [
           ['verify-full', 'npm', ['run', 'test:full']], ['verify-app', 'npm', ['--prefix', 'app', 'test']],
           ['verify-package', 'npm', ['--prefix', 'app', 'run', 'dist']],
           ['verify-hosted', process.execPath, ['app/tools/verify-hosted.mjs']], ['verify-release', 'npm', ['run', 'release:check']],
         ]) {
+          if (label === 'verify-full' && !state.plan.renderer) continue;
+          if (['verify-app', 'verify-package', 'verify-hosted'].includes(label) && !state.plan.app) continue;
           if (state.verified.includes(label)) { log(`${label}: already passed for ${state.commit}`); continue; }
           state.verifying = label; await save();
           await command(label, file, args);
           state.verified.push(label); delete state.verifying; await save();
         }
         await source();
+        state.validatedCommit = state.commit; await save();
       },
       async export() {
         await source(); await publicCheck();
         if (state.exportPending) await rollback();
         await clean(state.publicRepo);
-        state.exportBase = await git(['rev-parse', 'HEAD'], state.publicRepo);
+        state.exportParent = await git(['rev-parse', 'HEAD'], state.publicRepo);
+        state.exportBase ??= state.exportParent;
+        if (state.previousCommit && state.publicCommit && state.exportParent !== state.publicCommit) throw Error('Public revision changed before retry');
         if (!(await git(['ls-remote', 'origin', 'refs/heads/main'], state.publicRepo)).startsWith(state.exportBase + '\t')) throw Error('Public main must start at remote main');
+        state.branch ??= `release/${state.version}`;
+        await git(['checkout', '-B', state.branch, state.exportParent], state.publicRepo);
         state.exportPending = true; await save();
         try {
-          await command('export-public', 'npm', ['run', 'export:public', '--', state.publicRepo, '--message', options.message ?? `Release ${state.version}`]);
+          await command('export-public', process.execPath, [fileURLToPath(new URL('./export-public.mjs', import.meta.url)), state.publicRepo, '--skip-tests', '--message', options.message ?? `Release ${state.version}`]);
           await clean(state.publicRepo); await boundary();
           state.publicCommit = await git(['rev-parse', 'HEAD'], state.publicRepo);
-          if (await git(['rev-parse', 'HEAD^'], state.publicRepo) !== state.exportBase) throw Error('Export must append exactly one commit');
+          if (await git(['rev-parse', 'HEAD^'], state.publicRepo) !== state.exportParent) throw Error('Export must append exactly one commit');
           // Clear the rollback marker atomically with the completed-step record below.
         } catch (error) {
           try { await rollback(); } catch (rollbackError) { throw Error(`${error.message}\nRollback stopped: ${rollbackError.message}`); }
@@ -172,18 +259,35 @@ export async function release(options, { execute, log = console.log, sleep = del
       async push() {
         await publicCheck(); await clean(state.publicRepo); await boundary();
         if (await git(['rev-parse', 'HEAD'], state.publicRepo) !== state.publicCommit) throw Error('Public commit changed');
-        await git(['push', 'origin', 'HEAD:refs/heads/main'], state.publicRepo);
-        if (!(await git(['ls-remote', 'origin', 'refs/heads/main'], state.publicRepo)).startsWith(state.publicCommit + '\t')) throw Error('Remote main differs');
+        await git(['push', 'origin', `HEAD:refs/heads/${state.branch}`], state.publicRepo);
+        if (!(await git(['ls-remote', 'origin', `refs/heads/${state.branch}`], state.publicRepo)).startsWith(state.publicCommit + '\t')) throw Error('Remote release branch differs');
+        if (state.cancelledRuns) {
+          await cancelRuns();
+          for (const id of Object.values(state.runs)) {
+            let ready = false;
+            for (let attempt = 0; attempt < 40; attempt++) {
+              const result = JSON.parse(await gh(['run', 'view', String(id), '--json', 'headSha,status,conclusion']));
+              if (result.headSha !== state.publicCommit) throw Error('Rerun commit mismatch');
+              if (result.status === 'completed') {
+                if (result.conclusion !== 'success') await gh(['run', 'rerun', String(id)]);
+                ready = true; break;
+              }
+              await sleep(3000);
+            }
+            if (!ready) throw Error('Cancellation still pending; resume later');
+          }
+          delete state.cancelledRuns; await save();
+        }
         if (!state.dispatchStarted) {
           state.dispatchStarted = new Date().toISOString(); await save();
-          const dispatched = await gh(['workflow', 'run', 'release.yml', '--ref', 'main'], 'dispatch-release');
+          const dispatched = await gh(['workflow', 'run', 'release.yml', '--ref', state.branch], 'dispatch-release');
           const id = dispatched.match(/https:\/\/github\.com\/LBEILC\/Multiplane\/actions\/runs\/(\d+)/)?.[1];
           if (id) { state.runs['release.yml'] = Number(id); await save(); }
         }
         for (const workflow of ['ci.yml', 'release.yml']) {
           if (state.runs[workflow]) continue;
           for (let attempt = 0; attempt < 40; attempt++) {
-            const runs = JSON.parse(await gh(['run', 'list', '--workflow', workflow, '--commit', state.publicCommit, '--branch', 'main', '--event', workflow === 'ci.yml' ? 'push' : 'workflow_dispatch', '--limit', '100', '--json', 'databaseId,headSha,createdAt']));
+            const runs = JSON.parse(await gh(['run', 'list', '--workflow', workflow, '--commit', state.publicCommit, '--branch', state.branch, '--event', workflow === 'ci.yml' ? 'push' : 'workflow_dispatch', '--limit', '100', '--json', 'databaseId,headSha,createdAt']));
             const matches = runs.filter(item => item.headSha === state.publicCommit && (workflow === 'ci.yml' || item.createdAt >= state.dispatchStarted.slice(0, 19) + 'Z'));
             if (matches.length === 1) { state.runs[workflow] = matches[0].databaseId; await save(); break; }
             if (matches.length > 1) throw Error(`Ambiguous ${workflow} runs; inspect saved state`);
@@ -191,7 +295,29 @@ export async function release(options, { execute, log = console.log, sleep = del
           }
           if (!state.runs[workflow]) throw Error(`No ${workflow} run found; inspect workflow dispatch before retrying`);
         }
-        await waitRuns();
+      },
+      async promote() {
+        if (!state.completed.includes('verify') || state.validatedCommit !== state.commit) throw Error('Local validation missing');
+        await waitRuns(); await source(); await publicCheck(); await clean(state.publicRepo);
+        const remote = await git(['ls-remote', 'origin', 'refs/heads/main'], state.publicRepo);
+        if (!remote.startsWith(state.exportBase + '\t') && !remote.startsWith(state.publicCommit + '\t')) throw Error('Remote main changed');
+        await git(['merge-base', '--is-ancestor', state.exportBase, state.publicCommit], state.publicRepo);
+        await git(['checkout', 'main'], state.publicRepo);
+        await git(['merge', '--ff-only', state.publicCommit], state.publicRepo);
+        if (await git(['rev-parse', 'HEAD'], state.publicRepo) !== state.publicCommit) throw Error('Promotion changed commit');
+        if (!remote.startsWith(state.publicCommit + '\t')) await git(['push', 'origin', `${state.publicCommit}:refs/heads/main`], state.publicRepo);
+        if (!(await git(['ls-remote', 'origin', 'refs/heads/main'], state.publicRepo)).startsWith(state.publicCommit + '\t')) throw Error('Promotion not confirmed');
+        state.promotedCommit = state.publicCommit; await save();
+        for (let attempt = 0; attempt < 40; attempt++) {
+          const runs = JSON.parse(await gh(['run', 'list', '--workflow', 'ci.yml', '--commit', state.publicCommit, '--branch', 'main', '--event', 'push', '--json', 'databaseId,status']));
+          if (runs.length) {
+            for (const item of runs) if (item.status !== 'completed') await gh(['run', 'cancel', String(item.databaseId)]);
+            state.duplicateRuns = runs.map(item => item.databaseId); await save(); break;
+          }
+          if (attempt === 39) throw Error('Duplicate main CI not found; resume promotion to cancel it');
+          await sleep(3000);
+        }
+        if (await git(['ls-remote', 'origin', `refs/heads/${state.branch}`], state.publicRepo)) await git(['push', 'origin', '--delete', state.branch], state.publicRepo);
       },
       async collect() {
         await waitRuns();
@@ -236,18 +362,61 @@ export async function release(options, { execute, log = console.log, sleep = del
         state.draftUrl = draft.html_url; log(draft.html_url);
       },
     };
-    const start = options.step ?? options.from ?? steps.find(step => !state.completed.includes(step));
+    if (options.commit && state.commit) {
+      const next = await git(['rev-parse', '--verify', `${options.commit}^{commit}`], root);
+      if (next !== state.commit) {
+        if (state.completed.includes('promote') || state.promotedCommit) throw Error('Cannot revise a promoted release');
+        await clean(state.worktree);
+        const files = (await git(['diff', '--no-renames', '--name-only', '-z', state.commit, next], root)).split('\0').filter(file => file && !excluded(file));
+        const dependencyFiles = ['package.json', 'package-lock.json'];
+        let dependencies = false;
+        for (const file of dependencyFiles.filter(file => files.includes(file))) {
+          const before = JSON.parse(await git(['show', `${state.commit}:${file}`], root));
+          const after = JSON.parse(await git(['show', `${next}:${file}`], root));
+          dependencies ||= file === 'package.json' ? dependencyChange(before, after) : JSON.stringify(before.packages) !== JSON.stringify(after.packages);
+        }
+        await cancelRuns();
+        const pending = state.plan;
+        const affected = validationPlan(files, { retry: true, dependencies });
+        state.retryPlan = { ...affected };
+        state.retryPlan.renderer ||= !!pending?.renderer && !(state.verified ?? []).includes('verify-full');
+        state.retryPlan.tests = [...new Set([...state.retryPlan.tests, ...(pending?.tests ?? []).filter(file => !(state.verified ?? []).includes(`test:${file}`))])];
+        state.retryPlan.app ||= !!pending?.app && !['verify-app', 'verify-package', 'verify-hosted'].every(label => (state.verified ?? []).includes(label));
+        state.verified = (state.verified ?? []).filter(label => label !== 'verify-release' && !label.startsWith('test:') && !(affected.renderer && label === 'verify-full') && !(affected.app && ['verify-app', 'verify-package', 'verify-hosted'].includes(label)));
+        if (dependencies || files.some(file => /^app\/package(?:-lock)?\.json$/.test(file))) state.installed = false;
+        await git(['checkout', '--detach', next]);
+        state.previousCommit = state.commit; state.commit = next;
+        state.completed = []; state.runs = {}; delete state.dispatchStarted; delete state.cancelledRuns; delete state.plan;
+        await save();
+      }
+    }
+    const activeSteps = localOnly ? ['prepare', 'preflight', 'verify'] : steps;
+    const start = options.step ?? options.from ?? activeSteps.find(step => !state.completed.includes(step));
     if (!start) return state;
     const end = options.step ?? options.to ?? 'draft';
-    if (!steps.includes(start) || !steps.includes(end) || steps.indexOf(end) < steps.indexOf(start)) throw Error('Invalid step range');
-    if (options.commit && state.commit && await git(['rev-parse', '--verify', `${options.commit}^{commit}`], root) !== state.commit) throw Error('Selected commit differs from saved state');
-    for (const step of steps.slice(steps.indexOf(start), steps.indexOf(end) + 1)) {
-      const index = steps.indexOf(step);
-      if (steps.slice(0, index).some(previous => !state.completed.includes(previous))) throw Error(`Prerequisite missing for ${step}`);
+    if (!activeSteps.includes(start) || !activeSteps.includes(end) || activeSteps.indexOf(end) < activeSteps.indexOf(start)) throw Error('Invalid step range');
+    for (const step of activeSteps.slice(activeSteps.indexOf(start), activeSteps.indexOf(end) + 1)) {
+      const index = activeSteps.indexOf(step);
+      if (activeSteps.slice(0, index).some(previous => !state.completed.includes(previous))) throw Error(`Prerequisite missing for ${step}`);
       if (state.completed.includes(step)) { log(`${step}: already completed`); continue; }
       state.current = step; state.status = 'running'; delete state.error; await save();
-      try { await actions[step](); if (step === 'export') state.exportPending = false; state.completed.push(step); state.status = 'passed'; await save(); }
-      catch (error) { state.status = 'failed'; state.error = error.message; await save(); throw error; }
+      try {
+        await actions[step]();
+        if (step === 'export') state.exportPending = false;
+        state.completed.push(step); state.status = 'passed'; await save();
+      } catch (error) {
+        state.status = 'failed'; state.error = error.message; await save();
+        if (['verify', 'push'].includes(step) && (!localOnly || Object.keys(state.runs).length)) {
+          state.completed = state.completed.filter(item => item !== 'push');
+          state.cancelledRuns = true; await save();
+          try {
+            await cancelRuns();
+          } catch (cancelError) {
+            state.error += `\nCancellation failed: ${cancelError.message}`; await save();
+          }
+        }
+        throw error;
+      }
     }
     return state;
   } finally { await lock.close(); await unlink(lockFile); }
@@ -257,7 +426,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const options = {}, keys = { version: 'version', commit: 'commit', worktree: 'worktree', 'public-repo': 'publicRepo', notes: 'notes', output: 'output', step: 'step', from: 'from', to: 'to', message: 'message' };
     const args = process.argv.slice(2);
-    if (args.includes('--help')) console.log('npm run release -- --version <version> [--commit main] [--step prepare|verify|export|push|collect|draft | --from <step> --to <step>] [--output <directory>] [--worktree <directory>] [--public-repo <directory>] [--notes <file>] [--message <public commit message>]\nDefault: resume the first unfinished step through draft. Use --to verify for local validation only.');
+    if (args.includes('--help')) console.log('npm run release -- --version <version> [--commit main] [--step prepare|preflight|export|push|verify|promote|collect|draft | --from <step> --to <step>] [--output <directory>] [--worktree <directory>] [--public-repo <directory>] [--notes <file>] [--message <public commit message>]\nDefault: resume the first unfinished step through draft. Use --to verify for local validation only.');
     else {
       for (let i = 0; i < args.length; i += 2) { const key = keys[args[i]?.slice(2)]; if (!args[i]?.startsWith('--') || !key || !args[i + 1] || args[i + 1].startsWith('--')) throw Error('Invalid argument; use --help'); options[key] = args[i + 1]; }
       if (options.step && (options.from || options.to)) throw Error('--step cannot be combined with --from/--to');

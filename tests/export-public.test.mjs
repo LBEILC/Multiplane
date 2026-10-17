@@ -203,3 +203,12 @@ test('incremental export supports file/directory transitions and preserves ignor
   assert.deepEqual(await readFile(path.join(f.output, '.git/index')), before);
   assert.equal(await readFile(path.join(f.output, 'build/local'), 'utf8'), 'keep');
 });
+
+test('scan-only validates boundaries without creating or changing a public repository', async t => {
+  const f = await fixture(t);
+  const result = await exportPublic(f.root, undefined, () => {}, { scanOnly: true });
+  assert.deepEqual(result.files, ['README.md', 'docs/protocol.md']);
+  assert.ok(!(await readdir(f.base)).includes('public'));
+  await f.file('app/design/new-draft.js', 'draft');
+  await assert.rejects(exportPublic(f.root, undefined, () => {}, { scanOnly: true }), /Forbidden design files/);
+});

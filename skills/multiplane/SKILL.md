@@ -211,7 +211,7 @@ With `--json`, stdout contains one JSON event per line. **The last line is alway
 
 ## Long renders
 
-Rendering may take a long time. Each run creates a job directory, `out/jobs/<jobId>/` (`jobId` appears in both the `start` event and the `result`). Read `status.json` for the latest progress snapshot and `events.jsonl` for the full event stream. To stop a job, run `multiplane cancel <jobId>` or create a file named `stop` in its job directory.
+Rendering may take a long time, often longer than the timeout of your shell or command tool. When the tool lets you, give `render` a timeout long enough for the whole render or run it in the background; if the command is cut off, the job's process usually dies with it, so do not start the same render again: check it with `multiplane status <jobId> --json` and continue it with `multiplane resume` (see below). Each run creates a job directory, `out/jobs/<jobId>/` (`jobId` appears in both the `start` event and the `result`). Read `status.json` for the latest progress snapshot and `events.jsonl` for the full event stream. To stop a job, run `multiplane cancel <jobId>` or create a file named `stop` in its job directory.
 
 If the user turned on hosting in the desktop app, the app runs the render and it keeps going after your session ends. Nothing changes in how you call the command; stderr says the job was handed over, and `status.json` may show `queued` while another hosted job runs. When a session resumes and you started a job earlier but never saw its `result`, run `multiplane wait <jobId> --json` to get its events and exit code instead of starting it again. Use `--no-hosted` only when the user asks for a render that should not go through the app.
 

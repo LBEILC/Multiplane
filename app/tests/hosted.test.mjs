@@ -29,11 +29,11 @@ test('liveness caches identity failures and only ESRCH establishes an exit', asy
 });
 
 test('executor uses the requesting renderer, detached with no inherited stdio or shell', async () => {
-  const r = { node: '/tools/node', bin: '/renderer/bin/multiplane', command: 'render', args: ['shot with spaces.html', '--workers', '1'], jobDir: '/jobs/one', cwd: '/project', env: { PATH: '/tools' } };
+  const r = { node: '/tools/node', bin: '/renderer/bin/multiplane', command: 'render', args: ['shot with spaces.html', '--workers', '1'], jobDir: createTempDirectory(), cwd: '/project', env: { PATH: '/tools' } };
   let unreferenced = false;
   const pid = await launchExecutor(r, (file, args, options) => {
     assert.equal(file, r.node); assert.deepEqual(args, [r.bin, 'render', ...r.args, '--job-dir-exact', r.jobDir, '--hosted-executor']);
-    assert.deepEqual(options, { cwd: r.cwd, env: r.env, detached: true, stdio: 'ignore', windowsHide: true, shell: false });
+    assert.deepEqual(options, { cwd: r.cwd, env: r.env, detached: true, stdio: ['ignore', 'ignore', options.stdio[2]], windowsHide: true, shell: false });
     const child = Object.assign(new EventEmitter(), { pid: 17, unref() { unreferenced = true; } });
     queueMicrotask(() => child.emit('spawn')); return child;
   });

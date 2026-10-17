@@ -1,5 +1,4 @@
-import { constants } from 'node:fs';
-import { copyFile, rm, writeFile, access, rename, mkdtemp, mkdir } from 'node:fs/promises';
+import { link, rm, writeFile, access, rename, mkdtemp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { MultiplaneError } from './errors.mjs';
 
@@ -16,11 +15,19 @@ export async function writeArtifact(file, bytes) {
   try { await writeFile(file, bytes, { flag: 'wx' }); }
   catch (error) { outputError(error, file); }
 }
-export async function publishVideo(temporary, file, overwrite = false) {
-  if (overwrite) { await rename(temporary, file); return; }
-  try { await copyFile(temporary, file, constants.COPYFILE_EXCL); }
-  catch (error) { outputError(error, file); }
-  await rm(temporary);
+export async function publishVideo(temporary, file, overwrite = false, { linkFile = link, move = rename, remove = rm } = {}) {
+  if (overwrite) { await move(temporary, file); return; }
+  try { await linkFile(temporary, file); }
+  catch (error) {
+    if (!['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM'].includes(error.code)) outputError(error, file);
+    // The temporary video is in the output directory, so rename publishes it whole.
+    // Accept the short race between checking the target and renaming.
+    await requireNewOutput(file);
+    try { await move(temporary, file); }
+    catch (moveError) { outputError(moveError, file); }
+    return;
+  }
+  await remove(temporary);
 }
 
 // Build a replacement directory in isolation; publish only after the whole command succeeds.

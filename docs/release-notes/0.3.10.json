@@ -1,0 +1,29 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.10",
+  "date": "2026-10-17",
+  "items": [
+    {
+      "kind": "fixed",
+      "area": "renderer",
+      "highlight": true,
+      "icon": "shield",
+      "title": { "zh-CN": "中断后不留半截视频", "en": "No partial video after an interruption" },
+      "detail": { "zh-CN": "写出视频时被打断，输出位置上不会再留下不完整的文件，接续也不会因此报“输出已存在”。", "en": "If a render is cut off while writing the video, no incomplete file is left at the output path, so resuming no longer fails with \"Output already exists\"." }
+    },
+    {
+      "kind": "improved",
+      "area": "app",
+      "highlight": true,
+      "icon": "terminal",
+      "title": { "zh-CN": "看得到进程退出的原因", "en": "See why a render process died" },
+      "detail": { "zh-CN": "软件启动的渲染意外退出时，作业详情显示它最后的错误输出；没有错误输出时，说明常见原因并提示开启托管。", "en": "When a render started by the app exits unexpectedly, the job details show its last error output; if there is none, they explain the usual cause and point to hosting." }
+    },
+    {
+      "kind": "improved",
+      "area": "skill",
+      "title": { "zh-CN": "agent 为长渲染留足时间", "en": "Agents plan for long renders" },
+      "detail": { "zh-CN": "agent 会给渲染留足命令超时或放到后台运行；命令被打断时接续原作业，不再从头重渲。", "en": "Agents give renders a long enough command timeout or run them in the background, and resume the job instead of starting over when the command is cut off." }
+    }
+  ]
+}

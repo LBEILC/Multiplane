@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdir, readFile, writeFile, rename, readdir, stat, unlink, appendFile, utimes, realpath } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, readdir, stat, unlink, appendFile, utimes, realpath, open } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { processIdentity, jobAlive } from './process-identity.mjs';
 const schema = 'multiplane/1';
@@ -41,11 +41,12 @@ export async function validRequest(r, id, { execPath = process.execPath } = {}) 
   return pkg?.name === 'multiplane' && s?.jobId === id && s.schema === schema
     && await stat(r.node).then(info => info.isFile(), () => false) && await stat(r.bin).then(info => info.isFile(), () => false);
 }
-export function launchExecutor(r, create = spawn) {
-  return new Promise((resolve, reject) => {
-    const child = create(r.node, [r.bin, r.command, ...r.args, '--job-dir-exact', r.jobDir, '--hosted-executor'], { cwd: r.cwd, env: r.env, detached: true, stdio: 'ignore', windowsHide: true, shell: false });
+export async function launchExecutor(r, create = spawn) {
+  const error = await open(path.join(r.jobDir, 'stderr.log'), 'a');
+  try { return await new Promise((resolve, reject) => {
+    const child = create(r.node, [r.bin, r.command, ...r.args, '--job-dir-exact', r.jobDir, '--hosted-executor'], { cwd: r.cwd, env: r.env, detached: true, stdio: ['ignore', 'ignore', error.fd], windowsHide: true, shell: false });
     child.once('error', reject); child.once('spawn', () => { child.unref(); resolve(child.pid); });
-  });
+  }); } finally { await error.close(); }
 }
 export class Hosted {
   enabled = false; closed = false; pending; timer; launching = new Map(); queueSignature = '';

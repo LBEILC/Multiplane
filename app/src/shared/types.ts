@@ -10,7 +10,7 @@ export interface Job {
   jobId: string; jobDir: string; command: string; shot: string; pid: number;
   state: State; phase: string; done: number; total: number | null; fps: number | null;
   etaMs: number | null; startedAt: string; updatedAt: string; result: Event | null;
-  previewFrame: number | null; previewVersion: string; events: Event[]; lost?: boolean; hosted?: boolean; queuePosition?: number; stuck?: boolean; forced?: boolean; temporaryDirectories?: string[];
+  previewFrame: number | null; previewVersion: string; events: Event[]; lost?: boolean; stderr?: string; hosted?: boolean; queuePosition?: number; stuck?: boolean; forced?: boolean; temporaryDirectories?: string[];
 }
 export interface Snapshot { ready?: boolean; hosted?: boolean; language?: string; languagePreference?: string; jobs: Job[]; runningCount: number; theme: 'dark' | 'light'; select?: string }
 export interface Bridge {

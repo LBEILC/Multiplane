@@ -5,6 +5,7 @@ import os from 'node:os';
 import { watch } from 'node:fs';
 import { readFile, open, stat, writeFile, mkdir, rename } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
+import { errorTail, recoverResumeLogs } from './diagnostics.mjs';
 import { jobData } from '../shared/job-data.mjs';
 
 export function homeDirectory(env = process.env, platform = process.platform, home = os.homedir()) {
@@ -97,6 +98,7 @@ export class JobStore extends EventEmitter {
         }
       } catch (e) { if (e.code !== 'ENOENT') this.emit('fault', e); }
     }
+    try { await recoverResumeLogs(this.home, records); } catch (error) { this.emit('fault', error); }
     const previous = new Map(this.jobs.map(j => [j.jobId, j]));
     const jobs = [];
     for (const [id, record] of records) {
@@ -130,8 +132,11 @@ export class JobStore extends EventEmitter {
         }
         if (job.state === 'running' && alive === false) {
           job.state = 'failed'; job.lost = true;
+          await recoverResumeLogs(this.home, new Map([[id, record]]), true);
+          job.stderr = await errorTail(path.join(job.jobDir, 'stderr.log'));
           job.result = { schema: s.schema, type: 'result', command: s.command, ts: s.updatedAt, ok: false, code: 'internal_error', message: copy.processLost, artifacts: events.filter(e => e.type === 'artifact').map(({ path, kind, bytes }) => ({ path, kind, bytes })), data: {}, elapsedMs: Math.max(0, Date.parse(s.updatedAt) - Date.parse(s.startedAt)) };
         }
+        if (['failed', 'cancelled', 'succeeded'].includes(job.state) && !job.lost && await this.alive(s.pid, s) === false) await recoverResumeLogs(this.home, new Map([[id, record]]), true);
         jobs.push(job);
       } catch (e) {
         this.emit('fault', Error(`Job ${id}: ${e.message}`));

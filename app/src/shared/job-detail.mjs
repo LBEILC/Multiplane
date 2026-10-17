@@ -5,7 +5,9 @@ export const phaseIcons = { launch: 'ri-window-line', load: 'ri-download-2-line'
 export const formatName = value => ({ mp4: 'MP4', webm: 'WebM', mov: 'MOV' }[value] ?? value?.toUpperCase());
 export const encoderName = value => ({ x264: 'H.264', 'nvenc-h264': 'H.264 (NVENC)', 'nvenc-hevc': 'HEVC (NVENC)', vp9: 'VP9', prores: 'ProRes' }[value] ?? value);
 export function failureCopy(job) {
-  if (job.lost) return ['lostT', 'lostH'];
+  if (job.lost) return ['lostT', job.stderr
+    ? (job.command === 'render' ? 'lostOutputH' : 'lostOutputHNoResume')
+    : (job.command === 'render' ? 'lostH' : 'lostHNoResume')];
   if (job.result?.code === 'render_threw') return ['failT', 'failH'];
   if (job.result?.code === 'nondeterministic_output') return ['verifyT', 'verifyH'];
   if (job.state === 'cancelled') return ['cancelT', 'cancelH'];

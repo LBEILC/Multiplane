@@ -138,7 +138,7 @@ function renderDetail() {
   const tabs = ['preview', 'summary', 'timeline', 'options'].map(id => `<button role="tab" data-tab="${id}" aria-selected="${id === tab}">${t(id)}</button>`).join('');
   if ($('.tabs').innerHTML !== tabs) $('.tabs').innerHTML = tabs;
   // Preserve the video element during background refreshes and elapsed-time ticks.
-  const key = JSON.stringify([selected, tab, j.state, tab === 'preview' ? (j.command === 'render' ? (j.state==='succeeded'?'video':j.previewFrame!=null) : j.events) : j.events]);
+  const key = JSON.stringify([selected, tab, j.state, j.command, j.lost, tab === 'summary' ? j.stderr : null, tab === 'preview' ? (j.command === 'render' ? (j.state==='succeeded'?'video':j.previewFrame!=null) : j.events) : j.events]);
   if(tab==='preview'&&j.command==='render'&&j.previewFrame!=null){const img=$('#tab-content').querySelector<HTMLImageElement>('img.preview');if(img){const src=media(j,j.jobDir+'/preview.png',j.previewVersion);if(img.src!==src)img.src=src;setRoll('preview-'+j.jobId,j.previewFrame);const time=$('#tab-content').querySelector('[data-preview-time]');if(time)time.textContent=tc(j.previewFrame/(j.events.find(e=>e.type==='shot')?.fps??30));}}
   if (key !== contentKey) {
     contentKey = key;

@@ -39,13 +39,14 @@ function localLinks(source) {
     ...[...text.matchAll(/\b(?:href|src)=["']([^"']+)["']/gi)].map(m => m[1])
   ].filter(link => !/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(link));
 }
-export async function exportPublic(root, output, log = console.log, { message } = {}) {
-  if (!output) throw Error('Usage: npm run export:public -- <output-directory>');
-  ({ root, output } = await resolveExportPaths(root, output));
+export async function exportPublic(root, output, log = console.log, { message, scanOnly = false } = {}) {
+  if (!output && !scanOnly) throw Error('Usage: npm run export:public -- <output-directory>');
+  if (scanOnly) root = await nativeRealpath(path.resolve(root));
+  if (!scanOnly) ({ root, output } = await resolveExportPaths(root, output));
   let incremental = false, previous = [];
   try {
-    if (!(await lstat(output)).isDirectory()) throw Error('Output directory must be empty or a marked public repository');
-    if ((await readdir(output)).length) {
+    if (!scanOnly && !(await lstat(output)).isDirectory()) throw Error('Output directory must be empty or a marked public repository');
+    if (!scanOnly && (await readdir(output)).length) {
       await noLinks(path.join(output, '.git'), output);
       if (!(await lstat(path.join(output, '.git')).catch(() => null))?.isDirectory()) throw Error('Output directory must be empty or a marked public repository');
       let marker;
@@ -97,6 +98,9 @@ export async function exportPublic(root, output, log = console.log, { message } 
     if (!files.includes(target) && !files.some(file => file.startsWith(target + '/'))) links.push(`${entry.name}: ${link}`);
   }
   if (links.length) throw Error(`Links outside the export set:\n${links.join('\n')}`);
+  const forbiddenDesign = files.filter(name => name.startsWith('app/design/') && name !== 'app/design/tokens.css' && !name.startsWith('app/design/icons/'));
+  if (forbiddenDesign.length) throw Error(`Forbidden design files: ${forbiddenDesign.join(', ')}`);
+  if (scanOnly) { const summary = { files, scan: 'passed', links: 'passed' }; log(JSON.stringify(summary)); return summary; }
   const destination = name => {
     const target = path.resolve(output, name), relative = path.relative(output, target);
     if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative) || relative.split(path.sep)[0] === '.git') throw Error('Unsafe destination path');
@@ -174,10 +178,18 @@ export async function validatePublicExport(output, npmCommand = npm) {
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    if (![3, 5].includes(process.argv.length) || (process.argv.length === 5 && (process.argv[3] !== '--message' || !process.argv[4].trim()))) throw Error('Usage: npm run export:public -- <output-directory> [--message <commit-message>]');
-    const output = path.resolve(process.argv[2]);
-    await exportPublic(process.cwd(), output, console.log, { message: process.argv[4] });
-    await validatePublicExport(output);
-    console.log('Public export: npm ci and npm test (daily suite) passed.');
+    const args = process.argv.slice(2), scanOnly = args.includes('--scan-only'), skipTests = args.includes('--skip-tests');
+    const positional = args.filter(arg => !['--scan-only', '--skip-tests'].includes(arg));
+    let output, message;
+    if (positional.length) output = path.resolve(positional.shift());
+    if (positional.length) {
+      if (positional.length !== 2 || positional[0] !== '--message' || !positional[1].trim()) throw Error('Invalid export arguments');
+      message = positional[1];
+    }
+    await exportPublic(process.cwd(), output, console.log, { message, scanOnly });
+    if (!scanOnly && !skipTests) {
+      await validatePublicExport(output);
+      console.log('Public export: npm ci and npm test (daily suite) passed.');
+    }
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

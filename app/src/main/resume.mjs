@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { bundledCommand, bundledInvocation } from './settings.mjs';
 import { EventTail } from './store.mjs';
+import { retainResumeLog, resumeRecords } from './diagnostics.mjs';
 
 // File-backed stdio keeps both the standalone render and hosted waiter alive on app exit.
 export async function launchResume(root, home, id, onEvent, { execPath = process.execPath, env = process.env, create = spawn } = {}) {
@@ -19,11 +20,13 @@ export async function launchResume(root, home, id, onEvent, { execPath = process
     child.unref();
   } finally { await output.close(); await error.close(); }
   const tail = new EventTail(); let count = 0, reading = Promise.resolve();
-  const read = () => reading = reading.then(async () => { for (const event of (await tail.read(path.join(directory, 'stdout.jsonl'))).slice(count)) { count++; onEvent(event); } });
+  const read = () => reading = reading.catch(() => {}).then(async () => { for (const event of (await tail.read(path.join(directory, 'stdout.jsonl'))).slice(count)) { count++; onEvent(event); }
+    await retainResumeLog(directory, await resumeRecords(home)); });
   const timer = setInterval(() => { read().catch(() => {}); }, 100); timer.unref();
   const code = await exited;
   clearInterval(timer);
-  await read(); await rm(directory, { recursive: true, force: true });
+  await read();
+  if (await retainResumeLog(directory, await resumeRecords(home), true)) await rm(directory, { recursive: true, force: true });
   return code;
 }
 

@@ -116,6 +116,7 @@ lint 规则码（`finding.code`）：`wall_clock`、`unseeded_random`、`css_ani
 - 目录内容：
   - `events.jsonl`：与 `--json` 的 stdout **完全相同**的事件流（不管开没开 `--json` 都写）。
   - `status.json`：最新快照，原子写入（写临时文件再改名）：`{schema, jobId, command, shot, pid, state, phase, done, total, fps, etaMs, previewFrame, memoryBytes, startedAt, updatedAt, result}`；`state` 为 `queued` / `running` / `succeeded` / `failed` / `cancelled`。`queued` 只用于在软件队列里等待的托管作业（第 11 节）：排队期间由软件写快照，`pid` 是软件的进程，并加字段 `queuePosition`（从 1 起，1 表示下一个执行）。读取方遇到不认识的状态按“进行中”显示。`result` 结束时等于 `result` 事件的内容，运行中为 `null`。
+  - `stderr.log`：由桌面软件启动的渲染进程（托管执行者、在软件里发起的接续）的标准错误输出，进程结束后保留。agent 直接运行命令时没有这个文件。
   - 停止请求：在目录里创建 `stop` 文件。渲染器检测到后清理并以 `cancelled` 结束。
   - `segments/`（仅 `render`）：编好的分段及其记录，见第 6.1 节；渲染成功后删除。续传作业没有自己的 `segments/`，而是有 `resume.json`（`{ directory }`），指向它接着写的那个 `segments/` 目录。
 - `multiplane status <jobId|jobDir> [--json]`：读 `status.json`；进程已不在而 `state` 仍是 `running` 时报告为 `failed` / `internal_error`（不改文件）。`status` 本身的 `ok` 只表示读到了快照，原作业的成败看 `data.state` 和 `data.result`。
