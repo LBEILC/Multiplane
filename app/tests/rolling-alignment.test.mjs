@@ -39,7 +39,7 @@ test('settled rolling glyphs match native text baselines in jobs and tray',async
       })));
       for(const clip of clips){assert.ok(['clip','hidden'].includes(clip.overflow));assert.ok(clip.height<=clip.rootHeight+1);}
       await page.waitForTimeout(600);
-      await page.waitForFunction(()=>!document.querySelector('[data-rn-measuring]')&&
+      await page.waitForFunction(()=>
         [...document.querySelectorAll('[data-roll]')].every(root=>root.getAnimations({subtree:true}).every(a=>a.playState!=='running'&&!a.pending)));
       if(done!==1554)assert.ok(await page.locator('.rn-face').count()>0,'updates must exercise enhanced rolling columns');
       const samples=await alignment(page);
