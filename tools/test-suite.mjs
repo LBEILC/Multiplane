@@ -6,7 +6,14 @@ import { spawn } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 // Each renderer test may itself launch two Chromium workers plus FFmpeg.
-export const concurrency = cores => Math.max(1, Math.min(8, Math.floor(cores / 4)));
+export function concurrency(cores, requested) {
+  const limit = Math.max(1, Math.min(8, Math.floor(cores / 4)));
+  if (requested === undefined) return limit;
+  if (!/^[1-9][0-9]*$/.test(String(requested)) || !Number.isSafeInteger(Number(requested))) {
+    throw Error('MULTIPLANE_TEST_CONCURRENCY must be a positive integer');
+  }
+  return Math.min(limit, Number(requested));
+}
 // Real deadline/process-liveness checks must run without renderer load.
 export const serialFiles = ['ci-run.test.mjs', 'owned-process.test.mjs', 'resources.test.mjs', 'hosted.test.mjs'];
 
@@ -33,7 +40,7 @@ export async function runSuite({ full = false, logDirectory } = {}) {
   const directory = logDirectory ? path.resolve(logDirectory) : await mkdtemp(path.join(root, 'out/tests/', full ? 'full-' : 'daily-'));
   await mkdir(directory, { recursive: true });
   const results = [];
-  const workers = concurrency(availableParallelism());
+  const workers = concurrency(availableParallelism(), process.env.MULTIPLANE_TEST_CONCURRENCY);
   console.log(`Renderer ${full ? 'full' : 'daily'} suite: ${files.length} files, concurrency ${workers}; logs: ${path.relative(root, directory)}`);
   async function execute(file) {
     const start = performance.now(), stem = file.replace('.test.mjs', '');

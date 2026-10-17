@@ -23,11 +23,14 @@ test('settled rolling glyphs match native text baselines in jobs and tray',async
   const image=await sharp({create:{width:32,height:18,channels:3,background:'#ccc'}}).png().toBuffer();
   for(const tray of [false,true])for(const language of ['zh-CN','en']) {
     const page=await browser.newPage();
+    const now=Date.UTC(2026,9,17,12);
+    // Keep elapsed labels stable while real animation timers continue to run.
+    await page.clock.setFixedTime(now);
     const {jobs,errors}=await mountJobs(page,{tray,language,media:async()=>({body:image,contentType:'image/png'})});
     // First update enhances the native value; subsequent updates actually roll existing columns.
     for(const [done,left] of [[1554,564000],[1555,563000],[999,599000],[1000,600000]]) {
       jobs[0].done=done;jobs[0].total=2000;jobs[0].fps=done/100;jobs[0].etaMs=left;
-      jobs[0].startedAt=new Date(Date.now()-44000).toISOString();jobs[0].previewFrame=done-1;
+      jobs[0].startedAt=new Date(now-44000).toISOString();jobs[0].previewFrame=done-1;
       await page.evaluate(jobs=>window.publish({jobs}),jobs);
       await page.waitForTimeout(100);
       const clips=await page.locator('.rn-slot[data-rn-wheel]').evaluateAll(slots=>slots.map(slot=>({
@@ -36,6 +39,8 @@ test('settled rolling glyphs match native text baselines in jobs and tray',async
       })));
       for(const clip of clips){assert.ok(['clip','hidden'].includes(clip.overflow));assert.ok(clip.height<=clip.rootHeight+1);}
       await page.waitForTimeout(600);
+      await page.waitForFunction(()=>!document.querySelector('[data-rn-measuring]')&&
+        [...document.querySelectorAll('[data-roll]')].every(root=>root.getAnimations({subtree:true}).every(a=>a.playState!=='running'&&!a.pending)));
       if(done!==1554)assert.ok(await page.locator('.rn-face').count()>0,'updates must exercise enhanced rolling columns');
       const samples=await alignment(page);
       assert.ok(samples.length>=3);

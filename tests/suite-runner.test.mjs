@@ -39,3 +39,20 @@ test('ordinary', () => {}); fullTest('extended', () => {});`);
     assert.match(result.stdout, suite === 'daily' ? /# skipped 1/ : /# skipped 0/);
   }
 });
+
+test('a local concurrency cap reduces load without exceeding the machine limit', async () => {
+  assert.equal(concurrency(32, '2'), 2);
+  assert.equal(concurrency(8, '8'), 2);
+  for (const invalid of ['', '0', '-1', '1.5', 'two', 'Infinity']) {
+    assert.throws(() => concurrency(32, invalid), /positive integer/);
+  }
+  const files = ['a.test.mjs', 'b.test.mjs', 'c.test.mjs', ...serialFiles];
+  const seen = []; let active = 0, peak = 0;
+  await schedule(files, concurrency(32, '1'), async file => {
+    active++; peak = Math.max(peak, active); seen.push(file);
+    await new Promise(resolve => setImmediate(resolve));
+    active--;
+  });
+  assert.equal(peak, 1);
+  assert.deepEqual([...seen].sort(), [...files].sort());
+});
