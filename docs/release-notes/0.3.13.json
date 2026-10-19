@@ -1,0 +1,22 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.13",
+  "date": "2026-10-19",
+  "items": [
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "icon": "terminal",
+      "title": { "zh-CN": "复制的命令保留编码器和光栅化设置", "en": "Copied commands keep encoder and raster settings" },
+      "detail": { "zh-CN": "复制作业命令时，编码器和光栅化方式总会写进命令，即使用的是默认值；保存了其他偏好时，重跑复制的命令不会悄悄改用偏好里的设置。感谢 @fisHarly0 的报告和修复。", "en": "Copied job commands now always include the encoder and raster mode, even when they are the defaults, so replaying a command no longer silently switches to different saved preferences. Thanks to @fisHarly0 for the report and fix." }
+    },
+    {
+      "kind": "fixed",
+      "area": "renderer",
+      "highlight": true,
+      "title": { "zh-CN": "相对路径的 --root 不再把项目拆开", "en": "A relative --root no longer splits a project" },
+      "detail": { "zh-CN": "用相对路径传 --root 时，作业记录里保存解析后的绝对路径；放在不同子目录里的镜头在作业页归到同一个项目。感谢 @fisHarly0 的报告和修复。", "en": "When --root is given as a relative path, job records now store the resolved absolute path, so shots in different subdirectories are grouped under the same project in the Jobs page. Thanks to @fisHarly0 for the report and fix." }
+    }
+  ]
+}
