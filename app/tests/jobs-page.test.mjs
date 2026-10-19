@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import vm from 'node:vm';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
@@ -10,6 +11,8 @@ import { fixtureJobs, mountJobs } from './jobs-fixture.mjs';
 import { phaseTimes, mergedEvents, projectPath, commandArgs, commandText, quoteArgument, gpuName, ffmpegVersion, warnings, optionGroups } from '../src/shared/job-detail.mjs';
 import en from '../src/shared/copy/jobs-en.mjs';
 import zh from '../src/shared/copy/jobs-zh-CN.mjs';
+import { loadUserConfig } from '../../src/user-home.mjs';
+import { createTempDirectory } from '../../tests/helpers.mjs';
 
 test('events.jsonl projection retains first phase timestamps, latest progress, finding and terminal outcomes',async()=>{
   const events=(await readFile(new URL('fixtures/job-events.jsonl',import.meta.url),'utf8')).trim().split('\n').map(JSON.parse);
@@ -44,6 +47,17 @@ test('copied argv is accepted by the CLI parser, excludes internals and preserve
   assert.equal(quoteArgument("/a/b's $test.html",'win32'),"'/a/b''s $test.html'");
   assert.equal(quoteArgument("/a/b's $test.html",'linux'),"'/a/b'\"'\"'s $test.html'");
   for(const command of ['stills','verify']) {const j={...job,command,events:[{type:'start',options:{root:'/examples',format:'png',at:'0,.5',out:'/examples/stills','no-hosted':true}}]};assert.equal(parse(commandArgs(j)).at,'0,.5');}
+
+  // Built-in defaults still need to override saved preferences when replayed.
+  const home=createTempDirectory('multiplane-command-copy-');
+  await writeFile(path.join(home,'config.json'),JSON.stringify({schema:'multiplane/1',encoder:'nvenc-h264',raster:'software'}));
+  const env={MULTIPLANE_HOME:home};
+  for(const command of ['render','stills','verify']) {
+    const explicit=command==='render'?{encoder:'x264',raster:'gpu'}:{raster:'gpu'};
+    const original=loadUserConfig(command,explicit,env).options;
+    const copied={...job,command,events:[{type:'start',options:original}]};
+    assert.deepEqual(loadUserConfig(command,parse(commandArgs(copied)),env).options,original,command);
+  }
 });
 
 test('live jobs retain rollers, update values, navigate media, and disable motion with the OS preference',async ctx=>{

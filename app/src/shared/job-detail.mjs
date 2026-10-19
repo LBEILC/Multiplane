@@ -70,7 +70,8 @@ export const optionGroups = {
   paths: ['root', 'job-dir', 'ffmpeg'],
 };
 export const publicOptions = options => Object.entries(options ?? {}).filter(([key]) => Object.values(optionGroups).flat().includes(key));
-const defaults = { raster: 'gpu', scale: 1, upscale: 'lanczos', 'adaptive-blur': .5, 'no-post': false, 'no-lint': false, overwrite: false, from: 0, quality: 'standard', draft: false, 'no-hosted': false, 'no-static-reuse': false, 'static-reuse': false };
+// Keep encoder and raster explicit: saved preferences can override their built-in defaults.
+const defaults = { scale: 1, upscale: 'lanczos', 'adaptive-blur': .5, 'no-post': false, 'no-lint': false, overwrite: false, from: 0, quality: 'standard', draft: false, 'no-hosted': false, 'no-static-reuse': false, 'static-reuse': false };
 export function commandArgs(job) {
   const options = job.events.find(e => e.type === 'start')?.options ?? {};
   const args = [job.command, job.shot];
@@ -78,7 +79,6 @@ export function commandArgs(job) {
     if (value == null || value === false || String(value) === String(defaults[key])) continue;
     const extension = String(options.out ?? '').split('.').at(-1)?.toLowerCase();
     if (key === 'format' && (job.command !== 'render' || value === (['mp4','webm','mov'].includes(extension) ? extension : 'mp4'))) continue;
-    if (key === 'encoder' && value === 'x264') continue;
     if (key === 'render-scale' && Number(value) === Number(options.scale ?? 1)) continue;
     if (key === 'every' && job.command === 'stills' && Number(value) === 1 && options.at == null) continue;
     args.push(`--${key}`);
