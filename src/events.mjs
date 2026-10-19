@@ -153,7 +153,9 @@ export async function runCommand(command, shot, options, action, job = true) {
     if (job || ['lint', 'inspect'].includes(command)) {
       if (typeof shot !== 'string' || !shot.trim()) throw invalidOption('shot', 'Provide a shot HTML path.');
       if (options.root !== undefined && typeof options.root !== 'string') throw invalidOption('--root', '--root must be a path.');
-      shot = path.resolve(options.root ?? process.cwd(), shot);
+      // Persist the cwd-relative root before desktop consumers lose the original cwd.
+      options.root = path.resolve(options.root ?? process.cwd());
+      shot = path.resolve(options.root, shot);
     }
     const positive = ['scale', 'render-scale', 'fps', 'workers', 'motion-blur', 'max-motion-blur', 'every', 'max-bitrate'];
     for (const key of [...positive, 'from', 'to', 'shutter', 'grain', 'adaptive-blur', 'audio-offset', 'wait']) {
