@@ -1,0 +1,14 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.12",
+  "date": "2026-10-19",
+  "items": [
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "title": { "zh-CN": "托盘弹窗出现在图标旁边", "en": "Tray popup opens next to the icon" },
+      "detail": { "zh-CN": "托盘图标收在“隐藏的图标”里时，右键弹窗出现在图标旁边，不再贴着任务栏弹出。", "en": "When the tray icon is tucked into the hidden icons flyout, the popup now opens next to the icon instead of against the taskbar." }
+    }
+  ]
+}

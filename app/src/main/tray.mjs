@@ -20,13 +20,22 @@ export function trayPosition(icon, cursor, display, size) {
     ['bottom', b.y + b.height - w.y - w.height, Math.abs(anchor.y - w.y - w.height)],
   ];
   const reserved = edges.filter(e => e[1] > 0);
-  const edge = (reserved.length ? reserved : edges).sort((a,b) => a[2]-b[2])[0][0];
+  let edge = (reserved.length ? reserved : edges).sort((a,b) => a[2]-b[2])[0][0];
   const width = Math.min(size.width, w.width), height = Math.min(size.height, w.height);
   let x = anchor.x - width / 2, y = anchor.y - height / 2;
-  if (edge === 'bottom') y = w.y + w.height - height - 8;
-  if (edge === 'top') y = w.y + 8;
-  if (edge === 'left') x = w.x + 8;
-  if (edge === 'right') x = w.x + w.width - width - 8;
+  if (anchor.x >= w.x && anchor.x < w.x + w.width && anchor.y >= w.y && anchor.y < w.y + w.height) {
+    const top = valid ? icon.y : cursor.y;
+    const bottom = valid ? icon.y + icon.height : cursor.y + 1;
+    const above = top - height - 8, below = bottom + 8;
+    const useBelow = above < w.y && below + height <= w.y + w.height;
+    edge = useBelow ? 'top' : 'bottom';
+    y = useBelow ? below : above;
+  } else {
+    if (edge === 'bottom') y = w.y + w.height - height - 8;
+    if (edge === 'top') y = w.y + 8;
+    if (edge === 'left') x = w.x + 8;
+    if (edge === 'right') x = w.x + w.width - width - 8;
+  }
   return { edge, x: Math.round(Math.max(w.x, Math.min(x, w.x+w.width-width))), y: Math.round(Math.max(w.y, Math.min(y,w.y+w.height-height))), width, height };
 }
 export const trayProgress = jobs => {
