@@ -24,7 +24,9 @@ test('rolling updates retain the latest value without interrupting animations',a
   async function mount(reduced=false){
     const page=await browser.newPage();
     await page.emulateMedia({reducedMotion:reduced?'reduce':'no-preference'});
-    await page.clock.install();
+    // Freeze between protocol calls so slow CI hosts cannot advance the throttle window.
+    await page.clock.install({time:new Date('2026-01-01T00:00:00Z')});
+    await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'));
     await page.setContent('<span data-roll="number" data-value="0" data-numeric="true" data-digits="0">0</span><span data-roll="text" data-value="start">start</span>');
     await page.evaluate(()=>{window.calls=[];window.durations=[];window.destroyed=0;window.finished=0;});
     await page.addScriptTag({content:bundle.outputFiles[0].text});
