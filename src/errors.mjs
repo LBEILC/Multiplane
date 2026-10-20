@@ -13,6 +13,7 @@ export const errorCodes = Object.freeze(Object.fromEntries([
   [3, 'wait_timeout', 'Timed out waiting for job completion.'],
   [2, 'job_not_found', 'Job status was not found or is invalid.'],
   [3, 'config_invalid', 'User configuration is not a JSON object.'],
+  [3, 'config_locked', 'User configuration is being changed by another process.'],
   [3, 'skill_modified', 'The installed skill has local modifications.'],
   [3, 'skill_blocked', 'The skill directory cannot be safely changed.'],
   [3, 'skill_changed', 'The installed skill changed since inspection.'],

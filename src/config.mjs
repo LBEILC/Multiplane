@@ -1,10 +1,11 @@
 import path from 'node:path';
 import { migrateUserHome } from './home-migration.mjs';
-import * as fs from 'node:fs/promises';
+import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { userHome } from './platform.mjs';
 import { MultiplaneError, invalidOption } from './errors.mjs';
 import { ffmpegOutput } from './ffmpeg.mjs';
+import { lockConfiguration } from './config-lock.mjs';
 
 export const configKeys = ['ffmpeg', 'raster', 'encoder', 'workers', 'jobsDir', 'hosted'];
 export async function probeFfmpeg(file) {
@@ -56,15 +57,7 @@ export class Configuration {
     }
     this.prepare();
     await fs.mkdir(path.dirname(this.file), { recursive: true });
-    const lock = this.file + '.lock', deadline = performance.now() + 10000;
-    let handle;
-    while (!handle) {
-      try { handle = await fs.open(lock, 'wx'); }
-      catch (error) {
-        if (error.code !== 'EEXIST' || performance.now() >= deadline) throw error;
-        await new Promise(resolve => setTimeout(resolve, 25));
-      }
-    }
+    const unlock = await lockConfiguration(this.file);
     const temporary = this.file + '.' + randomUUID() + '.tmp';
     let result;
     try {
@@ -72,7 +65,7 @@ export class Configuration {
       await fs.writeFile(temporary, JSON.stringify({ ...values, schema: 'multiplane/1', [key]: value }, null, 2) + '\n', { flag: 'wx' });
       await fs.rename(temporary, this.file);
       result = { ...await this.read(undefined, true), changed: key };
-    } finally { await fs.unlink(temporary).catch(() => {}); await handle.close(); await fs.unlink(lock); }
+    } finally { await fs.unlink(temporary).catch(() => {}); await unlock(); }
     if (key === 'ffmpeg' && value !== null) result.check = await probeFfmpeg(value);
     return result;
   }
