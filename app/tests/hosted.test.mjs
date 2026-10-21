@@ -220,3 +220,140 @@ test('resume requests pass the whitelist and are claimed and executed', async t 
   });
   assert.equal(await validRequest({...r,command:'config'},r.jobId),false);
 });
+
+test('failed real spawn ends the queued job and allows the next request to run', async t => {
+  const f = await fixture(t), attempts = [], errors = [];
+  const broken = await f.request('broken', 'claimed', 2000);
+  broken.cwd = path.join(f.home, 'missing-working-directory');
+  const marker = path.join(f.home, 'hosted/broken.claimed.json');
+  await atomic(marker, broken);
+  const old = new Date(Date.now() - 2000); await utimes(marker, old, old);
+  await f.request('healthy', 'claimed', 1000);
+  f.hosted.report = error => errors.push(error);
+  f.hosted.launch = async r => {
+    attempts.push(r.jobId);
+    return r.jobId === 'broken' ? launchExecutor(r) : f.options.launch(r);
+  };
+  await f.hosted.start(); clearInterval(f.hosted.timer);
+  await f.hosted.tick(); await f.hosted.tick();
+  assert.deepEqual(attempts, ['broken', 'healthy']);
+  const failed = await f.status('broken');
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.result.code, 'internal_error');
+  assert.equal(failed.result.details.reason, 'hosted_launch_failed');
+  assert.deepEqual((await json(path.join(f.home, 'hosted/broken.failed.json'))).launchResult, failed.result);
+  assert.equal('queuePosition' in failed, false);
+  assert.equal(errors.length, 1); assert.equal(errors[0].code, 'ENOENT');
+  const events = (await readFile(path.join(broken.jobDir, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(events.filter(event => event.type === 'result').length, 1);
+  assert.deepEqual(events.at(-1), failed.result);
+  const { followJob } = await import('../../src/hosted.mjs');
+  assert.deepEqual(await followJob(broken.jobDir, { timeout: 0, interval: 1 }), failed.result);
+  const { run } = await import('../../tests/helpers.mjs');
+  const waited = await run(process.execPath, [path.resolve(import.meta.dirname, '../../bin/multiplane'), 'wait', broken.jobDir, '--json']);
+  assert.equal(waited.code, 4, waited.stdout + waited.stderr);
+  assert.deepEqual(JSON.parse(waited.stdout.trim()), failed.result);
+  await writeFile(path.join(f.home, 'jobs.jsonl'), JSON.stringify({ schema, jobId: broken.jobId, jobDir: broken.jobDir }) + '\n');
+  const store = new JobStore(f.home, { alive: async () => true }); t.after(() => store.close());
+  await store.refresh();
+  assert.equal(store.job('broken').hosted, true);
+  assert.equal(store.job('broken').state, 'failed');
+  assert.deepEqual(store.job('broken').result, failed.result);
+  await f.hosted.close();
+  const next = new Hosted(f.home, '0.3.0', { ...f.options, launch: async () => assert.fail('Failed work must not relaunch') });
+  t.after(() => next.close()); await next.start(); clearInterval(next.timer);
+});
+
+test('log cleanup cannot reject a successful spawn or hide the original launch error', async () => {
+  const request = { node: '/node', bin: '/bin/multiplane', command: 'render', args: [], jobDir: '/jobs/one', cwd: '/project', env: {} };
+  const cleanupError = Error('close failed'), reported = [];
+  const io = { openLog: async () => ({ fd: 7, close: async () => { throw cleanupError; } }), onCleanupError: error => reported.push(error) };
+  const child = () => {
+    const value = Object.assign(new EventEmitter(), { pid: 17, unref() {} });
+    queueMicrotask(() => value.emit('spawn')); return value;
+  };
+  assert.equal(await launchExecutor(request, child, io), 17);
+  assert.deepEqual(reported, [cleanupError]);
+  const launchError = Object.assign(Error('spawn denied'), { code: 'EACCES' });
+  await assert.rejects(launchExecutor(request, () => { throw launchError; }, io), error => error === launchError);
+  assert.deepEqual(reported, [cleanupError, cleanupError]);
+  assert.equal(await launchExecutor(request, child, { ...io, onCleanupError() { throw Error('report failed'); } }), 17);
+  await assert.rejects(launchExecutor(request, () => assert.fail('Must not spawn after open failure'), {
+    openLog: async () => { throw launchError; },
+  }), error => error === launchError);
+});
+
+for (const state of ['queued', 'running']) test(`launch failure does not replace an executor-owned ${state} status`, async t => {
+  const f = await fixture(t), r = await f.request('claimed');
+  f.hosted.report = () => {};
+  f.hosted.launch = async request => {
+    await rename(path.join(f.home, 'hosted/claimed.claimed.json'), path.join(f.home, 'hosted/claimed.running.json'));
+    await atomic(path.join(request.jobDir, 'status.json'), { ...await f.status('claimed'), state });
+    throw Error('uncertain launch outcome');
+  };
+  await f.hosted.start(); clearInterval(f.hosted.timer);
+  const status = await f.status('claimed');
+  assert.equal(status.state, state); assert.equal(status.result, null);
+  assert.ok(await stat(path.join(f.home, 'hosted/claimed.running.json')));
+  await assert.rejects(stat(path.join(r.jobDir, 'events.jsonl')), { code: 'ENOENT' });
+});
+
+for (const eventWritten of [false, true]) test(`restart completes a failed launch${eventWritten ? ' without duplicating its terminal event' : ' after claim withdrawal'}`, async t => {
+  const f = await fixture(t), r = await f.request('broken', 'failed');
+  const statusFile = path.join(r.jobDir, 'status.json');
+  await atomic(statusFile, { ...await f.status('broken'), state: 'queued', queuePosition: 1 });
+  const terminal = { schema, type: 'result', command: 'render', jobId: r.jobId, ts: new Date().toISOString(),
+    ok: false, code: 'internal_error', message: 'Original failure', artifacts: [], data: {}, elapsedMs: 0 };
+  if (eventWritten) await writeFile(path.join(r.jobDir, 'events.jsonl'), JSON.stringify(terminal) + '\n');
+  await f.request('healthy', 'claimed');
+  await f.hosted.start(); clearInterval(f.hosted.timer);
+  await f.hosted.tick();
+  assert.deepEqual(f.launched, ['healthy']);
+  const failed = await f.status('broken');
+  assert.equal(failed.state, 'failed'); assert.equal('queuePosition' in failed, false);
+  const events = (await readFile(path.join(r.jobDir, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(events.length, 1); assert.deepEqual(events[0], failed.result);
+  if (eventWritten) assert.deepEqual(failed.result, terminal);
+  else assert.equal(failed.result.details.reason, 'hosted_launch_failed');
+});
+
+for (const cut of ['middle', 'utf8', 'newline']) test(`restart completes a ${cut} result append for an already-following waiter`, async t => {
+  const f = await fixture(t), r = await f.request('broken', 'failed');
+  const result = { schema, type: 'result', command: 'render', jobId: r.jobId, ts: new Date().toISOString(),
+    ok: false, code: 'internal_error', message: '启动失败', artifacts: [], data: {}, elapsedMs: 0 };
+  await atomic(path.join(f.home, 'hosted/broken.failed.json'), { ...r, launchResult: result });
+  await atomic(path.join(r.jobDir, 'status.json'), { ...await f.status('broken'), state: 'queued', queuePosition: 1 });
+  const header = Buffer.from(JSON.stringify({ schema, type: 'progress', command: 'render', phase: 'launch' }) + '\n');
+  const bytes = Buffer.from(JSON.stringify(result) + '\n');
+  const length = cut === 'middle' ? Math.floor(bytes.length / 2) : cut === 'utf8' ? bytes.indexOf(Buffer.from('启')) + 1 : bytes.length - 1;
+  const events = path.join(r.jobDir, 'events.jsonl');
+  await writeFile(events, Buffer.concat([header, bytes.subarray(0, length)]));
+  await f.request('healthy', 'claimed');
+  const { followJob } = await import('../../src/hosted.mjs');
+  let observed;
+  const ready = new Promise(resolve => { observed = resolve; });
+  const following = followJob(r.jobDir, { timeout: 5, interval: 1, onEvent(event) { if (event.type === 'progress') observed(); } });
+  following.catch(() => {});
+  await ready; // The waiter already retained the partial tail from this read.
+  await f.hosted.start(); clearInterval(f.hosted.timer);
+  assert.deepEqual(await following, result);
+  await f.hosted.tick();
+  assert.deepEqual(f.launched, ['healthy']);
+  assert.deepEqual(await readFile(events), Buffer.concat([header, bytes]));
+  assert.deepEqual((await f.status('broken')).result, result);
+});
+
+for (const damaged of ['{"broken":\n', '{"unrecognized partial":']) test('one damaged failure log does not stop desktop startup or healthy queue work: ' + JSON.stringify(damaged), async t => {
+  const f = await fixture(t), r = await f.request('broken', 'failed'), errors = [];
+  await atomic(path.join(r.jobDir, 'status.json'), { ...await f.status('broken'), state: 'queued', queuePosition: 1 });
+  await writeFile(path.join(r.jobDir, 'events.jsonl'), damaged);
+  await f.request('healthy', 'claimed');
+  f.hosted.report = error => errors.push(error);
+  await f.hosted.start(); clearInterval(f.hosted.timer);
+  assert.deepEqual(f.launched, ['healthy']);
+  assert.equal(errors.length, 1);
+  // Unknown corruption is reported, not silently rewritten or presented as a
+  // successfully repaired log. It must not hold unrelated work hostage.
+  assert.equal(await readFile(path.join(r.jobDir, 'events.jsonl'), 'utf8'), damaged);
+  assert.equal((await f.status('broken')).result, null);
+});
