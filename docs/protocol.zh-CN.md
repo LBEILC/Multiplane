@@ -210,7 +210,7 @@ npm 包带上 `skills/multiplane/`。用 `multiplane skill install`（9.2）把�
 
 - 键和取值：`ffmpeg`（路径）、`jobsDir`（路径）、`raster`（`gpu` 或 `software`）、`encoder`（`x264`、`nvenc-h264` 或 `nvenc-hevc`）、`workers`（正整数；`auto` 等同于 `unset`）、`hosted`（`true` 或 `false`，见第 11 节）。未知的键或非法的值以 `invalid_option` 失败，不改文件。相对路径先按当前目录解析成绝对路径再写。
 - 文件里已有的未知字段原样保留。文件不是 JSON 对象时，`get` 和 `set` 以 `config_invalid` 失败（退出码 3），不覆盖它。`unset` 返回的 `data` 和 `set` 一样，也带 `changed`。
-- 配置写入通过记录所有者的锁目录串行执行。只有确认进程已退出时才回收锁（包括 PID 已复用但进程创建时间不同的情况）；不会仅因锁较旧就抢占仍存活或身份无法确认的进程。等待超时返回 `config_locked`（退出码 3，`details.path` 为锁路径）。旧版本或用户目录迁移留下的空锁文件无法确认所有者，不会自动删除：请关闭所有 Multiplane 进程，并确认没有配置写入或迁移正在进行，再手动删除残留的锁。在替换配置文件前发生的写入失败会保留原有配置。
+- 配置写入通过记录所有者的锁目录串行执行。只有确认进程已退出时才回收锁（包括 PID 已复用但进程创建时间不同的情况）；不会仅因锁较旧就抢占仍存活或身份无法确认的进程。等待超时返回 `config_locked`（退出码 3，`details.path` 为锁路径）。获取锁时不会替换已有文件。旧版本或用户目录迁移留下的空锁文件，以及空的或记录不完整的锁目录，都无法确认所有者，不会自动删除。进程在初始化或释放所有者记录时中断，可能留下这类目录：请关闭所有 Multiplane 进程，并确认没有配置写入或迁移正在进行，再手动删除残留的锁。在替换配置文件前发生的写入失败会保留原有配置。
 - `config set ffmpeg <path>` 写入路径后立刻探测。`data.check` 为 `{ usable, version, encoders: { libx264, "libvpx-vp9", prores_ks }, reason }`。`usable` 要求文件报出 FFmpeg 版本并带 `libx264`，另外两个编码器是可选的。可用时 `reason` 为 `null`，否则为 `not-found`、`cannot-run`、`not-ffmpeg` 或 `missing-libx264`。路径不可用时照样写入、命令照样成功，另发一条 `warning`（码 `ffmpeg_unusable`）。
 
 ### 9.2 `multiplane skill`

@@ -11,7 +11,7 @@ const ownerName = /^[0-9a-f-]{36}\.json$/;
 async function removeEmpty(lock) {
   try { await fs.rmdir(lock); }
   catch (error) {
-    // Another writer may already have published its nonempty directory.
+    // Never recursively remove a directory that may contain another owner.
     if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'ENOTDIR'].includes(error.code)) throw error;
   }
 }
@@ -28,7 +28,8 @@ async function recover(lock) {
     // that a writer died, so leave them (and unrecognized locks) untouched.
     if (!(await fs.lstat(lock)).isDirectory()) return;
     const names = await fs.readdir(lock);
-    if (!names.length) { await removeEmpty(lock); return; }
+    // An empty or partial directory may belong to a writer initializing its
+    // owner record. Only the successful marker remover may remove emptiness.
     if (names.length !== 1 || !ownerName.test(names[0])) return;
     let owner;
     try { owner = JSON.parse(await fs.readFile(path.join(lock, names[0]), 'utf8')); }
@@ -50,40 +51,44 @@ async function recover(lock) {
 }
 
 export async function lockConfiguration(file, { timeout = 10000 } = {}) {
-  const lock = file + '.lock', token = randomUUID();
-  const staged = lock + '.' + token + '.tmp', name = token + '.json';
-  await fs.mkdir(staged);
-  try {
-    await fs.writeFile(path.join(staged, name), JSON.stringify({
-      schema, host: hostname(), pid: process.pid, createdAt: await processCreatedAt(process.pid),
-    }) + '\n', { flag: 'wx' });
-    const deadline = performance.now() + timeout;
-    for (;;) {
-      try {
-        // Publish the owner and lock together. An existing nonempty lock
-        // directory cannot be replaced, including on Windows.
-        await fs.rename(staged, lock);
-        return () => release(lock, name);
-      } catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR', 'EPERM', 'EACCES'].includes(error.code)) throw error;
-        // Windows can report EPERM for an occupied directory. The previous
-        // owner may release it before this inspection, so retry that race too.
-        try { await fs.lstat(lock); }
-        catch (missing) {
-          if (missing.code !== 'ENOENT') throw missing;
-          if (performance.now() >= deadline) throw error;
-          await new Promise(resolve => setTimeout(resolve, 25));
-          continue;
-        }
-        if (performance.now() >= deadline) {
-          throw new MultiplaneError('config_locked', `Configuration is locked: ${lock}`, {
-            cause: error, details: { path: lock },
-            hint: 'Close other Multiplane processes and retry. If the lock remains, remove it only after confirming no process is changing settings.',
-          });
-        }
-        await recover(lock);
+  const lock = file + '.lock', name = randomUUID() + '.json';
+  // Resolve identity before acquiring the directory, not while it is empty.
+  const owner = JSON.stringify({
+    schema, host: hostname(), pid: process.pid, createdAt: await processCreatedAt(process.pid),
+  }) + '\n';
+  const deadline = performance.now() + timeout;
+  for (;;) {
+    try {
+      // Unlike rename on Windows, mkdir never replaces a legacy lock file.
+      await fs.mkdir(lock);
+      break;
+    } catch (error) {
+      if (!['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR', 'EPERM', 'EACCES'].includes(error.code)) throw error;
+      // The previous owner may release the lock before this inspection.
+      try { await fs.lstat(lock); }
+      catch (missing) {
+        if (missing.code !== 'ENOENT') throw missing;
+        if (performance.now() >= deadline) throw error;
         await new Promise(resolve => setTimeout(resolve, 25));
+        continue;
       }
+      if (performance.now() >= deadline) {
+        throw new MultiplaneError('config_locked', `Configuration is locked: ${lock}`, {
+          cause: error, details: { path: lock },
+          hint: 'Close other Multiplane processes and retry. If the lock remains, remove it only after confirming no process is changing settings.',
+        });
+      }
+      await recover(lock);
+      await new Promise(resolve => setTimeout(resolve, 25));
     }
-  } finally { await fs.rm(staged, { recursive: true, force: true }); }
+  }
+  try { await fs.writeFile(path.join(lock, name), owner, { flag: 'wx' }); }
+  catch (error) {
+    // We acquired this directory and no contender can reclaim an unfinished
+    // owner record. Clean up only our own file and the now-empty directory.
+    await fs.rm(path.join(lock, name), { force: true });
+    await removeEmpty(lock);
+    throw error;
+  }
+  return () => release(lock, name);
 }

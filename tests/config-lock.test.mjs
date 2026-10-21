@@ -93,6 +93,22 @@ test('legacy empty lock files stay untouched, with a manual recovery hint', asyn
   assert.deepEqual((await fs.readdir(f.home)).sort(), ['config.json', 'config.json.lock']);
 });
 
+test('a legacy lock file appearing at acquisition is never replaced', async t => {
+  const f = await fixture(t), mkdir = fs.mkdir;
+  let raced = false;
+  t.mock.method(fs, 'mkdir', async (directory, ...args) => {
+    if (directory === f.lock && !raced) {
+      raced = true;
+      await fs.writeFile(f.lock, 'migration in progress', { flag: 'wx' });
+    }
+    return mkdir(directory, ...args);
+  });
+  await assert.rejects(lockConfiguration(f.file, { timeout: 50 }), { code: 'config_locked' });
+  assert.equal(raced, true);
+  assert.equal(await fs.readFile(f.lock, 'utf8'), 'migration in progress');
+  assert.equal(await fs.readFile(f.file, 'utf8'), f.original);
+});
+
 test('a reused PID is recovered only with a different known process creation time', async t => {
   const f = await fixture(t);
   const current = await processCreatedAt(process.pid);
@@ -121,6 +137,18 @@ test('a delayed unlock does not delete a replacement owner', async t => {
   assert.deepEqual(await fs.readdir(f.lock), [name]);
   await replacement();
   await assert.rejects(fs.lstat(f.lock), { code: 'ENOENT' });
+});
+
+test('a delayed unlock leaves a replacement initializing its owner record untouched', async t => {
+  const f = await fixture(t), unlock = await lockConfiguration(f.file);
+  await fs.rename(f.lock, f.lock + '.previous');
+  const held = writer(t, f, 'workers', 2, 'before-owner');
+  assert.equal((await held.message).type, 'initializing');
+  await unlock();
+  assert.deepEqual(await fs.readdir(f.lock), []);
+  held.child.send('continue');
+  assert.equal((await held.closed)[0], 0);
+  assert.equal(JSON.parse(await fs.readFile(f.file)).workers, 2);
 });
 
 test('recovery racing a new owner cannot remove the replacement lock', async t => {
@@ -160,16 +188,16 @@ test('a replacement published during release survives the old directory cleanup'
   await replacement();
 });
 
-test('acquisition retries when a Windows-style collision disappears before inspection', async t => {
-  const f = await fixture(t), unlock = await lockConfiguration(f.file), rename = fs.rename;
+test('acquisition retries when a mkdir collision disappears before inspection', async t => {
+  const f = await fixture(t), unlock = await lockConfiguration(f.file), mkdir = fs.mkdir;
   let collided = false;
-  t.mock.method(fs, 'rename', async (source, target) => {
-    if (target === f.lock && !collided) {
+  t.mock.method(fs, 'mkdir', async (directory, ...args) => {
+    if (directory === f.lock && !collided) {
       collided = true;
       await unlock();
-      throw Object.assign(Error('occupied directory'), { code: 'EPERM' });
+      throw Object.assign(Error('occupied directory'), { code: 'EEXIST' });
     }
-    return rename(source, target);
+    return mkdir(directory, ...args);
   });
   const replacement = await lockConfiguration(f.file);
   assert.equal(collided, true);
@@ -188,11 +216,85 @@ test('inaccessible owners and malformed lock metadata are not reclaimed', async 
   assert.equal(await fs.readFile(path.join(f.lock, name), 'utf8'), '{broken');
 });
 
-test('an interrupted empty lock directory can be recovered', async t => {
+test('an initializing writer cannot be reclaimed before its owner record is written', async t => {
+  const f = await fixture(t), held = writer(t, f, 'workers', 2, 'before-owner');
+  assert.equal((await held.message).type, 'initializing');
+  assert.deepEqual(await fs.readdir(f.lock), []);
+  await assert.rejects(lockConfiguration(f.file, { timeout: 50 }), { code: 'config_locked' });
+  assert.deepEqual(await fs.readdir(f.lock), []);
+  held.child.send('continue');
+  assert.equal((await held.closed)[0], 0);
+  assert.equal(JSON.parse(await fs.readFile(f.file)).workers, 2);
+  assert.deepEqual(await fs.readdir(f.home), ['config.json']);
+});
+
+for (const mode of ['before-owner', 'partial-owner']) test(`a crash during ${mode} initialization fails closed`, async t => {
+  const f = await fixture(t), held = writer(t, f, 'workers', 2, mode);
+  assert.equal((await held.message).type, 'initializing');
+  await assert.rejects(lockConfiguration(f.file, { timeout: 50 }), { code: 'config_locked' });
+  held.child.kill('SIGKILL'); await held.closed;
+  const names = await fs.readdir(f.lock);
+  assert.equal(names.length, mode === 'before-owner' ? 0 : 1);
+  await assert.rejects(lockConfiguration(f.file, { timeout: 50 }), { code: 'config_locked' });
+  assert.deepEqual(await fs.readdir(f.lock), names);
+  if (names.length) assert.equal(await fs.readFile(path.join(f.lock, names[0]), 'utf8'), '{');
+  assert.equal(await fs.readFile(f.file, 'utf8'), f.original);
+});
+
+test('acquisition preserves filesystem errors when no lock exists', async t => {
+  const f = await fixture(t), mkdir = fs.mkdir;
+  t.mock.method(fs, 'mkdir', (directory, ...args) => {
+    if (directory === f.lock) throw Object.assign(Error('injected mkdir failure'), { code: 'EACCES' });
+    return mkdir(directory, ...args);
+  });
+  await assert.rejects(lockConfiguration(f.file, { timeout: 25 }), { code: 'EACCES' });
+  assert.deepEqual(await fs.readdir(f.home), ['config.json']);
+});
+
+for (const partial of [false, true]) test(`owner write failure cleans up its ${partial ? 'partial' : 'empty'} reservation`, async t => {
+  const f = await fixture(t), writeFile = fs.writeFile;
+  t.mock.method(fs, 'writeFile', async (file, ...args) => {
+    if (path.dirname(file) === f.lock) {
+      if (partial) await writeFile(file, '{');
+      throw Object.assign(Error('injected owner write failure'), { code: 'EIO' });
+    }
+    return writeFile(file, ...args);
+  });
+  await assert.rejects(lockConfiguration(f.file), { code: 'EIO' });
+  assert.equal(await fs.readFile(f.file, 'utf8'), f.original);
+  assert.deepEqual(await fs.readdir(f.home), ['config.json']);
+  t.mock.restoreAll();
+  await new Configuration(f.home).save('workers', 5);
+  assert.equal(JSON.parse(await fs.readFile(f.file)).workers, 5);
+});
+
+test('competing reapers cannot remove an empty directory after the owner marker is removed', async t => {
+  const f = await fixture(t), held = writer(t, f, 'workers', 9, 'hold');
+  assert.equal((await held.message).type, 'locked');
+  held.child.kill('SIGKILL'); await held.closed;
+  const rmdir = fs.rmdir;
+  let checked = false;
+  t.mock.method(fs, 'rmdir', async directory => {
+    if (directory === f.lock && !checked) {
+      checked = true;
+      assert.deepEqual(await fs.readdir(f.lock), []);
+      await assert.rejects(lockConfiguration(f.file, { timeout: 50 }), { code: 'config_locked' });
+      assert.deepEqual(await fs.readdir(f.lock), []);
+    }
+    return rmdir(directory);
+  });
+  const unlock = await lockConfiguration(f.file);
+  assert.equal(checked, true);
+  await unlock();
+  assert.deepEqual(await fs.readdir(f.home), ['config.json']);
+});
+
+test('unrecognized directory contents remain untouched', async t => {
   const f = await fixture(t);
   await fs.mkdir(f.lock);
-  await new Configuration(f.home).save('raster', 'software');
-  assert.equal(JSON.parse(await fs.readFile(f.file)).raster, 'software');
+  await fs.writeFile(path.join(f.lock, 'unknown'), 'keep');
+  await assert.rejects(lockConfiguration(f.file, { timeout: 50 }), { code: 'config_locked' });
+  assert.equal(await fs.readFile(path.join(f.lock, 'unknown'), 'utf8'), 'keep');
 });
 
 test('save failure releases its lock and preserves the valid configuration', async t => {
