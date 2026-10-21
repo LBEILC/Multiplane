@@ -16,6 +16,7 @@ export async function startServer(port = 0, root = process.cwd()) {
   if (typeof root !== 'string' || !root.trim()) throw invalidOption('--root', '--root must be a directory path.');
   if (!String(port).trim() || !Number.isInteger(Number(port)) || Number(port) < 0 || Number(port) > 65535) throw invalidOption('--port', '--port must be an integer from 0 to 65535.');
   port = Number(port);
+  const requestedRoot = path.resolve(root);
   const base = await normalizeResourcePath(root);
   try { if (!(await stat(base)).isDirectory()) throw new Error(); }
   catch { throw invalidOption('--root', '--root must be an existing directory.'); }
@@ -43,7 +44,7 @@ export async function startServer(port = 0, root = process.cwd()) {
 
       const segments = pathname.replaceAll('\\', '/').split('/');
       if (segments.some(p => p.startsWith('.') || p === 'node_modules')) { res.writeHead(403); return res.end(); }
-      let resourceRoot = root, resourceBase = base, resourcePath = pathname;
+      let resourceRoot = root, resourceBase = base, requestedResourceRoot = requestedRoot, resourcePath = pathname;
       // /multiplane/ is reserved for runtime resources.
       if (pathname.startsWith('/multiplane/')) {
         if (pathname === '/multiplane/shots.json') {
@@ -58,6 +59,7 @@ export async function startServer(port = 0, root = process.cwd()) {
           resourcePath = pathname.slice('/multiplane/vendor/three'.length);
           if (!/^\/(build|examples\/jsm)\/.*\.js$/.test(resourcePath)) { res.writeHead(403); return res.end(); }
         } else { res.writeHead(404); return res.end(); }
+        requestedResourceRoot = resourceRoot;
         resourceBase = await normalizeResourcePath(resourceRoot);
       }
       let target = path.resolve(resourceRoot, `.${resourcePath}`);
@@ -68,11 +70,15 @@ export async function startServer(port = 0, root = process.cwd()) {
         if (pathname === '/favicon.ico' && error.code === 'ENOENT') { res.writeHead(204); return res.end(); }
         throw error;
       }
-      if (targetInfo.isDirectory()) target = path.join(target, 'index.html');
+      let requestedTarget = path.resolve(requestedResourceRoot, `.${resourcePath}`);
+      if (targetInfo.isDirectory()) {
+        target = path.join(target, 'index.html');
+        requestedTarget = path.join(requestedTarget, 'index.html');
+      }
       target = await normalizeResourcePath(target);
       if (!await isInsideResourceRoot(resourceBase, target)) { res.writeHead(403); return res.end(); }
       const info = await stat(target);
-      const recorded = await recordInput(target);
+      const recorded = await recordInput(target, requestedTarget);
       const contentType = { '.wav': 'audio/wav', '.srt': 'text/plain; charset=utf-8', '.mp4': 'video/mp4' }[path.extname(target)] ?? mime[path.extname(target)] ?? 'application/octet-stream';
       const headers = { 'Content-Type': contentType, 'Content-Length': info.size, 'Accept-Ranges': 'bytes' };
       if (req.headers.range) {
