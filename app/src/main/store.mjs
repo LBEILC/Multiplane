@@ -111,7 +111,7 @@ export class JobStore extends EventEmitter {
         try { const p = await stat(path.join(record.jobDir, 'preview.png')); previewVersion = `${p.mtimeMs}:${p.size}`; } catch {}
         const job = jobData({ ...s, jobDir: record.jobDir, events, previewVersion }, error => this.emit('fault', error));
         if (!job) continue;
-        job.hosted = await stat(path.join(this.home, 'hosted', id + '.claimed.json')).then(() => true, () => false) || await stat(path.join(this.home, 'hosted', id + '.running.json')).then(() => true, () => false);
+        job.hosted = await stat(path.join(this.home, 'hosted', id + '.claimed.json')).then(() => true, () => false) || await stat(path.join(this.home, 'hosted', id + '.running.json')).then(() => true, () => false) || await stat(path.join(this.home, 'hosted', id + '.failed.json')).then(() => true, () => false);
         const alive = job.state === 'running' && await this.alive(s.pid, s);
         const previousProgress = this.progressActivity.get(id);
         if (!previousProgress || previousProgress.state !== job.state || previousProgress.phase !== s.phase || s.done > previousProgress.done) {

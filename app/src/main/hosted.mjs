@@ -41,19 +41,77 @@ export async function validRequest(r, id, { execPath = process.execPath } = {}) 
   return pkg?.name === 'multiplane' && s?.jobId === id && s.schema === schema
     && await stat(r.node).then(info => info.isFile(), () => false) && await stat(r.bin).then(info => info.isFile(), () => false);
 }
-export async function launchExecutor(r, create = spawn) {
-  const error = await open(path.join(r.jobDir, 'stderr.log'), 'a');
+export async function launchExecutor(r, create = spawn, { openLog = open, onCleanupError = () => {} } = {}) {
+  const error = await openLog(path.join(r.jobDir, 'stderr.log'), 'a');
   try { return await new Promise((resolve, reject) => {
     const child = create(r.node, [r.bin, r.command, ...r.args, '--job-dir-exact', r.jobDir, '--hosted-executor'], { cwd: r.cwd, env: r.env, detached: true, stdio: ['ignore', 'ignore', error.fd], windowsHide: true, shell: false });
     child.once('error', reject); child.once('spawn', () => { child.unref(); resolve(child.pid); });
-  }); } finally { await error.close(); }
+  }); } finally {
+    // A child inherits its own log descriptor. Parent cleanup must not turn a
+    // successful spawn into a rejected launch and a duplicate executor.
+    try { await error.close(); } catch (cause) { try { onCleanupError(cause); } catch {} }
+  }
 }
 export class Hosted {
   enabled = false; closed = false; pending; timer; launching = new Map(); queueSignature = '';
-  constructor(home, version, { inspect = processIdentity, alive = jobAlive, launch = launchExecutor, report = (_error) => {}, changed = () => {} } = {}) { Object.assign(this, { home, version, inspect, alive, launch, report, changed }); this.directory = path.join(home, 'hosted'); }
+  constructor(home, version, { inspect = processIdentity, alive = jobAlive, report = (_error) => {}, launch = r => launchExecutor(r, spawn, { onCleanupError: report }), changed = () => {} } = {}) { Object.assign(this, { home, version, inspect, alive, launch, report, changed }); this.directory = path.join(home, 'hosted'); }
   async start() { await mkdir(this.directory, { recursive: true }); this.identity = await this.inspect(process.pid); await this.tick(); this.timer = setInterval(() => this.tick().catch(this.report), 500); }
   async publish() { if (!this.identity) return; await atomic(path.join(this.home, 'app.json'), { schema, pid: process.pid, createdAt: this.identity.createdAt, acceptsHosted: this.enabled && !this.closed, version: this.version }); }
   tick() { if (this.pending) return this.pending; this.pending = this.scan().finally(() => { this.pending = null; }); return this.pending; }
+  async finishLaunchFailure(r) {
+    const file = path.join(r.jobDir, 'status.json'), s = await json(file);
+    // Never replace state published by an executor (or a completed result).
+    if (s?.schema !== schema || s.jobId !== r.jobId || s.result || s.state !== 'queued') return;
+    const events = path.join(r.jobDir, 'events.jsonl');
+    let log;
+    try { log = await readFile(events); } catch (error) { if (error.code !== 'ENOENT') throw error; log = Buffer.alloc(0); }
+    const boundary = log.lastIndexOf(10) + 1, pending = log.subarray(boundary);
+    // Only newline-terminated events are committed. Readers may already hold
+    // the partial tail, so repair by appending its suffix, never by truncating it.
+    let result;
+    const terminal = event => event?.schema === schema && event.type === 'result' && event.jobId === r.jobId;
+    for (const line of log.subarray(0, boundary).toString('utf8').split('\n')) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (terminal(event)) result = event;
+    }
+    if (!result) {
+      let tail;
+      try { tail = JSON.parse(pending.toString('utf8')); } catch {}
+      if (terminal(tail)) {
+        result = tail;
+        await appendFile(events, '\n');
+      } else {
+        const ts = new Date().toISOString();
+        result = r.launchResult ?? { schema, type: 'result', command: r.command, jobId: r.jobId, ts, ok: false,
+          code: 'internal_error', message: 'Hosted executor could not start.',
+          details: { reason: 'hosted_launch_failed', ...(r.launchError ? { cause: r.launchError } : {}) },
+          artifacts: [], data: {}, elapsedMs: Math.max(0, Date.now() - Date.parse(s.startedAt)) || 0 };
+        if (!terminal(result)) throw Error('Invalid saved hosted launch result.');
+        const bytes = Buffer.from(JSON.stringify(result) + '\n');
+        if (!bytes.subarray(0, pending.length).equals(pending)) throw Error('Incomplete hosted event differs from the saved launch result.');
+        // Persist the exact serialized event before appending any of its bytes.
+        // A restart can then finish even a split UTF-8 sequence for active waiters.
+        if (!r.launchResult) await atomic(path.join(this.directory, r.jobId + '.failed.json'), { ...r, launchResult: result });
+        await appendFile(events, bytes.subarray(pending.length));
+      }
+    }
+    const { queuePosition, ...rest } = s;
+    await atomic(file, { ...rest, state: result.code === 'cancelled' ? 'cancelled' : result.ok ? 'succeeded' : 'failed', updatedAt: result.ts, result });
+  }
+  async failLaunch(r, error) {
+    const base = path.join(this.directory, r.jobId);
+    const latest = await json(path.join(r.jobDir, 'status.json'));
+    if (latest?.schema !== schema || latest.jobId !== r.jobId || latest.state !== 'queued' || latest.result
+      || await exists(base + '.running.json')) return;
+    // Consume the claim before publishing failure. A delayed executor must lose
+    // its claim, while an executor that already owns .running remains untouched.
+    try { await rename(base + '.claimed.json', base + '.failed.json'); }
+    catch (cause) { if (cause.code === 'ENOENT') return; throw cause; }
+    const failed = { ...r, launchError: String(error.message ?? error) };
+    await atomic(base + '.failed.json', failed);
+    await this.finishLaunchFailure(failed);
+  }
   async scan() {
     if (this.closed) return;
     const enabled = (await json(path.join(this.home, 'config.json')))?.hosted === true;
@@ -68,6 +126,12 @@ export class Hosted {
       try { const target = file.replace('.request.json', '.claimed.json'); await rename(file, target); const now = new Date(); await utimes(target, now, now); } catch (e) { if (e.code !== 'ENOENT') throw e; }
     }
     files = await readdir(this.directory);
+    for (const name of files.filter(n => n.endsWith('.failed.json'))) {
+      try {
+        const r = await json(path.join(this.directory, name)), id = name.slice(0, -12);
+        if (jobReference(r, id)) await this.finishLaunchFailure(r);
+      } catch (error) { this.report(error); }
+    }
     const queued = []; let busy = false;
     for (const name of files.filter(n => /\.(claimed|running)\.json$/.test(n))) {
       const file = path.join(this.directory, name), r = await json(file), id = name.replace(/\.(claimed|running)\.json$/, ''), running = name.endsWith('.running.json');
@@ -95,7 +159,10 @@ export class Hosted {
     this.queueSignature = signature;
     if (!this.closed && !busy && queued.length) {
       const r = queued[0].r; this.launching.set(r.jobId, Date.now());
-      try { await this.launch(r); } catch (error) { this.launching.delete(r.jobId); this.report(error); }
+      try { await this.launch(r); } catch (error) {
+        this.launching.delete(r.jobId); this.report(error);
+        try { await this.failLaunch(r, error); } catch (failure) { this.report(failure); }
+      }
     }
   }
   async close() { this.closed = true; clearInterval(this.timer); await this.pending; const file = path.join(this.home, 'app.json'); const current = await json(file); if (current?.pid === process.pid && current.createdAt === this.identity?.createdAt) await unlink(file).catch(() => {}); }
