@@ -40,7 +40,7 @@ async function openShotOnce(shot, scale = 1, options = {}) {
     hint: 'Files under node_modules are not served. Use --root to point to the package directory (for example, --root node_modules/multiplane).',
   });
   try { await access(entry); } catch { throw new MultiplaneError('shot_not_found'); }
-  const server = await startServer(0, root);
+  const server = await startServer(0, inputRoot);
   let browser, page, crashed = false;
   try {
     browser = await launchBrowser(options);
