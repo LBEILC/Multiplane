@@ -98,7 +98,7 @@
 | 0 | 成功 | — |
 | 1 | 镜头或检查不通过 | `shot_not_found`、`shot_outside_root`、`shot_load_failed`（HTTP 或脚本错误）、`shot_contract_invalid`（缺 `SHOT`、`render` 不是函数、`duration`/`fps`/`cuts` 不合法等）、`stage_size_invalid`（缺 `#stage`、尺寸不是正整数或随视口变化）、`ready_timeout`、`render_threw`（`render(t)` 抛错，`details` 带 `t`）、`resource_failed`（字体或素材加载失败）、`nondeterministic_output`、`lint_failed`、`cancel_timeout`（`cancel --wait` 到时作业仍未结束） |
 | 2 | 用法错误 | `invalid_option`（未知、重复、缺值、取值非法；`details.option`）、`invalid_scale`（倍率导致奇数或非整数尺寸，`hint` 给可用倍率）、`output_exists`（显式输出路径已有文件且没给 `--overwrite`）、`job_not_found`（`status` / `cancel` / `resume` 找不到作业或快照损坏）、`resume_unavailable`（作业不能续传；`details.reason`，见第 6.1 节） |
-| 3 | 环境问题 | `skill_modified`、`skill_blocked`、`skill_changed`（见 9.2）、`config_invalid`（作为 `config` 命令的失败，见 9.1；在其他地方只是警告）、`ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`wait_timeout`（`wait --timeout` 到时，作业本身不受影响）、`port_in_use`（`serve --port` 指定的端口已被占用）、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
+| 3 | 环境问题 | `skill_modified`、`skill_blocked`、`skill_changed`（见 9.2）、`config_invalid`（作为 `config` 命令的失败，见 9.1；在其他地方只是警告）、`config_locked`（配置被其他写入进程锁定，或无法确认锁的所有者；见 9.1）、`ffmpeg_not_found`、`ffmpeg_unusable`（能找到但不能运行或缺编码器）、`browser_not_installed`、`browser_launch_failed`、`three_not_installed`、`unsupported_node`、`wait_timeout`（`wait --timeout` 到时，作业本身不受影响）、`port_in_use`（`serve --port` 指定的端口已被占用）、`job_dir_unwritable`（作业目录无法创建或写入，例如在只读目录里运行；`details.path`；`hint` 指向 `--job-dir` 和 `MULTIPLANE_JOBS_DIR`） |
 | 4 | 渲染器内部 | `output_invalid`（编码后的文件与渲染内容不符：帧数、时长、尺寸或帧率；`details.expected` 与 `details.actual`；文件不会发布）、`worker_crashed`、`browser_crashed`（浏览器进程或页面意外关闭，重启后仍然失败，或者同一帧第三次卡住，见 `worker_stalled`；已知时带 `details.t`）、`encode_failed`、`internal_error` |
 | 130 | 被取消 | `cancelled` |
 
@@ -210,6 +210,7 @@ npm 包带上 `skills/multiplane/`。用 `multiplane skill install`（9.2）把�
 
 - 键和取值：`ffmpeg`（路径）、`jobsDir`（路径）、`raster`（`gpu` 或 `software`）、`encoder`（`x264`、`nvenc-h264` 或 `nvenc-hevc`）、`workers`（正整数；`auto` 等同于 `unset`）、`hosted`（`true` 或 `false`，见第 11 节）。未知的键或非法的值以 `invalid_option` 失败，不改文件。相对路径先按当前目录解析成绝对路径再写。
 - 文件里已有的未知字段原样保留。文件不是 JSON 对象时，`get` 和 `set` 以 `config_invalid` 失败（退出码 3），不覆盖它。`unset` 返回的 `data` 和 `set` 一样，也带 `changed`。
+- 配置写入通过记录所有者的锁目录串行执行。只有确认进程已退出时才回收锁（包括 PID 已复用但进程创建时间不同的情况）；不会仅因锁较旧就抢占仍存活或身份无法确认的进程。等待超时返回 `config_locked`（退出码 3，`details.path` 为锁路径）。获取锁时不会替换已有文件。旧版本或用户目录迁移留下的空锁文件，以及空的或记录不完整的锁目录，都无法确认所有者，不会自动删除。进程在初始化或释放所有者记录时中断，可能留下这类目录：请关闭所有 Multiplane 进程，并确认没有配置写入或迁移正在进行，再手动删除残留的锁。在替换配置文件前发生的写入失败会保留原有配置。
 - `config set ffmpeg <path>` 写入路径后立刻探测。`data.check` 为 `{ usable, version, encoders: { libx264, "libvpx-vp9", prores_ks }, reason }`。`usable` 要求文件报出 FFmpeg 版本并带 `libx264`，另外两个编码器是可选的。可用时 `reason` 为 `null`，否则为 `not-found`、`cannot-run`、`not-ffmpeg` 或 `missing-libx264`。路径不可用时照样写入、命令照样成功，另发一条 `warning`（码 `ffmpeg_unusable`）。
 
 ### 9.2 `multiplane skill`
