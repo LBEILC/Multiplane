@@ -1,0 +1,21 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.14",
+  "date": "2026-10-21",
+  "items": [
+    {
+      "kind": "fixed",
+      "area": "renderer",
+      "highlight": true,
+      "title": { "zh-CN": "符号链接改了指向，续传会拒绝", "en": "Resume notices a retargeted symlink" },
+      "detail": { "zh-CN": "续传检查现在同时记录镜头请求的路径和它实际指向的文件。素材目录或项目根目录是符号链接（或 Windows 目录联接）时，渲染中断后如果改指向了内容不同的位置，续传会以 inputs_changed 拒绝，不会把前后两份素材拼进同一个视频。只对用这个版本开始的渲染生效。感谢 @liuyinchu 的修复。", "en": "Resume checks now record both the path a shot requested and the file it resolved to. If an asset directory or the project root is a symlink (or a Windows junction) and is pointed at different content after an interrupted render, resume is refused with inputs_changed instead of joining segments made from two versions. This applies to renders started with this version. Thanks to @liuyinchu for the fix." }
+    },
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "title": { "zh-CN": "托管渲染启动失败不再卡住队列", "en": "A hosted render that cannot start no longer blocks the queue" },
+      "detail": { "zh-CN": "托管渲染的执行进程启动失败时（例如发起命令的工作目录已经删掉），软件以前会在每次扫描时重试排在最前面的作业，后面的作业一直等。现在这个作业以失败结束，multiplane wait 会拿到结果，队列接着执行下一个。感谢 @liuyinchu 的修复。", "en": "When the executor for a hosted render failed to start (for example because the working directory of the command had been deleted), the app retried the first job on every scan and the jobs behind it kept waiting. That job now ends as failed, multiplane wait receives its result, and the queue moves on to the next job. Thanks to @liuyinchu for the fix." }
+    }
+  ]
+}
