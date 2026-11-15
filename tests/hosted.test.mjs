@@ -156,7 +156,7 @@ for (const [mode, reason] of [['reject', /Rejected by|app rejected/], ['ignore',
   });
 }
 
-fullTest('configuration, overrides, identity mismatch and lint failure never submit requests', { timeout: 60000 }, async t => {
+fullTest('disabled hosted configuration never submits requests', { timeout: 60000 }, async t => {
   const f = await fixture(t);
   for (const value of ['true', 'false']) {
     const saved = await f.cli(['config', 'set', 'hosted', value, '--json']);
@@ -165,11 +165,19 @@ fullTest('configuration, overrides, identity mismatch and lint failure never sub
   assert.equal((await f.cli(['config', 'set', 'hosted', 'yes', '--json'])).code, 2);
   assert.equal(loadUserConfig('stills', {}, f.env).options.hosted, false);
   assert.equal((await f.start().done).code, 0);
-  await f.cli(['config', 'set', 'hosted', 'true']);
+  assert.equal(f.app.requests.length, 0);
+});
+
+fullTest('CLI and environment overrides never submit hosted requests', { timeout: 60000 }, async t => {
+  const f = await fixture(t);
   assert.equal((await f.start(['--no-hosted']).done).code, 0);
   f.env.MULTIPLANE_HOSTED = '0';
   assert.equal((await f.start().done).code, 0);
-  delete f.env.MULTIPLANE_HOSTED;
+  assert.equal(f.app.requests.length, 0);
+});
+
+fullTest('identity mismatch and lint failure never submit hosted requests', { timeout: 60000 }, async t => {
+  const f = await fixture(t);
   const appFile = path.join(f.home, 'app.json'), app = JSON.parse(await readFile(appFile));
   await writeFile(appFile, JSON.stringify({ ...app, createdAt: '2000-01-01T00:00:00.000Z' }));
   assert.equal((await f.start().done).code, 0);
@@ -181,6 +189,10 @@ fullTest('configuration, overrides, identity mismatch and lint failure never sub
   assert.equal(await hostedAvailable('doctor', { hosted: true, _hostedCLI: {} }, f.env), false);
   assert.equal(await hostedAvailable('render', { hosted: true, _hostedCLI: {} }, f.env), true);
   assert.equal(await processCreatedAt(2147483647), null);
+});
+
+fullTest('wait rejects invalid timeouts and missing jobs', { timeout: 60000 }, async t => {
+  const f = await fixture(t);
   for (const value of ['-1', 'NaN', 'Infinity']) {
     const invalidWait = await f.cli(['wait', 'missing', '--timeout', value, '--json']);
     assert.equal(invalidWait.code, 2); assert.equal(final(invalidWait).code, 'invalid_option');
