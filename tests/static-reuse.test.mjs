@@ -44,8 +44,13 @@ test('macOS observer excludes textarea even when added after initialization', as
   try {
     await capture.page.evaluate(installStaticObserver, { platform: 'darwin' });
     await capture.page.evaluate(() => document.querySelector('#stage').append(document.createElement('textarea')));
-    for (let i = 0; i < 3; i++) assert.equal(await capture.page.evaluate(() => __multiplaneStatic.read()), true);
-    assert.equal(await capture.page.evaluate(() => __multiplaneStatic.reason), 'unobservable_api');
+    // Read the verdict and its reason in one browser task, before unrelated setters can mark it dirty.
+    const observed = await capture.page.evaluate(() => ({
+      reads: Array.from({ length: 3 }, () => __multiplaneStatic.read()),
+      reason: __multiplaneStatic.reason,
+    }));
+    assert.deepEqual(observed.reads, [true, true, true]);
+    assert.equal(observed.reason, 'unobservable_api');
   } finally { await capture.close(); }
 });
 test('SVG JPEG resources become observable static frames without weakening image checks', async () => {
