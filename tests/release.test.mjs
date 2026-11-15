@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { createTempDirectory } from './helpers.mjs';
@@ -36,7 +36,8 @@ async function fixture(t, completed = ['prepare', 'preflight']) {
       else if (args[0] === 'tag') stdout = 'v1.2.2';
       else if (args[0] === 'show') stdout = JSON.stringify({ version: '1.2.2' });
       else if (args[0] === 'reset') head = base;
-      else if (args[0] === 'worktree') stdout = `worktree ${worktree.replaceAll('\\', '/')}\nHEAD ${state.commit}\n`;
+      else if (args[0] === 'worktree' && args[1] === 'remove') await rm(args.at(-1), { recursive: true, force: true });
+      else if (args[0] === 'worktree') stdout =`worktree ${worktree.replaceAll('\\', '/')}\nHEAD ${state.commit}\n`;
     }
     if (args.includes('--skip-tests')) head = state.publicCommit;
     if (args.includes('--scan-only')) stdout = JSON.stringify({ files: [] });
@@ -220,6 +221,9 @@ test('successful export through draft collects seven verified assets and resumes
   assert.deepEqual(state.completed, steps);
   assert.equal(Object.keys(state.hashes).length, 7);
   assert.match(await readFile(path.join(f.output, 'SHA256.md'), 'utf8'), /release-notes.json/);
+  // Only final/ keeps installers; the download and the validation worktree are gone.
+  assert.deepEqual((await readdir(f.output)).filter(name => name.startsWith('artifacts-')), []);
+  await assert.rejects(stat(f.worktree), { code: 'ENOENT' });
   f.calls.length = 0;
   await release(f.options, { execute, log() {} });
   assert.equal(f.calls.length, 0);
@@ -227,6 +231,22 @@ test('successful export through draft collects seven verified assets and resumes
   state.completed.pop(); await writeFile(f.stateFile, JSON.stringify(state));
   await release(f.options, { execute, log() {} });
   assert.ok(!f.calls.some(call => call.args.includes('create')));
+});
+
+test('failed collection keeps its download and the validation worktree', async t => {
+  const f = await fixture(t, steps.slice(0, 6)); f.state.runs = { 'ci.yml': 11, 'release.yml': 12 };
+  await writeFile(f.stateFile, JSON.stringify(f.state));
+  const execute = async (file, args, config) => {
+    const result = await f.execute(file, args, config);
+    if (file === 'gh' && args[1] === 'view') result.stdout = JSON.stringify({ headSha: f.state.publicCommit, headBranch: f.state.branch, status: 'completed', conclusion: 'success' });
+    if (file === 'gh' && args[1] === 'download') await writeFile(path.join(args[args.indexOf('--dir') + 1], 'latest.yml'), 'partial');
+    return result;
+  };
+  await assert.rejects(release(f.options, { execute, log() {}, sleep() {} }), /Expected one artifact/);
+  const downloads = (await readdir(f.output)).filter(name => name.startsWith('artifacts-'));
+  assert.equal(downloads.length, 1);
+  assert.ok(await stat(path.join(f.output, downloads[0], 'latest.yml')));
+  assert.ok(await stat(f.worktree));
 });
 
 test('release subprocesses override inherited homes without mutating the parent', async t => {

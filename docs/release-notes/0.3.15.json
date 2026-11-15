@@ -1,0 +1,53 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.15",
+  "date": "2026-11-15",
+  "items": [
+    {
+      "kind": "improved",
+      "area": "renderer",
+      "highlight": true,
+      "icon": "speed",
+      "title": { "zh-CN": "运动模糊少截图，更快", "en": "Motion blur takes fewer captures" },
+      "detail": { "zh-CN": "在动的帧不再额外截两张探针图，截图数等于采样数；一段 1080p 实片快了约两成，采样数不变。", "en": "Moving frames no longer take two extra probe captures, so captures equal samples; a real 1080p clip rendered about 20% faster with the same sample counts." }
+    },
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "icon": "restart",
+      "title": { "zh-CN": "托管队列不再被丢失的作业卡住", "en": "Hosted queue survives a deleted job" },
+      "detail": { "zh-CN": "正在运行的托管作业所在目录被删掉后，队列会把它当作丢失并继续启动后面的作业；已结束作业的托管记录也会自动归档。", "en": "If a running hosted job's directory is deleted, the queue treats the job as lost and starts the next one; records of finished hosted jobs are archived automatically." }
+    },
+    {
+      "kind": "new",
+      "area": "renderer",
+      "title": { "zh-CN": "镜头可按输出帧取时间", "en": "Shots can read the frame time" },
+      "detail": { "zh-CN": "SHOT.sampleContext.frameTime 是当前输出帧的时间，同一帧的所有运动模糊采样都相同；按帧跳变的噪点、闪烁、随机花样用它取值，画面清晰，也不会让采样数加倍。", "en": "SHOT.sampleContext.frameTime is the time of the output frame, the same for every motion-blur sample of it; grain, flicker and random patterns keyed on it stay crisp and do not raise the sample count." }
+    },
+    {
+      "kind": "improved",
+      "area": "skill",
+      "title": { "zh-CN": "瞬间变化写进 cuts", "en": "Instant changes go in cuts" },
+      "detail": { "zh-CN": "使用说明告诉 agent：场景内的瞬间变化（按下、收起、以全强度开始的效果）也要声明为硬切，以及什么时候用 frameTime。", "en": "The skill now tells agents to declare instant changes inside a scene (a press, a collapse, an effect that starts at full strength) as cuts, and when to use frameTime." }
+    },
+    {
+      "kind": "fixed",
+      "area": "renderer",
+      "title": { "zh-CN": "设置锁不再永久卡住", "en": "Settings lock no longer sticks" },
+      "detail": { "zh-CN": "写设置的进程中途退出后，留下的锁会在确认其进程已结束时自动回收；仍被占用时报 config_locked。感谢 @liuyinchu 的修复。", "en": "A settings lock left by a process that exited is recovered once that process is confirmed gone; a lock still held reports config_locked. Thanks to @liuyinchu for the fix." }
+    },
+    {
+      "kind": "fixed",
+      "area": "renderer",
+      "title": { "zh-CN": "符号链接改了指向，续传会拒绝", "en": "Resume notices a retargeted symlink" },
+      "detail": { "zh-CN": "素材目录或项目根目录是符号链接时，渲染中断后改指向了内容不同的位置，续传会以 inputs_changed 拒绝，不会把两份素材拼进同一个视频。感谢 @liuyinchu 的修复（原定 0.3.14）。", "en": "If an asset directory or project root is a symlink pointed at different content after an interrupted render, resume is refused with inputs_changed instead of mixing two versions. Thanks to @liuyinchu (prepared for 0.3.14)." }
+    },
+    {
+      "kind": "fixed",
+      "area": "app",
+      "title": { "zh-CN": "托管渲染启动失败不再卡住队列", "en": "Hosted launch failures no longer block" },
+      "detail": { "zh-CN": "执行进程起不来的托管作业会以失败结束，multiplane wait 收到结果，队列继续。感谢 @liuyinchu 的修复（原定 0.3.14）。", "en": "A hosted job whose executor cannot start now ends as failed, multiplane wait receives the result, and the queue moves on. Thanks to @liuyinchu (prepared for 0.3.14)." }
+    }
+  ]
+}

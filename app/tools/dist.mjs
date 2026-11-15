@@ -20,6 +20,8 @@ await checkFont();
 const appOutput = path.resolve(app, 'dist');
 if (path.relative(app, appOutput) !== 'dist') throw Error('Unsafe desktop staging path');
 await rm(appOutput, { recursive: true, force: true });
+// electron-builder never prunes older builds; verification expects exactly one installer here.
+await rm(path.join(app, 'release'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 await run(process.execPath, ['tools/build.mjs'], { cwd: app });
 const stage = path.resolve(app, 'build/renderer');
 if (path.relative(path.resolve(app, 'build'), stage) !== 'renderer') throw Error('Unsafe renderer staging path');

@@ -28,7 +28,9 @@ test('lens probes suppress rotation differences without entering the composite o
     const actual = decodePNG(await processed.frame(1));
     const count = moving ? 64 : 1;
     assert.equal(processed.lastBlurSamples, count);
-    const grid = moving ? nestedSampleGrids(1, 30, 2, [], { motionBlur: 8, maxMotionBlur: 64, shutter: 0.5 }).get(count) : [1];
+    const grids = nestedSampleGrids(1, 30, 2, [], { motionBlur: 8, maxMotionBlur: 64, shutter: 0.5 });
+    const nearest = grids.get(8).reduce((best, time) => Math.abs(time - 1) < Math.abs(best - 1) ? time : best);
+    const grid = moving ? grids.get(count) : [nearest];
     assert.deepEqual(actual, averageLinear(grid.map(t => draw(t, {}))));
     const probes = calls.filter(call => call.motionProbeTime !== undefined);
     assert.ok(probes.length > 0);
@@ -125,7 +127,7 @@ test('upward samples use only the selected uniform grid and selected sample cont
   assert.deepEqual(actual, averageLinear(grid.map(t => draw(t, { motionBlur: 64 }))));
 });
 
-test('center probe detects matching endpoints and alpha-only motion', async () => {
+test('near-center grid probe detects matching edges and alpha-only motion', async () => {
   for (const alpha of [false, true]) {
     const processed = createPostCapture(fixture(t => alpha ? solid(0, Math.abs(t - 1) < 0.002 ? 255 : 0) : solid(Math.abs(t - 1) < 0.002 ? 255 : 0)), { ...settings, alpha });
     const actual = decodePNG(await processed.frame(1));
@@ -154,14 +156,14 @@ test('nested grids retain samples, equal weights and a centered shutter', async 
   }
 });
 
-test('static detection takes only three screenshots before the initial grid', async () => {
+test('static detection takes only three screenshots from the initial grid', async () => {
   const processed = createPostCapture(fixture(() => solid(123)), { ...settings, 'motion-blur': 6 });
   await processed.frame(1);
   assert.equal(processed.stats.samples, 3);
   assert.equal(processed.lastBlurSamples, 1);
 });
 
-test('moving frames skip the redundant endpoint without changing the contributing grid', async () => {
+test('moving frames capture only the contributing grid', async () => {
   for (const pipeline of [false, true]) {
     const calls = [], inspections = [];
     const capture = fixture(t => { calls.push(t); return solid(t < 1 ? 0 : 255); }, {
@@ -172,9 +174,9 @@ test('moving frames skip the redundant endpoint without changing the contributin
     const actual = decodePNG(await processed.frame(1));
     const grid = nestedSampleGrids(1, 30, 2, [], { motionBlur: 8, maxMotionBlur: 64, shutter: .5 }).get(64);
     assert.deepEqual(actual, averageLinear(grid.map(t => solid(t < 1 ? 0 : 255))));
-    assert.equal(calls.length, 66);
+    assert.equal(calls.length, 64);
     assert.equal(new Set(calls).size, calls.length);
-    assert.deepEqual(inspections, [1 + .25 / 30]);
+    assert.deepEqual(inspections, [1, 1 - .25 / 30, 1 + .25 / 30]);
   }
 });
 
@@ -338,4 +340,46 @@ fullTest('render result aggregates sample counts and invalid CLI maximum fails b
   const data = JSON.parse(result.stdout.trim().split('\n').at(-1)).data;
   assert.equal(data.post.maxMotionBlur, 16); assert.equal(data.blurSamples.max, 16);
   assert.equal(Object.values(data.blurSamples.histogram).reduce((a, b) => a + b), data.frames);
+});
+
+
+test('standard four-sample motion captures four times and stillness captures three', async () => {
+  for (const pipeline of [false, true]) for (const moving of [false, true]) {
+    const calls = [];
+    const capture = fixture(t => { calls.push(t); return solid(moving && t >= 1 ? 124 : 123); });
+    if (pipeline) capture.beginFrame = async (t, context) => ({ png: capture.frame(t, context) });
+    const processed = createPostCapture(capture, { ...settings, quality: 'standard', 'motion-blur': 4, 'max-motion-blur': 32, pipeline });
+    await processed.frame(1);
+    assert.equal(processed.stats.samples, moving ? 4 : 3);
+    assert.equal(processed.lastBlurSamples, moving ? 4 : 1);
+    const grid = nestedSampleGrids(1, 30, 2, [], { motionBlur: 4, maxMotionBlur: 32, shutter: .5 }).get(4);
+    assert.ok(calls.every(t => grid.includes(t)));
+    assert.equal(calls[0], grid[0]); assert.equal(calls[1], grid.at(-1));
+  }
+});
+
+
+test('a context read first seen on a grid probe restarts even a still frame', async () => {
+  let used = false;
+  const capture = fixture((t, context) => {
+    if (t !== 1 && Math.abs(t - 1) < .008) used = true;
+    return solid(context.motionBlur);
+  }, { _inspectSample: async () => {} });
+  Object.defineProperty(capture, 'sampleContextUsed', { get: () => used });
+  const processed = createPostCapture(capture, { ...settings, 'motion-blur': 4 });
+  assert.deepEqual(decodePNG(await processed.frame(1)), solid(4));
+  assert.equal(processed.lastBlurSamples, 1);
+});
+
+test('matching grid edges inspect the nearest grid point before declaring stillness', async () => {
+  const post = { motionBlur: 4, maxMotionBlur: 32, shutter: .5 };
+  const grid = nestedSampleGrids(1, 30, 2, [], post).get(4);
+  const nearest = grid.reduce((best, time) => Math.abs(time - 1) < Math.abs(best - 1) ? time : best);
+  const calls = [];
+  const processed = createPostCapture(fixture(t => { calls.push(t); return solid(t === nearest ? 124 : 123); }),
+    { ...settings, 'motion-blur': 4, 'max-motion-blur': 32 });
+  await processed.frame(1);
+  assert.deepEqual(calls.slice(0, 3), [grid[0], grid.at(-1), nearest]);
+  assert.equal(processed.stats.samples, 4);
+  assert.equal(processed.lastBlurSamples, 4);
 });

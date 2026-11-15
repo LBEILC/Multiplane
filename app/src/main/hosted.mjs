@@ -136,10 +136,26 @@ export class Hosted {
     for (const name of files.filter(n => /\.(claimed|running)\.json$/.test(n))) {
       const file = path.join(this.directory, name), r = await json(file), id = name.replace(/\.(claimed|running)\.json$/, ''), running = name.endsWith('.running.json');
       // An already-running executor remains authoritative if its package is moved or upgraded.
-      if (!jobReference(r, id) || (!running && !await validRequest(r, id))) continue;
+      if (!jobReference(r, id)) continue;
+      if (running) {
+        // Only confirmed absence releases the queue; access errors are not absence.
+        const missing = await stat(r.jobDir).then(() => false, error => { if (error.code === 'ENOENT') return true; throw error; });
+        if (missing) {
+          try { await rename(file, path.join(this.directory, id + '.abandoned.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+          this.launching.delete(id);
+          continue;
+        }
+      }
       const s = await json(path.join(r.jobDir, 'status.json'));
       if (s?.schema !== schema || s.jobId !== id) { if (running) busy = true; continue; }
-      if (s.result || ['cancelled', 'succeeded', 'failed'].includes(s.state)) { this.launching.delete(r.jobId); continue; }
+      if (s.result || ['cancelled', 'succeeded', 'failed'].includes(s.state)) {
+        // Leave a claim alone while its executor may still be acquiring it.
+        if (!running && this.launching.has(id) && Date.now() - this.launching.get(id) < 15000) { busy = true; continue; }
+        try { await rename(file, path.join(this.directory, id + '.done.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        this.launching.delete(id);
+        continue;
+      }
+      if (!running && !await validRequest(r, id)) continue;
       if (running) {
         if ((s.state === 'queued' && Date.now() - (this.launching.get(r.jobId) ?? (await stat(file)).ctimeMs) < 15000) || (s.state !== 'queued' && await this.alive(s.pid, s) !== false)) busy = true;
         continue;

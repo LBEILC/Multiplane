@@ -32,6 +32,8 @@ const installer = path.join(out, 'release', `${product}.exe`);
 const installation = path.join(out, 'install space', product);
 const diagnostic = path.join(out, 'nsis.txt');
 if (process.argv.includes('--build')) {
+  // Start from a fresh copy so stale files from an earlier build cannot leak in.
+  for (const name of ['app', 'release']) await rm(path.join(out, name), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   await cp(path.join(root, 'app/dist'), path.join(out, 'app'), { recursive: true });
   const pkg = JSON.parse(await readFile(path.join(out, 'app/package.json')));
   await writeFile(path.join(out, 'app/package.json'), JSON.stringify({ ...pkg, name: 'multiplane-installer-test-077', productName: product }));
@@ -76,6 +78,7 @@ if (process.argv.includes('--build')) {
       assert.equal(evidence.fixed.gui.windows, 1);
     } finally { await application.close(); }
     console.log('Quoted baseline timed out; unquoted NSIS installation and packaged CLI passed.');
+    evidence.passed = true;
   } finally {
     const uninstaller = path.join(installation, `Uninstall ${product}.exe`);
     if (await exists(uninstaller)) await runInstaller(uninstaller, ['/S', '/currentuser', `_?=${installation}`], env, { timeout: 120000 });
@@ -84,5 +87,9 @@ if (process.argv.includes('--build')) {
     assert.equal(evidence.uninstalled, true);
     assert.equal(path.relative(out, installation), path.join('install space', product));
     await rm(installation, { recursive: true, force: true });
+    // A pass keeps only evidence.json and nsis.txt; a failure keeps the build and homes as well.
+    if (evidence.passed) for (const name of ['app', 'release', 'home', 'desktop', 'agents', 'installer.nsh']) {
+      await rm(path.join(out, name), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
   }
 }

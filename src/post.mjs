@@ -264,7 +264,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         const changes = [];
         const observeStart = performance.now();
         for (const time of probes) {
-          changes.push(await capture.observe(time, { motionBlur, motionBlurBase }));
+          changes.push(await capture.observe(time, { frameTime: t, motionBlur, motionBlurBase }));
           observedTime = time;
           if (changes.at(-1)) break;
         }
@@ -280,7 +280,7 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
       let finalCapture = hooked || motionBlur === 1;
       let selectedTimes = times;
       let dofMotionSamples = new Set(times).size;
-      const context = (observed, time) => ({ motionBlur, motionBlurBase, observed,
+      const context = (observed, time) => ({ frameTime: t, motionBlur, motionBlurBase, observed,
         motionProbeTime: finalCapture ? undefined : t,
         dofMotionSamples: finalCapture ? dofMotionSamples : undefined,
         dofMotionIndex: finalCapture ? [...new Set(selectedTimes)].sort((a, b) => a - b).indexOf(time) : undefined });
@@ -333,40 +333,54 @@ export function createPostCapture(capture, options = {}, fps = capture.fps) {
         // halving the raster and displacement threshold changes refinement.
         // Calibrated in capture raster pixels: about 2px for fast/standard, 1px for high.
         const threshold = resolveQuality(options) === 'high' ? 1 : 2;
-        // Stop as soon as motion is established. Retain exact full-size still
-        // checks, and reuse every matching time without changing the final grid.
-        await sampleMany([t, endpoints[0]], true);
-        const centerProbe = cache.get(t);
-        let still = cache.get(endpoints[0]).image.data.equals(centerProbe.image.data);
-        if (still) {
-          await sampleMany([endpoints[1]], true);
-          still = cache.get(endpoints[1]).image.data.equals(centerProbe.image.data);
-        } else if (capture._inspectSample) {
-          // Preserve conditional sampleContext reads at the skipped endpoint.
-          const start = performance.now();
-          await capture._inspectSample(endpoints[1], context(false, endpoints[1]));
-          stats.captureMs += performance.now() - start;
-          contextUsed ||= capture.sampleContextUsed === true;
+        // Inspect the former probes without screenshots so conditional context
+        // reads keep selecting the compatible grid, including on still frames.
+        if (capture._inspectSample) {
+          for (const time of new Set([t, ...endpoints])) {
+            const start = performance.now();
+            await capture._inspectSample(time, context(false, time));
+            stats.captureMs += performance.now() - start;
+            contextUsed ||= capture.sampleContextUsed === true;
+          }
+          observedTime = undefined;
+        }
+        const initialGrid = grids.get(motionBlur);
+        const nearest = initialGrid.reduce((best, time) => Math.abs(time - t) < Math.abs(best - t) ? time : best);
+        let probeLegacy = contextUsed, still;
+        while (true) {
+          const probes = probeLegacy ? [t, endpoints[0], endpoints[1]] : [initialGrid[0], initialGrid.at(-1), nearest];
+          await sampleMany(probes.slice(0, 2), true);
+          still = cache.get(probes[0]).image.data.equals(cache.get(probes[1]).image.data);
+          if (still) {
+            await sampleMany([probes[2]], true);
+            still = cache.get(probes[0]).image.data.equals(cache.get(probes[2]).image.data);
+          }
+          if (!contextUsed || probeLegacy) break;
+          // A read at a new grid probe must also restart a potentially still frame.
+          probeLegacy = true; cache.clear(); observedTime = undefined;
         }
         let legacy = contextUsed;
         let grid = legacy ? times : grids.get(motionBlur);
         if (still) {
-          png = centerProbe.png; result = centerProbe.image; usedSamples = 1; selectedTimes = [t];
+          const time = contextUsed ? t : nearest, probe = cache.get(time);
+          png = probe.png; result = probe.image; usedSamples = 1; selectedTimes = [time];
           stats.staticFrames++; stats.adaptiveFrames++;
         } else {
           if (legacy) cache.clear();
           while (true) {
-            await sampleMany([...grid, t], true);
+            await sampleMany(legacy ? [...grid, t] : grid, true);
             // A conditional read discovered after the probes restarts the frame
             // on the old grids. No image from a different sample context survives.
             if (contextUsed && !legacy) {
               legacy = true; motionBlur = initialMotionBlur;
               cache.clear(); observedTime = undefined; grid = times; continue;
             }
-            const images = grid.map(time => cache.get(time).image), center = cache.get(t);
+            const images = grid.map(time => cache.get(time).image);
+            const representative = legacy ? t : grid.reduce((best, time) => Math.abs(time - t) < Math.abs(best - t) ? time : best);
+            const center = cache.get(representative);
             const identical = images.every(image => image.data.equals(center.image.data));
             if (identical) {
-              png = center.png; result = center.image; usedSamples = 1; selectedTimes = [t];
+              png = center.png; result = center.image; usedSamples = 1; selectedTimes = [representative];
               stats.staticFrames++; stats.adaptiveFrames++; break;
             }
             let difference = 0;

@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, mkdtemp, lstat, readdir, copyFile, rename, open, unlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, mkdtemp, lstat, readdir, copyFile, rename, open, unlink, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,7 +94,8 @@ export async function release(options, { execute, log = console.log, sleep = del
       finally { try { await writes; } finally { await handle.close(); state.timings.push({ label: stepLabel, ms: Date.now() - started }); await save(); } }
     };
     const git = (args, cwd = state.worktree) => command('git', 'git', args, cwd);
-    const gh = (args, label = 'github') => command(label, 'gh', args[0] === 'api' ? args : [...args, '-R', repository]);
+    // GitHub calls name the repository explicitly, so they never depend on the validation worktree.
+    const gh = (args, label = 'github') => command(label, 'gh', args[0] === 'api' ? args : [...args, '-R', repository], root);
     const clean = async cwd => { if (await git(['status', '--porcelain', '--untracked-files=all'], cwd)) throw Error(`Working tree is not clean: ${cwd}`); };
     const source = async () => {
       await clean(state.worktree);
@@ -340,6 +341,10 @@ export async function release(options, { execute, log = console.log, sleep = del
         state.hashes['release-notes.json'] = digest(await readFile(path.join(final, 'release-notes.json')));
         const table = '| File | SHA-256 |\n|---|---|\n' + Object.entries(state.hashes).map(([name, hash]) => `| ${name} | \`${hash}\` |`).join('\n') + '\n';
         await writeFile(path.join(directory, 'SHA256.md'), table); log(table);
+        // final/ now holds the verified copies; drop this download and any left by failed attempts.
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (entry.isDirectory() && entry.name.startsWith('artifacts-')) await rm(path.join(directory, entry.name), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        }
       },
       async draft() {
         await waitRuns();
@@ -390,9 +395,15 @@ export async function release(options, { execute, log = console.log, sleep = del
         await save();
       }
     }
+    // After a recorded draft nothing reads the validation checkout; a failed run keeps it for inspection.
+    const retireWorktree = async () => {
+      if (!state.completed.includes('draft') || !await exists(state.worktree)) return;
+      try { await git(['worktree', 'remove', '--force', state.worktree], root); }
+      catch (error) { log(`Could not remove validation worktree ${state.worktree}; the next run retries.\n${error.message}`); }
+    };
     const activeSteps = localOnly ? ['prepare', 'preflight', 'verify'] : steps;
     const start = options.step ?? options.from ?? activeSteps.find(step => !state.completed.includes(step));
-    if (!start) return state;
+    if (!start) { await retireWorktree(); return state; }
     const end = options.step ?? options.to ?? 'draft';
     if (!activeSteps.includes(start) || !activeSteps.includes(end) || activeSteps.indexOf(end) < activeSteps.indexOf(start)) throw Error('Invalid step range');
     for (const step of activeSteps.slice(activeSteps.indexOf(start), activeSteps.indexOf(end) + 1)) {
@@ -418,6 +429,7 @@ export async function release(options, { execute, log = console.log, sleep = del
         throw error;
       }
     }
+    await retireWorktree();
     return state;
   } finally { await lock.close(); await unlink(lockFile); }
 }

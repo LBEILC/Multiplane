@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, writeFile, readFile, rename, utimes, stat, symlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, utimes, stat, symlink, rm } from 'node:fs/promises';
 import { createTempDirectory } from './helpers.mjs';
 import { EventEmitter } from 'node:events';
 import { Hosted, json, atomic, validRequest, launchExecutor } from '../src/main/hosted.mjs';
@@ -356,4 +356,70 @@ for (const damaged of ['{"broken":\n', '{"unrecognized partial":']) test('one da
   // successfully repaired log. It must not hold unrelated work hostage.
   assert.equal(await readFile(path.join(r.jobDir, 'events.jsonl'), 'utf8'), damaged);
   assert.equal((await f.status('broken')).result, null);
+});
+
+
+test('deleted running job directory is abandoned and the next job starts on the first scan', async t => {
+  const f = await fixture(t), r = await f.request('deleted', 'running');
+  await f.request('next', 'claimed');
+  assert.equal(path.dirname(r.jobDir), path.join(f.home, 'jobs'));
+  await rm(r.jobDir, { recursive: true });
+  await f.hosted.tick();
+  assert.deepEqual(f.launched, ['next']);
+  assert.equal(await json(path.join(f.home, 'hosted/deleted.running.json')), null);
+  assert.deepEqual(await json(path.join(f.home, 'hosted/deleted.abandoned.json')), r);
+  // Archived markers must never be read on subsequent scans.
+  await writeFile(path.join(f.home, 'hosted/deleted.abandoned.json'), 'null');
+  await f.hosted.tick();
+  assert.deepEqual(f.launched, ['next']);
+});
+
+for (const contents of [null, '{', '{}', JSON.stringify({ schema, jobId: 'other', state: 'succeeded' })]) {
+  test(`existing running directory with unavailable or invalid status stays busy: ${contents}`, async t => {
+    const f = await fixture(t), r = await f.request('existing', 'running');
+    const file = path.join(r.jobDir, 'status.json');
+    if (contents === null) await rm(file); else await writeFile(file, contents);
+    await f.request('next', 'claimed');
+    await f.hosted.tick();
+    assert.deepEqual(f.launched, []);
+    assert.deepEqual(await json(path.join(f.home, 'hosted/existing.running.json')), r);
+    assert.equal(await json(path.join(f.home, 'hosted/existing.abandoned.json')), null);
+  });
+}
+
+for (const suffix of ['running', 'claimed']) for (const terminal of [
+  { state: 'cancelled' }, { state: 'succeeded' }, { state: 'failed' }, { state: 'running', result: { ok: true } },
+]) test(`${suffix} marker archives terminal status ${JSON.stringify(terminal)} and retains hosted label`, async t => {
+  const f = await fixture(t), r = await f.request('finished', suffix);
+  await atomic(path.join(r.jobDir, 'status.json'), { ...await f.status(r.jobId), ...terminal });
+  await writeFile(path.join(f.home, 'jobs.jsonl'), JSON.stringify({ schema, jobId: r.jobId, jobDir: r.jobDir }) + '\n');
+  const store = new JobStore(f.home, { alive: async () => true }); t.after(() => store.close());
+  await store.refresh(); assert.equal(store.job(r.jobId).hosted, true);
+  // Completion archival must also work after the requesting renderer has moved.
+  await rm(r.bin);
+  await f.hosted.tick();
+  assert.equal(await json(path.join(f.home, 'hosted', r.jobId + '.' + suffix + '.json')), null);
+  assert.deepEqual(await json(path.join(f.home, 'hosted/finished.done.json')), r);
+  await store.refresh(); assert.equal(store.job(r.jobId).hosted, true);
+  // Even a now-active status cannot make an archived job hold up the queue.
+  await atomic(path.join(r.jobDir, 'status.json'), { ...await f.status(r.jobId), state: 'running', result: null });
+  await writeFile(r.bin, '');
+  await f.request('next', 'claimed');
+  await f.hosted.tick(); assert.deepEqual(f.launched, ['next']);
+});
+
+test('terminal claim is archived only after its active launch window expires', async t => {
+  const f = await fixture(t), r = await f.request('starting', 'claimed');
+  await atomic(path.join(r.jobDir, 'status.json'), { ...await f.status(r.jobId), state: 'cancelled' });
+  await f.request('next', 'claimed');
+  f.hosted.launching.set(r.jobId, Date.now());
+  await f.hosted.tick();
+  assert.deepEqual(await json(path.join(f.home, 'hosted/starting.claimed.json')), r);
+  assert.equal(await json(path.join(f.home, 'hosted/starting.done.json')), null);
+  assert.deepEqual(f.launched, []);
+  f.hosted.launching.set(r.jobId, Date.now() - 15001);
+  await f.hosted.tick();
+  assert.deepEqual(await json(path.join(f.home, 'hosted/starting.done.json')), r);
+  assert.equal(f.hosted.launching.has(r.jobId), false);
+  assert.deepEqual(f.launched, ['next']);
 });
