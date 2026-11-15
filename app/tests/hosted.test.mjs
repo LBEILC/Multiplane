@@ -11,7 +11,7 @@ import { JobStopper } from '../src/main/stop.mjs';
 import { trayTemplate, hideOnClose } from '../src/main/tray.mjs';
 const schema = 'multiplane/1';
 
-test('liveness caches identity failures and only ESRCH establishes an exit', async () => {
+test('liveness caches identity failures and distinguishes confirmed absence', async () => {
   const job = { pid: 42, startedAt: '2026-01-01T00:00:01.000Z' };
   for (const code of ['ETIMEDOUT', 'EACCES']) {
     let queries = 0, present = true;
@@ -422,4 +422,31 @@ test('terminal claim is archived only after its active launch window expires', a
   assert.deepEqual(await json(path.join(f.home, 'hosted/starting.done.json')), r);
   assert.equal(f.hosted.launching.has(r.jobId), false);
   assert.deepEqual(f.launched, ['next']);
+});
+
+for (const [label, offset, executable, expected] of [
+  ['reused PID', 2001, 'node.exe', false],
+  ['reused by another program', 2001, 'other.exe', false],
+  ['rounding boundary', 2000, 'node.exe', null],
+  ['wrong executable', 0, 'other.exe', null],
+  ['matching executor', -1000, 'node.exe', true],
+  ['invalid creation time', NaN, 'node.exe', null],
+  ['failed query', null, 'node.exe', null],
+]) test('job store and hosted queue handle ' + label, async t => {
+  const f = await fixture(t), r = await f.request('existing', 'running');
+  const status = await f.status('existing');
+  const alive = createJobAlive({ presence: () => true, inspect: async pid => {
+    if (offset === null) throw Error('query failed');
+    return { pid, executable, createdAt: Number.isNaN(offset) ? 'invalid' : new Date(Date.parse(status.startedAt) + offset).toISOString() };
+  } });
+  assert.equal(await alive(status.pid, status), expected);
+  await writeFile(path.join(f.home, 'jobs.jsonl'), JSON.stringify({ schema, jobId: r.jobId, jobDir: r.jobDir }) + '\n');
+  const store = new JobStore(f.home, { alive }); t.after(() => store.close());
+  await store.refresh();
+  assert.equal(Boolean(store.job(r.jobId).lost), expected === false);
+  assert.equal(store.job(r.jobId).state, expected === false ? 'failed' : 'running');
+  f.hosted.alive = alive;
+  await f.request('next', 'claimed');
+  await f.hosted.tick();
+  assert.deepEqual(f.launched, expected === false ? ['next'] : []);
 });

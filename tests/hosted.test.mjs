@@ -252,3 +252,49 @@ test('handoff announces a valid queue position once and falls back for an absent
     assert.ok(messages[0].includes(position > 0 ? `queued; #${position}` : 'position unavailable'));
   }
 });
+
+for (const [label, createdAt, code] of [
+  ['reused PID', '2026-01-01T00:00:02.001Z', 'internal_error'],
+  ['rounding boundary', '2026-01-01T00:00:02.000Z', 'wait_timeout'],
+  ['original executor', '2025-12-31T23:59:59.000Z', 'wait_timeout'],
+  ['unavailable identity', null, 'wait_timeout'],
+  ['invalid identity', 'invalid', 'wait_timeout'],
+  ['query failure', new Error('query failed'), 'wait_timeout'],
+]) test('event follower handles ' + label, async () => {
+  const job = createTempDirectory('multiplane-follow-');
+  await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid,
+    state: 'running', startedAt: '2026-01-01T00:00:00.000Z', result: null }));
+  let queries = 0;
+  await assert.rejects(followJob(job, { timeout: 0, inspect: async pid => {
+    queries++; assert.equal(pid, process.pid);
+    if (createdAt instanceof Error) throw createdAt;
+    return createdAt;
+  } }), error => error.code === code && (code !== 'internal_error' || error.message.includes('Job process exited without a result.')));
+  assert.equal(queries, 1);
+});
+
+test('event follower detects a live PID newer than the recorded job using the OS identity', async () => {
+  const job = createTempDirectory('multiplane-follow-');
+  await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid,
+    state: 'running', startedAt: '2000-01-01T00:00:00.000Z', result: null }));
+  await assert.rejects(followJob(job, { timeout: 0 }), { code: 'internal_error' });
+});
+
+for (const [label, createdAt] of [
+  ['matching identity', '2025-12-31T23:59:59.000Z'],
+  ['unavailable identity', null],
+  ['query failure', new Error('query failed')],
+]) test('event follower caches ' + label + ' across polls within one second', async t => {
+  const job = createTempDirectory('multiplane-follow-');
+  await writeFile(path.join(job, 'status.json'), JSON.stringify({ schema: 'multiplane/1', pid: process.pid,
+    state: 'running', startedAt: '2026-01-01T00:00:00.000Z', result: null }));
+  const probe = t.mock.method(process, 'kill');
+  let queries = 0;
+  await assert.rejects(followJob(job, { timeout: 0.1, interval: 5, inspect: async pid => {
+    queries++; assert.equal(pid, process.pid);
+    if (createdAt instanceof Error) throw createdAt;
+    return createdAt;
+  } }), { code: 'wait_timeout' });
+  assert.ok(probe.mock.callCount() > 1, 'process existence is checked on multiple polls');
+  assert.equal(queries, 1);
+});

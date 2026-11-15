@@ -42,7 +42,9 @@ export function createJobAlive({ inspect = processIdentity, presence = processPr
       identities.set(pid, entry);
     }
     const identity = await entry.identity;
-    // A failed identity query or a mismatch cannot establish that the PID exited.
+    // A process born after the job cannot be its executor (allow clock rounding).
+    if (identity?.pid === pid && Date.parse(identity.createdAt) - Date.parse(job.startedAt) > 2000) return false;
+    // Other mismatches and failed queries do not establish an exit.
     return matchesJob(identity, job) ? true : null;
   };
 }

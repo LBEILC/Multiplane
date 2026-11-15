@@ -1,0 +1,21 @@
+{
+  "schema": "multiplane-release-notes/1",
+  "version": "0.3.16",
+  "date": "2026-11-15",
+  "items": [
+    {
+      "kind": "fixed",
+      "area": "app",
+      "highlight": true,
+      "icon": "restart",
+      "title": { "zh-CN": "已退出的渲染不再显示卡住", "en": "Exited renders no longer look stuck" },
+      "detail": { "zh-CN": "渲染进程退出后，它的进程号若被别的程序用上，作业以前会一直显示“可能卡住了”；现在会判为进程已丢失，托管队列也不再被它占着。", "en": "When a render's process had exited and its process ID was reused by another program, the job stayed “possibly stuck”; it is now shown as lost and no longer holds the hosted queue." }
+    },
+    {
+      "kind": "fixed",
+      "area": "renderer",
+      "title": { "zh-CN": "wait 不再无限等待", "en": "wait no longer hangs" },
+      "detail": { "zh-CN": "multiplane wait 等的作业进程已退出、进程号又被复用时，以前会一直等下去；现在以 internal_error 结束。", "en": "If the job's process had exited and its process ID was reused, multiplane wait kept waiting; it now ends with internal_error." }
+    }
+  ]
+}

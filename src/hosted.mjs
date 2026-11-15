@@ -97,9 +97,10 @@ export const resultExitCode = result => result.ok ? 0 : errorCodes[result.code]?
 
 // Keep bytes intact across partial writes and UTF-8 boundaries. Only complete lines
 // are published, so timeout diagnostics cannot splice into a partial JSON record.
-export async function followJob(directory, { timeout = Infinity, onBytes, onEvent, interval = 100 } = {}) {
+export async function followJob(directory, { timeout = Infinity, onBytes, onEvent, interval = 100, inspect = processCreatedAt } = {}) {
   const deadline = performance.now() + timeout * 1000;
   let offset = 0, pending = Buffer.alloc(0);
+  let identity = null;
   for (;;) {
     let handle;
     try {
@@ -125,8 +126,21 @@ export async function followJob(directory, { timeout = Infinity, onBytes, onEven
       || typeof status.state !== 'string') throw new MultiplaneError('job_not_found');
     // A result is committed to the event log before status; read the next poll.
     if (!status.result && status.state === 'running') {
-      try { process.kill(status.pid, 0); }
-      catch (error) { if (error.code === 'ESRCH') throw new MultiplaneError('internal_error', 'Job process exited without a result.'); }
+      let exited = false, present = false;
+      try { process.kill(status.pid, 0); present = true; }
+      catch (error) { exited = error.code === 'ESRCH'; }
+      if (present) {
+        if (!identity || identity.pid !== status.pid || identity.startedAt !== status.startedAt
+          || performance.now() >= identity.expiresAt) {
+          const createdAt = await Promise.resolve().then(() => inspect(status.pid)).catch(() => null);
+          // Cache failed queries too, avoiding a subprocess on every poll.
+          identity = { pid: status.pid, startedAt: status.startedAt, createdAt, expiresAt: performance.now() + 10000 };
+        }
+        const { createdAt } = identity;
+        // Allow two seconds for platform clock rounding; failed queries stay unknown.
+        exited = Date.parse(createdAt) - Date.parse(status.startedAt) > 2000;
+      }
+      if (exited) throw new MultiplaneError('internal_error', 'Job process exited without a result.');
     }
     if (performance.now() >= deadline) throw new MultiplaneError('wait_timeout');
     await delay(interval);
